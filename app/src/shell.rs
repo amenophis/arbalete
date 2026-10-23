@@ -12,11 +12,18 @@ use serde::Serialize;
 use serde_json::json;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
+use std::thread::LocalKey;
 
 /// The UI is served by the app itself under this origin.
 const UI_ORIGIN: &str = "https://arbalette.ui/";
 
 const SIDEBAR_WIDTH: i32 = 260;
+
+/// The overlay's size: one text field for now (ui/src/Overlay.tsx).
+const OVERLAY_SIZE: Size = Size {
+    width: 600,
+    height: 56,
+};
 
 /// The height of the sidebar's toolbar, which holds the window buttons on macOS (ui/src/index.css).
 const TOOLBAR_HEIGHT: f32 = 40.0;
@@ -28,6 +35,9 @@ thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     static SIDEBAR: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static CONTENT: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    /// Shown above the page, to open tabs.
+    static OVERLAY_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static OVERLAY: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     static STATE: RefCell<UiState> = RefCell::default();
     /// Where the sidebar is saved, once the previous session is restored.
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
@@ -95,11 +105,38 @@ fn update_sidebar<R>(change: impl FnOnce(&mut Sidebar) -> R) -> R {
 
 fn send_state() {
     let json = STATE.with_borrow(UiState::to_json);
-    let frame = SIDEBAR.with_borrow(|view| view.as_ref()?.browser()?.main_frame());
-    if let Some(frame) = frame {
-        let code =
-            format!(r#"dispatchEvent(new CustomEvent("arbalette:state", {{ detail: {json} }}))"#);
+    dispatch(
+        &SIDEBAR,
+        &format!(r#"new CustomEvent("arbalette:state", {{ detail: {json} }})"#),
+    );
+}
+
+/// Dispatches a DOM event, given as JavaScript, in one of the UI's views.
+fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) {
+    if let Some(frame) = view.with_borrow(|view| view.as_ref()?.browser()?.main_frame()) {
+        let code = format!("dispatchEvent({event})");
         frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
+    }
+}
+
+fn show_overlay(visible: bool) {
+    let Some(overlay) = OVERLAY.with_borrow(Clone::clone) else {
+        return;
+    };
+    if visible {
+        let window = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
+        let width = window.map_or(0, |size| size.width);
+        overlay.set_bounds(Some(&Rect {
+            x: (width - OVERLAY_SIZE.width) / 2,
+            y: 96,
+            width: OVERLAY_SIZE.width,
+            height: OVERLAY_SIZE.height,
+        }));
+        dispatch(&OVERLAY_VIEW, r#"new Event("arbalette:show")"#);
+    }
+    overlay.set_visible(visible.into());
+    if visible && let Some(view) = overlay.contents_view() {
+        view.request_focus();
     }
 }
 
@@ -155,6 +192,12 @@ pub fn run(command: Command) {
     match (command, browser) {
         (Command::Ready, _) => send_state(),
         (Command::Select(id), _) => select_tab(id),
+        (Command::ShowOverlay, _) => show_overlay(true),
+        (Command::HideOverlay, _) => show_overlay(false),
+        (Command::Open(url), _) => {
+            show_overlay(false);
+            open_tab(&url);
+        }
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
@@ -236,20 +279,22 @@ wrap_window_delegate! {
                 window.add_child_view(Some(&mut view));
                 layout.set_flex_for_view(Some(&mut view), flex);
             }
+            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), 0);
+            let controller = window
+                .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
+                .expect("overlay");
+            controller.set_visible(0);
+            OVERLAY_VIEW.set(Some(overlay));
+            OVERLAY.set(Some(controller));
             window.show();
             WINDOW.set(Some(window));
         }
 
         /// Asks every browser to close; the window closes once they all have.
-        fn can_close(&self, window: Option<&mut Window>) -> i32 {
-            let Some(window) = window else { return 1 };
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             let mut closed = 1;
-            for index in 0..window.child_view_count() {
-                let browser = window
-                    .child_view_at(index as i32)
-                    .and_then(|view| view.as_browser_view())
-                    .and_then(|view| view.browser());
-                if let Some(host) = browser.and_then(|b| b.host()) {
+            for view in [&SIDEBAR, &CONTENT, &OVERLAY_VIEW] {
+                if let Some(host) = view.with_borrow(|view| view.as_ref()?.browser()?.host()) {
                     closed &= host.try_close_browser();
                 }
             }
@@ -503,7 +548,7 @@ wrap_resource_request_handler! {
             request: Option<&mut Request>,
         ) -> Option<ResourceHandler> {
             let url = CefString::from(&request?.url()).to_string();
-            let path = &url[UI_ORIGIN.len()..];
+            let path = ui_path(&url);
             let (mime, body) = match path.strip_prefix("command/").and_then(Command::parse) {
                 Some(command) => {
                     post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
@@ -525,8 +570,14 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            run(self.command);
+            run(self.command.clone());
         }    }
+}
+
+/// The path of a UI url. Request urls keep their fragment, like `index.html#overlay`.
+fn ui_path(url: &str) -> &str {
+    let path = &url[UI_ORIGIN.len()..];
+    path.split('#').next().unwrap_or(path)
 }
 
 /// The built UI (`mise run ui`), embedded in the app.
@@ -544,7 +595,7 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UiState, ui_file};
+    use super::{UiState, ui_file, ui_path};
 
     #[test]
     fn sends_the_page_and_the_tabs() {
@@ -573,5 +624,17 @@ mod tests {
     #[test]
     fn serves_nothing_else() {
         assert!(ui_file("../Cargo.toml").is_none());
+    }
+
+    #[test]
+    fn ignores_the_fragment() {
+        assert_eq!(
+            ui_path("https://arbalette.ui/index.html#overlay"),
+            "index.html"
+        );
+        assert_eq!(
+            ui_path("https://arbalette.ui/command/open/a%23b"),
+            "command/open/a%23b"
+        );
     }
 }
