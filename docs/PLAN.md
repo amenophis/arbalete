@@ -1,0 +1,361 @@
+# Arbalette — implementation plan
+
+Goal: a browser that brings back the ideas that made Arc popular (vertical sidebar, Spaces, profiles, link
+routing…), **cross-platform (macOS, Linux, Windows)**, starting with macOS.
+Stack: **Rust + React/TypeScript on Chromium, through CEF directly** (no Tauri: see the extension test results).
+
+Arbalette is an independent project, not affiliated with The Browser Company. Arc is mentioned only to describe
+the features we take inspiration from and to import user data.
+
+## 1. Features we take inspiration from
+
+- **Vertical sidebar**: Favorites (icon grid) at the top, pinned tabs, then today's tabs. Tabs and folders form a
+  tree. A pinned tab remembers its original URL and can be reset to it. Closing a tab returns to the tab that
+  opened it.
+- **Spaces**: separate sets of pinned and unpinned tabs, each with its own name, icon and color theme.
+- **Profiles**: isolated web data (cookies, history, logins). **Several Spaces can share one profile**, and
+  Favorites belong to the profile, so Spaces of the same profile share them.
+- **Auto-archive**: unpinned tabs inactive for longer than a threshold (12 hours by default; 1 h, 6 h, 24 h, 7 d,
+  30 d or never) move to a browsable archive and can be restored. The threshold is set per profile.
+- **Link routing**: rules decide where links opened from other apps land. A rule is a set of URL conditions
+  ("matches" or "contains") and a destination Space; a default destination applies when no rule matches.
+- **Command Bar**: one field for URLs, search, open tabs, history and actions.
+- **Resource saving**: tabs in the background are frozen, then unloaded, and reload when selected. The sidebar
+  shows their state. Sites can be excluded, and the browser saves more when the computer is on low power.
+- **Split View** and **Peek** (preview a link above the current page).
+- **Chrome extensions**: installed from the Chrome Web Store, like in any Chromium browser. Password managers and
+  content blockers are essential for users coming from Arc.
+
+## 2. Technical choices
+
+### Rust + React/TypeScript
+
+- **Rust**: all the logic — model, persistence, profiles, auto-archive, link routing, history, imports,
+  extensions, content view management.
+- **React/TypeScript**: sidebar, Command Bar, settings. It displays state and sends commands to Rust.
+  Shared types generated from Rust (`specta`).
+- **Tabs**: each tab is a content view of the window, placed to the right of the UI view.
+
+### The key decision: the web engine
+
+Chrome extension support settles the engine question: **only Chromium runs Chrome extensions**. The system
+WebViews that Tauri 2 uses cannot:
+
+| OS | Tauri 2 engine | Profile isolation | Extensions |
+|---|---|---|---|
+| macOS | WKWebView (WebKit, like Safari) | `data_store_identifier` (macOS 14+) | `WKWebExtension` (macOS 15.4+): Safari's WebExtensions API, no Chrome Web Store |
+| Windows | WebView2 (Chromium) | one `data_directory` per profile | Limited: unpacked extensions only, partial APIs, no Web Store |
+| Linux | WebKitGTK | one `data_directory` per profile | None |
+
+The target engine is therefore **Chromium on all three OSes, through CEF** (Chromium Embedded Framework), which
+also gives every user the same rendering and the same behavior. Two ways to get there, both keeping Rust for the
+logic and React/TypeScript for the UI:
+
+| Option | + | − |
+|---|---|---|
+| **Tauri 3 with its CEF runtime** | Keeps Tauri's tooling, commands, plugins and bundler. | In alpha; no confirmed support for Chrome extensions yet. |
+| **CEF directly from Rust** (`cef` crate, maintained by the Tauri team), React UI in a CEF view | Full access to CEF, including Chrome-style browsers and their extension support. | We write the window, IPC and packaging glue that Tauri would provide. |
+
+#### Extension test results (October 2026)
+
+Tested with the official `cefclient` sample of CEF 156.0.8 (Chromium 156) on macOS arm64, with an MV3 probe
+extension and uBlock Origin Lite from the Chrome Web Store:
+
+| Check | Chrome style (CEF Views window) | Alloy style (native parent view, as in Tauri) |
+|---|---|---|
+| Content scripts, service worker, `chrome.storage`, `tabs.get` | ✅ | ✅ |
+| `tabs.query` | ✅ | ⚠️ returns no tab |
+| `tabs.update`, `tabs.create` | ✅ | ❌ "No current window" |
+| Action popup | ✅ | ❌ "Could not find an active browser window" |
+| Install from the Chrome Web Store | ✅ once the app accepts the `.crx` download | not tested |
+
+Findings:
+- **Only Chrome style supports extensions properly.** In Alloy style an extension cannot find the active tab,
+  which breaks password managers and most action popups.
+- **Tauri 3 cannot offer Chrome style on macOS**: its CEF runtime hosts every browser in a native parent view,
+  which CEF forces to Alloy style (CEF issue #3294, open since 2022). The runtime also states that it does not
+  support extensions. Making it possible would take months of upstream work with uncertain acceptance.
+- **Web Store installs go through the app's download handler**: the app must accept the extension's `.crx`
+  download silently; Chrome then completes the installation.
+
+**Decision: CEF directly from Rust**, with CEF Views windows and Chrome-style browsers. The phase 0 spike now
+only has to validate the app shell with the `cef` crate.
+
+Whatever the outcome, all tab control lives in a single Rust module, `engine` (create, navigate, back, forward,
+reload, snapshot, title/URL/favicon/loading events, extensions). The rest of the code never touches the engine
+directly. Following the doctrine, this module becomes a trait only if a second engine actually exists.
+
+### UI rules (performance and native feel)
+
+The UI is HTML/TS, but it must behave like a native UI. These rules apply from phase 0:
+
+- **Rust is the source of truth.** The UI only keeps a copy of the state and sends commands.
+- **Send changes, not the full state.** Rust emits targeted events (tab added, title changed, node moved…). The full
+  state is loaded only at startup and when switching Spaces.
+- **Fine-grained store** (Zustand or Jotai, with selectors): changing a tab re-renders only its row. Memoized row
+  components, virtualized long lists.
+- **Optimistic updates** for instant actions (selection, drag and drop, renaming): the UI reacts immediately, Rust
+  confirms or corrects.
+- **Keyboard shortcuts through the app's native menus** (`⌘T`, `⌘L`, `⌘S`, `⌘W`…), never in JavaScript alone:
+  they must work even when the web page has focus.
+- **Native where it shows**: app menus and native context menus, window translucency (macOS vibrancy, Windows
+  Mica), macOS window buttons, cursors, native scrolling.
+- **Overlays above the page** (Command Bar, Peek, rich menus): a transparent UI view brought to the front,
+  designed in phase 0.
+- **Animate only `transform` and `opacity`**, so animations stay smooth.
+- **No heavy computation in the UI**: search, ranking and sorting happen in Rust.
+
+### Resource saving
+
+Arc manages each tab's page through four states — alive, frozen, discarded, closed — with a per-tab timer, a
+reaction to memory pressure and to macOS Low Power Mode, a list of URL patterns that are never suspended, and
+an optional state indicator in the sidebar. Arbalette follows the same model, implemented in the `engine` module:
+
+| State | What it means | How (CEF) |
+|---|---|---|
+| **Active** | Visible tab | Normal browser |
+| **Hidden** | Loaded but not visible | View hidden; Chromium throttles timers and rendering on its own |
+| **Frozen** | Loaded, JavaScript and timers paused, memory kept | DevTools protocol `Page.setWebLifecycleState("frozen")`, sent by the app |
+| **Unloaded** | Browser closed; the tab keeps its URL, title, favicon and a snapshot | Close the browser; recreate it when the tab is selected |
+
+Rules:
+- **Lazy loading**: on launch, restored tabs are unloaded; a tab loads only when selected.
+- **Timers**: a hidden tab is frozen after a few minutes, then unloaded after a longer delay.
+- **Memory pressure**: when the OS reports pressure, the least recently used tabs are unloaded first.
+- **Low power** (macOS Low Power Mode, Windows energy saver, Linux power profile): shorter delays.
+- **Never suspended**: tabs playing audio, using the camera, microphone or screen sharing, the tabs of an open
+  Split View, and sites matching the user's exception patterns.
+- **Settings**: off, balanced (default) or maximum savings; exception list. A discreet indicator in the sidebar
+  marks unloaded tabs.
+
+This is separate from auto-archive: an unloaded tab stays in the sidebar; an archived tab leaves it.
+
+### Repository layout
+
+Start with the minimum and split when the code calls for it (doctrine, rule 10):
+
+```text
+app/                           desktop app: windows, commands, engine module
+crates/arbalette-core/         model (profiles, Spaces, node tree, Favorites) and pure logic, no engine
+ui/                            React + TypeScript (Vite)
+```
+
+`arbalette-core` is separate from the start for one reason only: the logic must be testable without launching
+the app or the engine. Persistence, auto-archive, link routing and imports start as modules of these two crates; a module becomes
+a crate only if it grows enough to hurt readability or build times.
+
+Tooling: pnpm, Vite, Vitest + Testing Library, `cargo test` / `clippy` / `rustfmt`, `cargo-deny` for dependency
+licenses and advisories, GitHub Actions CI on all three OSes from day one, installers (dmg, AppImage/deb, msi),
+macOS signing and notarization.
+
+## 3. Arbalette data model (Rust)
+
+```rust
+struct Profile    { id: ProfileId, name: String, color: Color, data_store: Uuid }  // isolated web data
+struct Space      { id: SpaceId, title: String, icon: Icon, theme: Theme, profile: ProfileId,
+                    pinned_root: NodeId, today_root: NodeId }                     // N Spaces -> 1 profile
+struct Node       { id: NodeId, parent: Option<NodeId>, children: Vec<NodeId>, title: Option<String>,
+                    created_at: Timestamp, kind: NodeKind }
+enum   NodeKind   { Tab(Tab), Folder { expanded: bool }, Split(Split), Container }
+struct Tab        { url: Url, saved_url: Option<Url>, saved_title: Option<String>, favicon: Option<Blob>,
+                    opener: Option<NodeId>, last_active_at: Timestamp, is_unread: bool }
+struct Sidebar    { profiles: Vec<Profile>, spaces: HashMap<SpaceId, Space>, space_order: Vec<SpaceId>,
+                    nodes: HashMap<NodeId, Node>, favorites: HashMap<ProfileId, NodeId> }
+struct ArchivedTab { node: Node, reason: ArchiveReason, archived_at: Timestamp, space: SpaceId }
+struct RoutingRule { id: RuleId, enabled: bool, conditions: Vec<Condition>, destination: Destination }
+enum   Condition   { UrlMatches(Pattern), UrlContains(String) }
+enum   Destination { Space(SpaceId), MostRecentSpaceOf(ProfileId), MostRecentSpace }
+```
+
+This is a target, not a starting point: each type is added when a phase needs it.
+History and imported bookmarks: SQLite **per profile**, like web data.
+
+## 4. Imports
+
+Import formats are documented here only as far as needed for interoperability: reading the user's own data
+from the browsers they use.
+
+### From Arc
+
+Arc stores its data in `~/Library/Application Support/Arc/` on macOS (in the Arc app's `Packages` directory on
+Windows):
+
+| Data | Source | Conversion |
+|---|---|---|
+| Sidebar: Spaces, Favorites, pinned and today's tabs, folders | `StorableSidebar.json`: a flat map of items linked by `parentID` / `childrenIds`, `spaceModels`, `orderedSpaceIDs`, `topAppsContainerIDs` (Favorites, one container per profile) | Profiles, Spaces and node tree; split views become separate tabs at first |
+| Profiles | Each Space references a profile (default, or custom with a `directoryBasename`); names and colors in `User Data/Local State` | One Arbalette profile per Arc profile |
+| Archive | `StorableArchiveItems.json` | Arbalette archive |
+| Link routing rules | `StorableLinkRouting.json` | Rules; destinations that do not exist in Arbalette fall back to the profile's most recent Space |
+| History, bookmarks | `User Data/<directoryBasename>/History`, `Bookmarks` | Same as any Chromium browser (below) |
+
+These formats must be validated against real Arc data before the importer ships.
+
+### From system browsers
+
+| Family | Browsers | Profiles | Bookmarks | History |
+|---|---|---|---|---|
+| Chromium | Chrome, Edge, Brave, Vivaldi, Opera, Dia, Arc | `Local State` (`profile.info_cache`) | `Bookmarks` (JSON) | `History` (SQLite, µs since 1601) |
+| Firefox | Firefox, Zen, LibreWolf | `profiles.ini` | `places.sqlite` (`moz_bookmarks`) | `places.sqlite` (`moz_places`, `moz_historyvisits`) |
+| Safari | Safari (macOS) | — | `~/Library/Safari/Bookmarks.plist` | `~/Library/Safari/History.db` (dates since 2001) |
+
+Rules:
+- Automatic detection of installed browsers and profiles, with OS-specific paths.
+- SQLite databases are **copied before reading**: they are locked while the browser is open.
+- Target choice: each source profile becomes an Arbalette profile or is merged into an existing one.
+  The bookmarks bar can become the Favorites or a pinned folder.
+- **Safari** requires **Full Disk Access** for Arbalette (macOS blocks even reading `~/Library/Safari` without it):
+  the import assistant explains this and opens the right System Settings pane.
+- **Out of scope at first**: passwords and cookies. They are encrypted with the system keychain and are sensitive
+  data; they may come later, for example through the browsers' CSV export.
+
+## 5. Phased plan
+
+Each phase ends with a usable, tested app. Development and acceptance testing happen **on macOS**;
+CI builds all three OSes from phase 0.
+
+### Phase 0 — Foundations
+
+#### Engine spike
+
+Before any scaffolding, a throwaway prototype with the `cef` crate is built on macOS and checked against this
+list:
+
+- One CEF Views window holding a React UI view and Chrome-style content views side by side, with an overlay
+  above the page (`CefOverlayController`).
+- Rust ↔ UI messages in both directions.
+- Install extensions from the Chrome Web Store by accepting `.crx` downloads: uBlock Origin Lite, Bitwarden,
+  1Password, Dark Reader. Their popups open from our own UI.
+- Two profiles (request contexts) with isolated cookies, storage and extensions.
+- Freeze a hidden page and resume it; unload a browser and recreate it from its URL; measure the memory saved.
+- Build, bundle and sign a macOS app; build on Linux and Windows in CI.
+
+The spike code is not merged. Its result, together with the extension tests above, is recorded as a decision
+document in `docs/decisions/`.
+
+#### Foundations
+- Project scaffold for the chosen option (React/TypeScript UI, Cargo workspace), CI on three OSes.
+- Window: UI view (sidebar) + one content view, synchronized resizing.
+- `engine` module: navigation (back, forward, reload), progress, title, URL, favicon.
+- JSON persistence, session restore with lazy loading (a restored tab loads only when selected).
+- **Performance prototype** (below), to be validated before starting phase 1.
+
+#### Performance prototype
+
+Goal: check that an HTML/TS UI matches native UI performance before investing in features. Measured on macOS,
+in a production build, on the development machine.
+
+Scenario: a sidebar with 500 tabs spread across folders in 5 Spaces, 10 content views loaded with real sites,
+and the Rust ↔ UI bridge with its change events.
+
+| Measure | Target |
+|---|---|
+| Switch tab: from click to display of an already loaded page | < 50 ms; UI part < 16 ms |
+| Switch Space (500 tabs) | < 100 ms, no jank |
+| Drag and drop in the sidebar | 60 fps, no dropped frame |
+| Open the Command Bar (shortcut → field ready) | < 50 ms |
+| Keystroke in the Command Bar → results displayed | next frame (< 16 ms) over 10,000 history entries |
+| Tab title update (Rust → UI) | < 5 ms, without re-rendering other rows |
+| Cold start to a usable window | < 1 s |
+| UI memory (excluding web pages) | < 150 MB |
+| Shortcuts | work while the web page has focus |
+| Overlay | the Command Bar displays above the page |
+
+Tools: Web Inspector / DevTools (Performance), Rust-side timestamps on commands and events, Instruments on macOS.
+Measurements are reproducible with a script and generated data.
+
+If targets are missed: optimize first. If the gap remains large, reconsider the UI (cross-platform Rust UI such as
+`gpui`, or native per OS) before phase 1. Only the UI would need rewriting, since the logic is in Rust.
+
+#### Commit sequence
+
+Rules in [CONTRIBUTING.md](../CONTRIBUTING.md#commits). Every commit builds and passes the checks.
+
+| # | Branch | Commit |
+|---|---|---|
+| 1 | `main` | `docs: initialize repository with license, readme and project plan` |
+| 2 | `docs/engine-decision` | `docs: record the web engine decision` |
+| 3 | `build/scaffold` | `build(app): scaffold the app with a react and typescript ui` |
+| 4 | | `build: add cargo workspace with arbalette-core crate` |
+| 5 | | `build(ui): add lint, format and test tooling` |
+| 6 | | `ci: build and test on macos, linux and windows` |
+| 7 | | `ci: check dependency licenses and advisories with cargo-deny` |
+| 8 | `feat/sidebar-model` | `feat(core): add sidebar model with profiles, spaces and tab tree` |
+| 9 | | `feat(core): persist sidebar state as json` |
+| 10 | `feat/content-view` | `feat(app): show sidebar and content views side by side` |
+| 11 | | `feat(engine): navigate back, forward and reload` |
+| 12 | | `feat(engine): report title, url, favicon and loading progress` |
+| 13 | | `feat(ui): render tabs and select the active one` |
+| 14 | | `feat(app): restore the previous session on launch` |
+| 15 | `feat/native-shell` | `feat(app): handle keyboard shortcuts through native menus` |
+| 16 | | `feat(ui): show an overlay above the page` |
+| 17 | `perf/prototype` | `test(perf): generate a 500-tab benchmark scenario` |
+| 18 | | `test(perf): measure tab switching, drag and command bar latency` |
+| 19 | | `docs(perf): record phase 0 measurements` |
+
+The engine spike itself lives on throwaway branches and is not part of this sequence.
+
+Each following phase starts the same way: define its commit sequence before writing code.
+
+### Phase 1 — Vertical sidebar
+- Favorites (icon grid), pinned tabs, divider, today's tabs.
+- Drag and drop between sections, nested folders, renaming, pin / unpin.
+- Pinned tab: "go back to the saved URL". Closing a tab returns to the tab that opened it.
+- Hide the sidebar, with reveal on hover at the left edge.
+- Shortcuts (`⌘` on macOS, `Ctrl` elsewhere): close, reopen, move between tabs, `1…9` for Favorites.
+
+### Phase 2 — Profiles and Spaces
+- Profiles: creation, name, color; isolated web data (one data store per profile).
+- Spaces: creation / editing (name, emoji, color or gradient), attached to a profile, several Spaces per profile.
+- Switching Spaces: switcher at the bottom of the sidebar, horizontal swipe, shortcuts.
+- Favorites follow the profile of the displayed Space.
+
+### Phase 3 — Imports
+- Import assistant on first launch and in Settings.
+- Chromium browsers, Firefox, Safari: profiles, bookmarks, history.
+- Arc: profiles, Spaces, Favorites, pinned tabs, folders, archive, link routing rules.
+
+### Phase 4 — Chrome extensions
+- Install from the Chrome Web Store and from a local folder (developer mode), update, enable, disable, remove.
+- Extensions are installed **per profile**, like their data.
+- Toolbar actions in the sidebar (pinned extensions, then an overflow menu), popups, options pages, permission
+  prompts.
+- Acceptance list: uBlock Origin Lite, Bitwarden, 1Password, Dark Reader, plus the most used extensions found in
+  imported Chromium profiles.
+
+### Phase 5 — Command Bar
+- Centered palette for "new tab" and "edit URL".
+- Results: open tabs (all Spaces), Favorites and pinned tabs, history (including imported), search engine
+  suggestions, actions.
+- Ranking: recency, frequency, typed count, exact, domain or title-prefix match.
+
+### Phase 6 — Auto-archive
+- Thresholds: 1 h, 6 h, 12 h (default), 24 h, 7 d, 30 d, never; per-profile setting.
+- Browsable, restorable archive (full node kept).
+
+### Phase 7 — Resource saving
+- Freeze, then unload hidden tabs on timers; reload on selection from the saved URL, with the snapshot shown
+  while loading.
+- Memory pressure and low-power detection on each OS.
+- Never-suspended cases (media, capture, Split View, exception patterns), settings and sidebar indicator.
+- Acceptance: with 100 tabs open, memory used after unloading compared with all tabs alive, measured and recorded.
+
+### Phase 8 — Link routing
+- Registration as the default browser on each OS.
+- Receiving external URLs (URL open event on macOS; single instance + command-line arguments elsewhere).
+- Rules: "matches" / "contains", several conditions, per-rule toggle, default destination
+  (most recent Space, optionally of a given profile).
+
+### Phase 9 — Polish
+- Split View, Peek.
+- Per-OS finish: macOS vibrancy, Windows Mica, Wayland/X11.
+
+### Phase 10 — Linux and Windows
+- Full acceptance testing on each OS, signed installers, automatic updates.
+
+### Later
+Sync, password import.
+
+## 6. Open points
+
+1. **Engine**: CEF directly from Rust, pending the app-shell spike in phase 0.
+2. **Phase order**: imports in phase 3 (right after profiles and Spaces) to ease migration from Arc.
