@@ -5,17 +5,20 @@
 
 use crate::command::Command;
 use arbalette_core::sidebar::{NodeId, NodeKind, Sidebar, Tab};
+use arbalette_core::store;
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
-use serde::{Serialize, Serializer};
+use serde::Serialize;
+use serde_json::json;
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 
 /// The UI is served by the app itself under this origin.
 const UI_ORIGIN: &str = "https://arbalette.ui/";
 
 const SIDEBAR_WIDTH: i32 = 260;
 
-/// The first tab, until the previous session is restored.
+/// The first tab of a new session.
 const START_URL: &str = "https://www.wikipedia.org/";
 
 thread_local! {
@@ -23,47 +26,39 @@ thread_local! {
     static SIDEBAR: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static CONTENT: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static STATE: RefCell<UiState> = RefCell::default();
+    /// Where the sidebar is saved, once the previous session is restored.
+    static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
 }
 
-/// What the UI shows, sent whole on every change.
-#[derive(Default, Serialize)]
+/// What the UI shows.
+#[derive(Default)]
 struct UiState {
     page: Page,
-    /// The tabs of the first Space, until Spaces are shown.
-    #[serde(rename = "tabs", serialize_with = "today_tabs")]
     sidebar: Sidebar,
-    /// The tab shown in the content view.
-    active: Option<NodeId>,
 }
 
 impl UiState {
-    fn active_tab(&mut self) -> Option<&mut Tab> {
-        self.sidebar.tab_mut(self.active?)
-    }
-}
-
-#[derive(Serialize)]
-struct TabItem<'a> {
-    id: NodeId,
-    #[serde(flatten)]
-    tab: &'a Tab,
-}
-
-fn today_tabs<S: Serializer>(sidebar: &Sidebar, serializer: S) -> Result<S::Ok, S::Error> {
-    let today = sidebar
-        .node(sidebar.spaces()[0].today)
-        .expect("a Space's root");
-    serializer.collect_seq(
-        today
+    /// Sent whole to the UI on every change. Only the first Space is shown for now.
+    fn to_json(&self) -> serde_json::Value {
+        let home = &self.sidebar.spaces()[0];
+        let today = self.sidebar.node(home.today).expect("a Space's root");
+        let tabs: Vec<_> = today
             .children
             .iter()
-            .filter_map(|&id| match &sidebar.node(id)?.kind {
-                NodeKind::Tab(tab) => Some(TabItem { id, tab }),
+            .filter_map(|&id| match &self.sidebar.node(id)?.kind {
+                NodeKind::Tab(tab) => Some(json!({
+                    "id": id,
+                    "url": tab.url,
+                    "title": tab.title,
+                    "favicon": tab.favicon,
+                })),
                 _ => None,
-            }),
-    )
+            })
+            .collect();
+        json!({ "page": self.page, "tabs": tabs, "active": home.selected })
+    }
 }
 
 /// The loading state of the content view; its title and url belong to the active tab.
@@ -77,14 +72,26 @@ struct Page {
     can_go_forward: bool,
 }
 
-/// Changes the state and sends it to the UI.
-fn update(change: impl FnOnce(&mut UiState)) {
-    STATE.with_borrow_mut(change);
+/// Changes the page and sends the state to the UI.
+fn update_page(change: impl FnOnce(&mut Page)) {
+    STATE.with_borrow_mut(|state| change(&mut state.page));
     send_state();
 }
 
+/// Changes the sidebar, saves it and sends the state to the UI.
+fn update_sidebar<R>(change: impl FnOnce(&mut Sidebar) -> R) -> R {
+    let result = STATE.with_borrow_mut(|state| change(&mut state.sidebar));
+    if let Some(path) = SESSION_FILE.with_borrow(Clone::clone)
+        && let Err(error) = STATE.with_borrow(|state| store::save(&state.sidebar, &path))
+    {
+        eprintln!("cannot save the session: {error}");
+    }
+    send_state();
+    result
+}
+
 fn send_state() {
-    let json = STATE.with_borrow(|state| serde_json::to_string(state).expect("serializable"));
+    let json = STATE.with_borrow(UiState::to_json);
     let frame = SIDEBAR.with_borrow(|view| view.as_ref()?.browser()?.main_frame());
     if let Some(frame) = frame {
         let code =
@@ -93,19 +100,42 @@ fn send_state() {
     }
 }
 
+/// Loads the sidebar saved by the previous session; a file that cannot be read is replaced on the
+/// next save.
+fn restore(path: PathBuf) {
+    match store::load(&path) {
+        Ok(Some(sidebar)) => STATE.with_borrow_mut(|state| state.sidebar = sidebar),
+        Ok(None) => {}
+        Err(error) => eprintln!("cannot restore the session: {error:?}"),
+    }
+    SESSION_FILE.set(Some(path));
+    if STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_none()) {
+        open_tab(START_URL);
+    }
+}
+
+fn active_tab(sidebar: &mut Sidebar) -> Option<&mut Tab> {
+    let id = sidebar.spaces()[0].selected?;
+    sidebar.tab_mut(id)
+}
+
 /// Opens a tab in the first Space and shows it.
 fn open_tab(url: &str) {
-    update(|state| {
-        let home = state.sidebar.spaces()[0].id;
-        state.active = state.sidebar.open_tab(home, url).ok();
+    update_sidebar(|sidebar| {
+        let home = sidebar.spaces()[0].id;
+        let tab = sidebar.open_tab(home, url).expect("the first Space");
+        sidebar.select(home, tab).expect("a new tab");
     });
     load(url);
 }
 
 fn select_tab(id: NodeId) {
-    let url = STATE.with_borrow_mut(|state| Some(state.sidebar.tab_mut(id)?.url.clone()));
+    let url = update_sidebar(|sidebar| {
+        let home = sidebar.spaces()[0].id;
+        sidebar.select(home, id).ok()?;
+        Some(sidebar.tab_mut(id)?.url.clone())
+    });
     if let Some(url) = url {
-        update(|state| state.active = Some(id));
         load(&url);
     }
 }
@@ -126,7 +156,9 @@ pub fn close() {
 }
 
 wrap_app! {
-    pub struct ArbaletteApp {}
+    pub struct ArbaletteApp {
+        session_file: PathBuf,
+    }
 
     impl App {
         // Development builds are signed ad hoc, so each build would ask for keychain access.
@@ -137,16 +169,19 @@ wrap_app! {
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
-            Some(ArbaletteBrowserProcessHandler::new())
+            Some(ArbaletteBrowserProcessHandler::new(self.session_file.clone()))
         }
     }
 }
 
 wrap_browser_process_handler! {
-    struct ArbaletteBrowserProcessHandler {}
+    struct ArbaletteBrowserProcessHandler {
+        session_file: PathBuf,
+    }
 
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
+            restore(self.session_file.clone());
             window_create_top_level(Some(&mut MainWindowDelegate::new()));
         }
     }
@@ -175,8 +210,9 @@ wrap_window_delegate! {
                 }))
                 .expect("box layout");
             let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH);
-            open_tab(START_URL);
-            let content = browser_view(ContentClient::new(), START_URL, 0);
+            // Only the active tab loads: the others wait until they are selected.
+            let url = STATE.with_borrow_mut(|state| Some(active_tab(&mut state.sidebar)?.url.clone()));
+            let content = browser_view(ContentClient::new(), &url.expect("restore selects a tab"), 0);
             SIDEBAR.set(Some(sidebar.clone()));
             CONTENT.set(Some(content.clone()));
             for (view, flex) in [(sidebar, 0), (content, 1)] {
@@ -292,8 +328,8 @@ wrap_display_handler! {
         fn on_address_change(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
             if frame.is_some_and(|frame| frame.is_main() == 1) {
                 let url = url.map(CefString::to_string).unwrap_or_default();
-                update(|state| {
-                    if let Some(tab) = state.active_tab() {
+                update_sidebar(|sidebar| {
+                    if let Some(tab) = active_tab(sidebar) {
                         tab.url = url;
                     }
                 });
@@ -302,8 +338,8 @@ wrap_display_handler! {
 
         fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
             let title = title.map(CefString::to_string).unwrap_or_default();
-            update(|state| {
-                if let Some(tab) = state.active_tab() {
+            update_sidebar(|sidebar| {
+                if let Some(tab) = active_tab(sidebar) {
                     tab.title = title;
                 }
             });
@@ -311,15 +347,15 @@ wrap_display_handler! {
 
         fn on_favicon_urlchange(&self, _browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
             let favicon = icon_urls.and_then(|urls| urls.clone().into_iter().next());
-            update(|state| {
-                if let Some(tab) = state.active_tab() {
+            update_sidebar(|sidebar| {
+                if let Some(tab) = active_tab(sidebar) {
                     tab.favicon = favicon;
                 }
             });
         }
 
         fn on_loading_progress_change(&self, _browser: Option<&mut Browser>, progress: f64) {
-            update(|state| state.page.progress = progress);
+            update_page(|page| page.progress = progress);
         }
     }
 }
@@ -329,10 +365,10 @@ wrap_load_handler! {
 
     impl LoadHandler {
         fn on_loading_state_change(&self, _browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
-            update(|state| {
-                state.page.loading = is_loading == 1;
-                state.page.can_go_back = can_go_back == 1;
-                state.page.can_go_forward = can_go_forward == 1;
+            update_page(|page| {
+                page.loading = is_loading == 1;
+                page.can_go_back = can_go_back == 1;
+                page.can_go_forward = can_go_forward == 1;
             });
         }
     }
@@ -475,8 +511,12 @@ mod tests {
     fn sends_the_page_and_the_tabs() {
         let mut state = UiState::default();
         let home = state.sidebar.spaces()[0].id;
-        state.active = state.sidebar.open_tab(home, "https://example.com/").ok();
-        let json = serde_json::to_value(&state).unwrap();
+        let tab = state
+            .sidebar
+            .open_tab(home, "https://example.com/")
+            .unwrap();
+        state.sidebar.select(home, tab).unwrap();
+        let json = state.to_json();
         assert_eq!(json["page"]["canGoBack"], false);
         assert_eq!(json["tabs"][0]["url"], "https://example.com/");
         assert_eq!(json["tabs"][0]["id"], json["active"]);
