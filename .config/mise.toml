@@ -7,8 +7,20 @@ cmake = "4.4.4"
 ninja = "1.13.2"
 cargo-deny = "0.20.2"
 
+[env]
+# One exported CEF distribution, shared by every build instead of a download per build.
+CEF_PATH = "{{env.HOME}}/cef"
+
+[tasks.cef]
+description = "Download CEF to CEF_PATH"
+run = [
+  "cargo install --locked export-cef-dir --version =156.0.0",
+  "export-cef-dir --force \"$CEF_PATH\"",
+]
+
 [tasks.setup]
-description = "Install the CEF bundling tool"
+description = "Download CEF and install the CEF bundling tool"
+depends = ["cef"]
 run = "cargo install --locked cef --version =156.0.0 --features build-util --bin bundle-cef-app"
 
 [tasks.ui]

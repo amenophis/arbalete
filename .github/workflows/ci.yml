@@ -25,11 +25,7 @@ jobs:
           # their own: the repository's 10 GB of cache stays for main.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # An exported CEF distribution, shared by every build instead of a download per build.
-      # actions/cache needs a path without "..": keep it in the home directory.
-      - name: Locate CEF
-        run: echo "CEF_PATH=$HOME/cef" >> "$GITHUB_ENV"
-
+      # CEF_PATH, set in mise.toml. actions/cache needs a path without "..".
       - name: Cache CEF
         id: cef-cache
         uses: actions/cache@v6
@@ -39,8 +35,6 @@ jobs:
 
       - name: Export CEF
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        run: |
-          cargo install --locked export-cef-dir --version =156.0.0
-          export-cef-dir --force "$CEF_PATH"
+        run: mise run cef
 
       - run: mise run check
