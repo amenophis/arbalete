@@ -5,13 +5,20 @@
 
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 /// The UI is served by the app itself under this origin.
 const UI_ORIGIN: &str = "https://arbalette.ui/";
 
+const SIDEBAR_WIDTH: i32 = 260;
+
+/// Shown in the content view until tabs are wired to the sidebar.
+const START_URL: &str = "https://www.wikipedia.org/";
+
 thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    /// Browsers not closed yet: the app quits when the last one closes.
+    static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
 }
 
 /// Closes the main window, which quits the app once its browser is closed. Called by the macOS
@@ -65,30 +72,38 @@ wrap_window_delegate! {
         fn on_window_created(&self, window: Option<&mut Window>) {
             let window = window.expect("window").clone();
             window.set_title(Some(&CefString::from("Arbalette")));
-            window.set_to_fill_layout();
-            let ui = browser_view_create(
-                Some(&mut UiClient::new()),
-                Some(&CefString::from(format!("{UI_ORIGIN}index.html").as_str())),
-                Some(&BrowserSettings::default()),
-                None,
-                None,
-                Some(&mut UiViewDelegate::new()),
-            )
-            .expect("ui browser view");
-            window.add_child_view(Some(&mut View::from(&ui)));
+            let layout = window
+                .set_to_box_layout(Some(&BoxLayoutSettings {
+                    horizontal: 1,
+                    cross_axis_alignment: AxisAlignment::STRETCH,
+                    ..Default::default()
+                }))
+                .expect("box layout");
+            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH);
+            let content = browser_view(ContentClient::new(), START_URL, 0);
+            for (view, flex) in [(sidebar, 0), (content, 1)] {
+                let mut view = View::from(&view);
+                window.add_child_view(Some(&mut view));
+                layout.set_flex_for_view(Some(&mut view), flex);
+            }
             window.show();
             WINDOW.set(Some(window));
         }
 
+        /// Asks every browser to close; the window closes once they all have.
         fn can_close(&self, window: Option<&mut Window>) -> i32 {
-            let browser = window
-                .and_then(|w| w.child_view_at(0))
-                .and_then(|view| view.as_browser_view())
-                .and_then(|view| view.browser());
-            match browser.and_then(|b| b.host()) {
-                Some(host) => host.try_close_browser(),
-                None => 1,
+            let Some(window) = window else { return 1 };
+            let mut closed = 1;
+            for index in 0..window.child_view_count() {
+                let browser = window
+                    .child_view_at(index as i32)
+                    .and_then(|view| view.as_browser_view())
+                    .and_then(|view| view.browser());
+                if let Some(host) = browser.and_then(|b| b.host()) {
+                    closed &= host.try_close_browser();
+                }
             }
+            closed
         }
 
         fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
@@ -106,10 +121,30 @@ wrap_window_delegate! {
     }
 }
 
-wrap_browser_view_delegate! {
-    struct UiViewDelegate {}
+/// An Alloy browser view. A width of 0 means "no preferred width": the layout decides.
+fn browser_view(mut client: Client, url: &str, width: i32) -> BrowserView {
+    browser_view_create(
+        Some(&mut client),
+        Some(&CefString::from(url)),
+        Some(&BrowserSettings::default()),
+        None,
+        None,
+        Some(&mut AlloyViewDelegate::new(width)),
+    )
+    .expect("browser view")
+}
 
-    impl ViewDelegate {}
+wrap_browser_view_delegate! {
+    struct AlloyViewDelegate {
+        width: i32,
+    }
+
+    impl ViewDelegate {
+        // A zero height would make the size "empty" and CEF would ignore it.
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size { width: self.width, height: 1 }
+        }
+    }
 
     impl BrowserViewDelegate {
         fn browser_runtime_style(&self) -> RuntimeStyle {
@@ -118,6 +153,7 @@ wrap_browser_view_delegate! {
     }
 }
 
+// Shows the app's own UI.
 wrap_client! {
     struct UiClient {}
 
@@ -127,17 +163,35 @@ wrap_client! {
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(UiLifeSpanHandler::new())
+            Some(QuitOnLastClose::new())
+        }
+    }
+}
+
+// Shows web pages.
+wrap_client! {
+    struct ContentClient {}
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(QuitOnLastClose::new())
         }
     }
 }
 
 wrap_life_span_handler! {
-    struct UiLifeSpanHandler {}
+    struct QuitOnLastClose {}
 
     impl LifeSpanHandler {
+        fn on_after_created(&self, _browser: Option<&mut Browser>) {
+            OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
+        }
+
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            quit_message_loop();
+            OPEN_BROWSERS.set(OPEN_BROWSERS.get() - 1);
+            if OPEN_BROWSERS.get() == 0 {
+                quit_message_loop();
+            }
         }
     }
 }
