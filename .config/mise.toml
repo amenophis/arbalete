@@ -5,6 +5,7 @@ pnpm = "12.15.0"
 # Needed by the cef crate to build CEF's C++ wrapper.
 cmake = "4.4.4"
 ninja = "1.13.2"
+cargo-deny = "0.20.2"
 
 [tasks.setup]
 description = "Install the CEF bundling tool"
@@ -24,6 +25,7 @@ run = [
   "cargo fmt --all --check",
   "cargo clippy --workspace --all-targets -- -D warnings",
   "cargo test --workspace",
+  "cargo deny check",
 ]
 
 [tasks.app]
