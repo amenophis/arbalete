@@ -29,7 +29,12 @@ fn main() {
     };
     let mut app = shell::ArbaletteApp::new();
     assert_eq!(
-        initialize(Some(args.as_main_args()), Some(&settings), Some(&mut app), std::ptr::null_mut()),
+        initialize(
+            Some(args.as_main_args()),
+            Some(&settings),
+            Some(&mut app),
+            std::ptr::null_mut()
+        ),
         1
     );
     #[cfg(target_os = "macos")]
@@ -41,13 +46,19 @@ fn main() {
 
 /// Where Arbalette keeps its data, resolved because CEF compares paths after resolving symlinks.
 fn data_dir() -> PathBuf {
-    let home = PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).unwrap());
+    let home = PathBuf::from(
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .unwrap(),
+    );
     let dir = if cfg!(target_os = "macos") {
         home.join("Library/Application Support/Arbalette")
     } else if cfg!(target_os = "windows") {
         PathBuf::from(std::env::var_os("APPDATA").unwrap()).join("Arbalette")
     } else {
-        std::env::var_os("XDG_DATA_HOME").map_or_else(|| home.join(".local/share"), PathBuf::from).join("arbalette")
+        std::env::var_os("XDG_DATA_HOME")
+            .map_or_else(|| home.join(".local/share"), PathBuf::from)
+            .join("arbalette")
     };
     std::fs::create_dir_all(&dir).unwrap();
     dir.canonicalize().unwrap()

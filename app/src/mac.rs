@@ -2,7 +2,8 @@
 
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::{
-    ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, extern_methods, msg_send,
+    ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, extern_methods,
+    msg_send,
     rc::Retained,
     runtime::{AnyObject, Bool, NSObjectProtocol},
     sel,

@@ -191,8 +191,30 @@ wrap_resource_request_handler! {
 fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
     match path {
         "index.html" => Some(("text/html", include_bytes!("../../ui/dist/index.html"))),
-        "assets/index.js" => Some(("text/javascript", include_bytes!("../../ui/dist/assets/index.js"))),
+        "assets/index.js" => Some((
+            "text/javascript",
+            include_bytes!("../../ui/dist/assets/index.js"),
+        )),
         "assets/index.css" => Some(("text/css", include_bytes!("../../ui/dist/assets/index.css"))),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ui_file;
+
+    #[test]
+    fn serves_the_built_ui() {
+        let (mime, body) = ui_file("index.html").unwrap();
+        assert_eq!(mime, "text/html");
+        assert!(String::from_utf8_lossy(body).contains("/assets/index.js"));
+        assert!(ui_file("assets/index.js").is_some());
+        assert!(ui_file("assets/index.css").is_some());
+    }
+
+    #[test]
+    fn serves_nothing_else() {
+        assert!(ui_file("../Cargo.toml").is_none());
     }
 }
