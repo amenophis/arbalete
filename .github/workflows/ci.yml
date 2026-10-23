@@ -18,9 +18,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           # The default key hashes every Rust version installed on the runner, which varies between
-          # runner images; the version that matters is pinned in mise.toml.
+          # runner images. Without it, a pull request that changes Cargo.lock or mise.toml still
+          # restores main's latest cache; cargo rebuilds only what changed.
           add-rust-environment-hash-key: false
-          key: ${{ hashFiles('.config/mise.toml') }}
           # Pull requests read main's cache (GitHub falls back to the base branch) without saving
           # their own: the repository's 10 GB of cache stays for main.
           save-if: ${{ github.ref == 'refs/heads/main' }}
