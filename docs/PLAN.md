@@ -112,7 +112,7 @@ the app or the engine. Persistence, auto-archive, link routing and imports start
 a crate only if it grows enough to hurt readability or build times.
 
 Tooling: pnpm, Vite, Vitest + Testing Library, `cargo test` / `clippy` / `rustfmt`, `cargo-deny` for dependency
-licenses and advisories, GitHub Actions CI on all three OSes from day one, installers (dmg, AppImage/deb, msi),
+licenses and advisories, GitHub Actions CI (macOS first, then Linux and Windows), installers (dmg, AppImage/deb, msi),
 macOS signing and notarization.
 
 ## 3. Arbalette data model (Rust)
@@ -178,7 +178,7 @@ Rules:
 ## 5. Phased plan
 
 Each phase ends with a usable, tested app. Development and acceptance testing happen **on macOS**;
-CI builds all three OSes from phase 0.
+CI runs on macOS; Linux and Windows join it in phase 10.
 
 ### Phase 0 — Foundations
 
@@ -188,7 +188,7 @@ Results and decision in [0001 — Web engine](decisions/0001-web-engine.md). Its
 phase 4, which builds the extension compatibility layer.
 
 #### Foundations
-- Project scaffold (CEF through the `cef` crate, React/TypeScript UI, Cargo workspace), CI on three OSes.
+- Project scaffold (CEF through the `cef` crate, React/TypeScript UI, Cargo workspace), CI on macOS.
 - One CEF Views window holding the sidebar and the content views (Alloy style), with an overlay view above the
   page.
 - `engine` module: navigation (back, forward, reload), progress, title, URL, favicon.
@@ -233,7 +233,7 @@ Rules in [CONTRIBUTING.md](../CONTRIBUTING.md#commits). Every commit builds and 
 | 3 | `build/scaffold` | `build(app): scaffold the app with a react and typescript ui` |
 | 4 | | `build: add cargo workspace with arbalette-core crate` |
 | 5 | | `build(ui): add lint, format and test tooling` |
-| 6 | | `ci: build and test on macos, linux and windows` |
+| 6 | | `ci: build and test on macos` |
 | 7 | | `ci: check dependency licenses and advisories with cargo-deny` |
 | 8 | `feat/sidebar-model` | `feat(core): add sidebar model with profiles, spaces and tab tree` |
 | 9 | | `feat(core): persist sidebar state as json` |
@@ -308,6 +308,7 @@ Each following phase starts the same way: define its commit sequence before writ
 - Per-OS finish: macOS vibrancy, Windows Mica, Wayland/X11.
 
 ### Phase 10 — Linux and Windows
+- CI on Linux and Windows: system libraries CEF needs, loading `libcef` in tests, Windows sandbox bootstrap.
 - Full acceptance testing on each OS, signed installers, automatic updates.
 
 ### Later
