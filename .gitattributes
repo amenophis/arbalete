@@ -1,0 +1,2 @@
+# Keep LF line endings on every OS: the formatters check them.
+* text=auto eol=lf
