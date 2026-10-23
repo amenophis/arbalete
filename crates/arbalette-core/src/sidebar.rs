@@ -29,6 +29,8 @@ pub struct Space {
     pub profile: ProfileId,
     pub pinned: NodeId,
     pub today: NodeId,
+    /// The tab shown when the Space is displayed.
+    pub selected: Option<NodeId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -64,6 +66,7 @@ pub enum Error {
     UnknownNode,
     /// Only containers and folders hold other nodes.
     NotAContainer,
+    NotATab,
     /// A folder cannot move inside itself or one of its descendants.
     MoveIntoItself,
     /// A Space's root containers cannot be moved or removed.
@@ -138,6 +141,7 @@ impl Sidebar {
             profile,
             pinned,
             today,
+            selected: None,
         });
         Ok(id)
     }
@@ -151,6 +155,17 @@ impl Sidebar {
             favicon: None,
         };
         Ok(self.insert(Some(today), NodeKind::Tab(tab)))
+    }
+
+    pub fn select(&mut self, space: SpaceId, tab: NodeId) -> Result<(), Error> {
+        match self.nodes.get(&tab).map(|n| &n.kind) {
+            None => return Err(Error::UnknownNode),
+            Some(NodeKind::Tab(_)) => {}
+            Some(_) => return Err(Error::NotATab),
+        }
+        let space = self.spaces.iter_mut().find(|s| s.id == space);
+        space.ok_or(Error::UnknownSpace)?.selected = Some(tab);
+        Ok(())
     }
 
     pub fn add_folder(&mut self, parent: NodeId, title: &str) -> Result<NodeId, Error> {
@@ -184,6 +199,14 @@ impl Sidebar {
         while let Some(id) = pending.pop() {
             let node = self.nodes.remove(&id).expect("children are known nodes");
             pending.extend(node.children);
+        }
+        for space in &mut self.spaces {
+            if space
+                .selected
+                .is_some_and(|tab| !self.nodes.contains_key(&tab))
+            {
+                space.selected = None;
+            }
         }
         Ok(())
     }
@@ -312,6 +335,22 @@ mod tests {
         };
         assert_eq!(tab.title, "Example");
         assert_eq!(sidebar.tab_mut(home.today), None);
+    }
+
+    #[test]
+    fn selects_a_tab_until_it_is_removed() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let tab = sidebar.open_tab(home.id, "https://example.com/").unwrap();
+        sidebar.select(home.id, tab).unwrap();
+        assert_eq!(sidebar.spaces()[0].selected, Some(tab));
+        assert_eq!(sidebar.select(home.id, home.today), Err(Error::NotATab));
+        assert_eq!(
+            sidebar.select(home.id, NodeId(999)),
+            Err(Error::UnknownNode)
+        );
+        sidebar.remove(tab).unwrap();
+        assert_eq!(sidebar.spaces()[0].selected, None);
     }
 
     #[test]

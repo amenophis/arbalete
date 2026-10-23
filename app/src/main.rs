@@ -28,7 +28,7 @@ fn main() {
         cache_path: CefString::from(root.join("Default").to_str().unwrap()),
         ..Default::default()
     };
-    let mut app = shell::ArbaletteApp::new();
+    let mut app = shell::ArbaletteApp::new(root.join("session.json"));
     assert_eq!(
         initialize(
             Some(args.as_main_args()),
