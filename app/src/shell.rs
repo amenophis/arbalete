@@ -4,9 +4,10 @@
 //! relies on is implemented explicitly.
 
 use crate::command::Command;
+use arbalette_core::sidebar::{NodeId, NodeKind, Sidebar, Tab};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use std::cell::{Cell, RefCell};
 
 /// The UI is served by the app itself under this origin.
@@ -14,7 +15,7 @@ const UI_ORIGIN: &str = "https://arbalette.ui/";
 
 const SIDEBAR_WIDTH: i32 = 260;
 
-/// Shown in the content view until tabs are wired to the sidebar.
+/// The first tab, until the previous session is restored.
 const START_URL: &str = "https://www.wikipedia.org/";
 
 thread_local! {
@@ -30,15 +31,45 @@ thread_local! {
 #[derive(Default, Serialize)]
 struct UiState {
     page: Page,
+    /// The tabs of the first Space, until Spaces are shown.
+    #[serde(rename = "tabs", serialize_with = "today_tabs")]
+    sidebar: Sidebar,
+    /// The tab shown in the content view.
+    active: Option<NodeId>,
 }
 
-/// The page in the content view.
+impl UiState {
+    fn active_tab(&mut self) -> Option<&mut Tab> {
+        self.sidebar.tab_mut(self.active?)
+    }
+}
+
+#[derive(Serialize)]
+struct TabItem<'a> {
+    id: NodeId,
+    #[serde(flatten)]
+    tab: &'a Tab,
+}
+
+fn today_tabs<S: Serializer>(sidebar: &Sidebar, serializer: S) -> Result<S::Ok, S::Error> {
+    let today = sidebar
+        .node(sidebar.spaces()[0].today)
+        .expect("a Space's root");
+    serializer.collect_seq(
+        today
+            .children
+            .iter()
+            .filter_map(|&id| match &sidebar.node(id)?.kind {
+                NodeKind::Tab(tab) => Some(TabItem { id, tab }),
+                _ => None,
+            }),
+    )
+}
+
+/// The loading state of the content view; its title and url belong to the active tab.
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Page {
-    url: String,
-    title: String,
-    favicon: Option<String>,
     /// From 0 to 1.
     progress: f64,
     loading: bool,
@@ -59,6 +90,29 @@ fn send_state() {
         let code =
             format!(r#"dispatchEvent(new CustomEvent("arbalette:state", {{ detail: {json} }}))"#);
         frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
+    }
+}
+
+/// Opens a tab in the first Space and shows it.
+fn open_tab(url: &str) {
+    update(|state| {
+        let home = state.sidebar.spaces()[0].id;
+        state.active = state.sidebar.open_tab(home, url).ok();
+    });
+    load(url);
+}
+
+fn select_tab(id: NodeId) {
+    let url = STATE.with_borrow_mut(|state| Some(state.sidebar.tab_mut(id)?.url.clone()));
+    if let Some(url) = url {
+        update(|state| state.active = Some(id));
+        load(&url);
+    }
+}
+
+fn load(url: &str) {
+    if let Some(frame) = CONTENT.with_borrow(|view| view.as_ref()?.browser()?.main_frame()) {
+        frame.load_url(Some(&CefString::from(url)));
     }
 }
 
@@ -121,6 +175,7 @@ wrap_window_delegate! {
                 }))
                 .expect("box layout");
             let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH);
+            open_tab(START_URL);
             let content = browser_view(ContentClient::new(), START_URL, 0);
             SIDEBAR.set(Some(sidebar.clone()));
             CONTENT.set(Some(content.clone()));
@@ -206,7 +261,7 @@ wrap_client! {
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(QuitOnLastClose::new())
+            Some(BrowserLifeSpan::new())
         }
     }
 }
@@ -217,7 +272,7 @@ wrap_client! {
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(QuitOnLastClose::new())
+            Some(BrowserLifeSpan::new())
         }
 
         fn display_handler(&self) -> Option<DisplayHandler> {
@@ -237,18 +292,30 @@ wrap_display_handler! {
         fn on_address_change(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
             if frame.is_some_and(|frame| frame.is_main() == 1) {
                 let url = url.map(CefString::to_string).unwrap_or_default();
-                update(|state| state.page.url = url);
+                update(|state| {
+                    if let Some(tab) = state.active_tab() {
+                        tab.url = url;
+                    }
+                });
             }
         }
 
         fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
             let title = title.map(CefString::to_string).unwrap_or_default();
-            update(|state| state.page.title = title);
+            update(|state| {
+                if let Some(tab) = state.active_tab() {
+                    tab.title = title;
+                }
+            });
         }
 
         fn on_favicon_urlchange(&self, _browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
             let favicon = icon_urls.and_then(|urls| urls.clone().into_iter().next());
-            update(|state| state.page.favicon = favicon);
+            update(|state| {
+                if let Some(tab) = state.active_tab() {
+                    tab.favicon = favicon;
+                }
+            });
         }
 
         fn on_loading_progress_change(&self, _browser: Option<&mut Browser>, progress: f64) {
@@ -271,10 +338,33 @@ wrap_load_handler! {
     }
 }
 
+// Quits the app when its last browser closes, and opens popups as tabs.
 wrap_life_span_handler! {
-    struct QuitOnLastClose {}
+    struct BrowserLifeSpan {}
 
     impl LifeSpanHandler {
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _popup_id: i32,
+            target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            _user_gesture: i32,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut i32>,
+        ) -> i32 {
+            if let Some(url) = target_url {
+                open_tab(&url.to_string());
+            }
+            1
+        }
+
         fn on_after_created(&self, _browser: Option<&mut Browser>) {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
         }
@@ -351,17 +441,14 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            if self.command == Command::Ready {
-                return send_state();
-            }
-            let Some(browser) = CONTENT.with_borrow(|view| view.as_ref()?.browser()) else {
-                return;
-            };
-            match self.command {
-                Command::Ready => {}
-                Command::Back => browser.go_back(),
-                Command::Forward => browser.go_forward(),
-                Command::Reload => browser.reload(),
+            let browser = CONTENT.with_borrow(|view| view.as_ref()?.browser());
+            match (self.command, browser) {
+                (Command::Ready, _) => send_state(),
+                (Command::Select(id), _) => select_tab(id),
+                (Command::Back, Some(browser)) => browser.go_back(),
+                (Command::Forward, Some(browser)) => browser.go_forward(),
+                (Command::Reload, Some(browser)) => browser.reload(),
+                (_, None) => {}
             }
         }
     }
@@ -385,9 +472,14 @@ mod tests {
     use super::{UiState, ui_file};
 
     #[test]
-    fn sends_the_state_in_camel_case() {
-        let json = serde_json::to_value(UiState::default()).unwrap();
+    fn sends_the_page_and_the_tabs() {
+        let mut state = UiState::default();
+        let home = state.sidebar.spaces()[0].id;
+        state.active = state.sidebar.open_tab(home, "https://example.com/").ok();
+        let json = serde_json::to_value(&state).unwrap();
         assert_eq!(json["page"]["canGoBack"], false);
+        assert_eq!(json["tabs"][0]["url"], "https://example.com/");
+        assert_eq!(json["tabs"][0]["id"], json["active"]);
     }
 
     #[test]

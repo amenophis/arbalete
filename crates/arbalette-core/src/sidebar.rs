@@ -54,6 +54,7 @@ pub enum NodeKind {
 pub struct Tab {
     pub url: String,
     pub title: String,
+    pub favicon: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -108,6 +109,13 @@ impl Sidebar {
         self.nodes.get(&id)
     }
 
+    pub fn tab_mut(&mut self, id: NodeId) -> Option<&mut Tab> {
+        match &mut self.nodes.get_mut(&id)?.kind {
+            NodeKind::Tab(tab) => Some(tab),
+            _ => None,
+        }
+    }
+
     pub fn add_profile(&mut self, name: &str) -> ProfileId {
         let id = ProfileId(self.next_id());
         self.profiles.push(Profile {
@@ -140,6 +148,7 @@ impl Sidebar {
         let tab = Tab {
             url: url.to_string(),
             title: url.to_string(),
+            favicon: None,
         };
         Ok(self.insert(Some(today), NodeKind::Tab(tab)))
     }
@@ -290,6 +299,19 @@ mod tests {
             panic!("not a tab")
         };
         assert_eq!(tab.url, "https://example.com/");
+    }
+
+    #[test]
+    fn updates_a_tab() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let tab = sidebar.open_tab(home.id, "https://example.com/").unwrap();
+        sidebar.tab_mut(tab).unwrap().title = "Example".to_string();
+        let NodeKind::Tab(tab) = &sidebar.node(tab).unwrap().kind else {
+            panic!("not a tab")
+        };
+        assert_eq!(tab.title, "Example");
+        assert_eq!(sidebar.tab_mut(home.today), None);
     }
 
     #[test]

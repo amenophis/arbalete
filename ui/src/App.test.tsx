@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
-import type { Page } from "./bridge";
+import type { Page, Tab } from "./bridge";
 
 const fetch = vi.fn();
 
@@ -12,18 +12,16 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function receive(page: Partial<Page>) {
+const tabs: Tab[] = [
+  { id: 3, url: "https://example.com/", title: "Example", favicon: null },
+  { id: 4, url: "https://example.org/", title: "Other", favicon: null },
+];
+
+function receive(page: Partial<Page>, active = 3) {
   const detail = {
-    page: {
-      url: "https://example.com/",
-      title: "Example",
-      favicon: null,
-      progress: 1,
-      loading: false,
-      canGoBack: true,
-      canGoForward: true,
-      ...page,
-    },
+    page: { progress: 1, loading: false, canGoBack: true, canGoForward: true, ...page },
+    tabs,
+    active,
   };
   act(() => {
     dispatchEvent(new CustomEvent("arbalette:state", { detail }));
@@ -48,10 +46,18 @@ test("sends navigation commands to the app", () => {
   }
 });
 
-test("shows the page and its loading progress", () => {
+test("shows the active tab and the loading progress", () => {
   render(<App />);
-  receive({ title: "Wikipedia", loading: true, progress: 0.4, canGoBack: false });
-  expect(screen.getByText("Wikipedia")).toBeDefined();
+  receive({ loading: true, progress: 0.4, canGoBack: false });
+  expect(screen.getByText("https://example.com/")).toBeDefined();
   expect(screen.getByRole("progressbar", { name: "Loading" })).toBeDefined();
   expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", true);
+  expect(screen.getByRole("button", { name: "Example" }).getAttribute("aria-current")).toBe("page");
+});
+
+test("selects a tab", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "Other" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/select/4", { method: "POST" });
 });

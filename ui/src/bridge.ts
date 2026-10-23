@@ -8,16 +8,22 @@ export function send(command: string) {
 // Sent whole by the app on every change (UiState in app/src/shell.rs).
 export type State = {
   page: Page;
+  tabs: Tab[];
+  active: number | null;
 };
 
 export type Page = {
-  url: string;
-  title: string;
-  favicon: string | null;
   progress: number;
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+};
+
+export type Tab = {
+  id: number;
+  url: string;
+  title: string;
+  favicon: string | null;
 };
 
 export function useAppState(): State | undefined {
