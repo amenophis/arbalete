@@ -5,11 +5,13 @@
     system-ui,
     sans-serif;
   --background: #ece8f4;
+  --hover: #0000000f;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #26232e;
+    --hover: #ffffff14;
   }
 }
 
@@ -19,12 +21,26 @@ body {
   background: var(--background);
 }
 
-.app {
-  padding: 16px;
+.sidebar {
+  padding: 8px;
 }
 
-h1 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
+.toolbar {
+  display: flex;
+  gap: 2px;
+}
+
+.toolbar button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.toolbar button:hover {
+  background: var(--hover);
 }

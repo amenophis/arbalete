@@ -1,3 +1,4 @@
+mod command;
 #[cfg(target_os = "macos")]
 mod mac;
 mod shell;
