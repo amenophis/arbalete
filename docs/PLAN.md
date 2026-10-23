@@ -218,6 +218,7 @@ and the Rust ↔ UI bridge with its change events.
 | UI memory (excluding web pages) | < 150 MB |
 | Shortcuts | work while the web page has focus |
 | Overlay | the Command Bar displays above the page |
+| Page scrolling | as smooth as Chrome on the same page (choppy in the first builds) |
 
 Tools: Web Inspector / DevTools (Performance), Rust-side timestamps on commands and events, Instruments on macOS.
 Measurements are reproducible with a script and generated data.
