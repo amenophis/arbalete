@@ -149,6 +149,19 @@ fn load(url: &str) {
     }
 }
 
+/// Runs a command from the UI or a menu, on the UI thread.
+pub fn run(command: Command) {
+    let browser = CONTENT.with_borrow(|view| view.as_ref()?.browser());
+    match (command, browser) {
+        (Command::Ready, _) => send_state(),
+        (Command::Select(id), _) => select_tab(id),
+        (Command::Back, Some(browser)) => browser.go_back(),
+        (Command::Forward, Some(browser)) => browser.go_forward(),
+        (Command::Reload, Some(browser)) => browser.reload(),
+        (_, None) => {}
+    }
+}
+
 /// Closes the main window, which quits the app once its browser is closed. Called by the macOS
 /// app menu; the window's own close button does the same on every OS.
 #[cfg(target_os = "macos")]
@@ -512,17 +525,8 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let browser = CONTENT.with_borrow(|view| view.as_ref()?.browser());
-            match (self.command, browser) {
-                (Command::Ready, _) => send_state(),
-                (Command::Select(id), _) => select_tab(id),
-                (Command::Back, Some(browser)) => browser.go_back(),
-                (Command::Forward, Some(browser)) => browser.go_forward(),
-                (Command::Reload, Some(browser)) => browser.reload(),
-                (_, None) => {}
-            }
-        }
-    }
+            run(self.command);
+        }    }
 }
 
 /// The built UI (`mise run ui`), embedded in the app.

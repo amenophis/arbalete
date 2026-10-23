@@ -1,15 +1,16 @@
-//! The NSApplication subclass CEF requires on macOS, and the app menu.
+//! The NSApplication subclass CEF requires on macOS, and the menus.
 
+use crate::command::Command;
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::{
     ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, extern_methods,
     msg_send,
     rc::Retained,
-    runtime::{AnyObject, Bool, NSObjectProtocol},
+    runtime::{AnyObject, Bool, NSObjectProtocol, Sel},
     sel,
 };
 use objc2_app_kit::{NSApp, NSApplication, NSEvent, NSMenu, NSMenuItem};
-use objc2_foundation::ns_string;
+use objc2_foundation::{NSString, ns_string};
 use std::cell::Cell;
 
 #[derive(Default)]
@@ -35,6 +36,22 @@ define_class!(
         #[unsafe(method(terminate:))]
         unsafe fn terminate(&self, _sender: Option<&AnyObject>) {
             crate::shell::close();
+        }
+
+        // Menu actions reach the application at the end of the responder chain.
+        #[unsafe(method(arbaletteBack:))]
+        fn back(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Back);
+        }
+
+        #[unsafe(method(arbaletteForward:))]
+        fn forward(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Forward);
+        }
+
+        #[unsafe(method(arbaletteReload:))]
+        fn reload(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Reload);
         }
     }
 
@@ -68,22 +85,71 @@ pub fn setup_application() {
     assert!(NSApp(mtm).isKindOfClass(ArbaletteApplication::class()));
 }
 
-/// The app menu, built in code: ⌘Q quits.
+/// The menus, built in code. Their key equivalents are the app's keyboard shortcuts.
 pub fn setup_menu() {
     let mtm = MainThreadMarker::new().expect("main thread");
-    let quit = unsafe {
+    let menu_bar = NSMenu::new(mtm);
+    for (title, items) in [
+        (
+            ns_string!("Arbalette"),
+            vec![item(
+                mtm,
+                ns_string!("Quit Arbalette"),
+                sel!(terminate:),
+                ns_string!("q"),
+            )],
+        ),
+        (
+            ns_string!("View"),
+            vec![item(
+                mtm,
+                ns_string!("Reload Page"),
+                sel!(arbaletteReload:),
+                ns_string!("r"),
+            )],
+        ),
+        (
+            ns_string!("History"),
+            vec![
+                item(
+                    mtm,
+                    ns_string!("Back"),
+                    sel!(arbaletteBack:),
+                    ns_string!("["),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Forward"),
+                    sel!(arbaletteForward:),
+                    ns_string!("]"),
+                ),
+            ],
+        ),
+    ] {
+        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), title);
+        for item in items {
+            menu.addItem(&item);
+        }
+        let menu_item = NSMenuItem::new(mtm);
+        menu_item.setSubmenu(Some(&menu));
+        menu_bar.addItem(&menu_item);
+    }
+    NSApp(mtm).setMainMenu(Some(&menu_bar));
+}
+
+/// A menu item sending `action` with ⌘ and `key`.
+fn item(
+    mtm: MainThreadMarker,
+    title: &NSString,
+    action: Sel,
+    key: &NSString,
+) -> Retained<NSMenuItem> {
+    unsafe {
         NSMenuItem::initWithTitle_action_keyEquivalent(
             NSMenuItem::alloc(mtm),
-            ns_string!("Quit Arbalette"),
-            Some(sel!(terminate:)),
-            ns_string!("q"),
+            title,
+            Some(action),
+            key,
         )
-    };
-    let app_menu = NSMenu::new(mtm);
-    app_menu.addItem(&quit);
-    let app_item = NSMenuItem::new(mtm);
-    app_item.setSubmenu(Some(&app_menu));
-    let menu_bar = NSMenu::new(mtm);
-    menu_bar.addItem(&app_item);
-    NSApp(mtm).setMainMenu(Some(&menu_bar));
+    }
 }
