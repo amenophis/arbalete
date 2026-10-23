@@ -1,7 +1,9 @@
-import { send, useAppState } from "./bridge";
+import { send, type Tab, useAppState } from "./bridge";
 
 export function App() {
-  const page = useAppState()?.page;
+  const state = useAppState();
+  const page = state?.page;
+  const active = state?.tabs.find((tab) => tab.id === state.active);
   return (
     <nav className="sidebar">
       <div className="toolbar">
@@ -25,18 +27,35 @@ export function App() {
           ↻
         </button>
       </div>
-      {page && (
-        <div className="page">
-          {page.favicon && <img className="favicon" src={page.favicon} alt="" />}
-          <div className="page-text">
-            <div className="title">{page.title || page.url}</div>
-            <div className="url">{page.url}</div>
-          </div>
-        </div>
-      )}
+      {active && <div className="url">{active.url}</div>}
       {page?.loading && (
         <progress className="progress" aria-label="Loading" value={page.progress} />
       )}
+      <ul className="tabs">
+        {state?.tabs.map((tab) => (
+          <li key={tab.id}>
+            <TabItem tab={tab} active={tab.id === state.active} />
+          </li>
+        ))}
+      </ul>
     </nav>
+  );
+}
+
+function TabItem({ tab, active }: { tab: Tab; active: boolean }) {
+  return (
+    <button
+      type="button"
+      className="tab"
+      aria-current={active ? "page" : undefined}
+      onClick={() => send(`select/${tab.id}`)}
+    >
+      {tab.favicon ? (
+        <img className="favicon" src={tab.favicon} alt="" />
+      ) : (
+        <span className="favicon" />
+      )}
+      <span className="title">{tab.title || tab.url}</span>
+    </button>
   );
 }

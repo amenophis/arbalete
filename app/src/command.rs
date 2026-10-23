@@ -1,5 +1,7 @@
 //! Commands the UI sends to the app, as `https://arbalette.ui/command/<name>` requests.
 
+use arbalette_core::sidebar::NodeId;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Command {
     /// The UI is listening: send it the current state.
@@ -7,6 +9,8 @@ pub enum Command {
     Back,
     Forward,
     Reload,
+    /// Shows a tab in the content view: `select/<tab id>`.
+    Select(NodeId),
 }
 
 impl Command {
@@ -16,7 +20,10 @@ impl Command {
             "back" => Some(Self::Back),
             "forward" => Some(Self::Forward),
             "reload" => Some(Self::Reload),
-            _ => None,
+            _ => {
+                let id = path.strip_prefix("select/")?;
+                serde_json::from_str(id).ok().map(Self::Select)
+            }
         }
     }
 }
@@ -34,7 +41,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_a_tab_selection() {
+        let Some(Command::Select(id)) = Command::parse("select/12") else {
+            panic!("not a selection")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "12");
+    }
+
+    #[test]
     fn ignores_unknown_commands() {
         assert_eq!(Command::parse("quit"), None);
+        assert_eq!(Command::parse("select/tab"), None);
     }
 }
