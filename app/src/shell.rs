@@ -91,6 +91,7 @@ wrap_window_delegate! {
             }
         }
 
+        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
