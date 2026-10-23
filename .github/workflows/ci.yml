@@ -9,14 +9,11 @@ permissions:
   contents: read
 
 jobs:
+  # macOS only for now: Linux and Windows are added when the app targets them (plan, phase 10).
   check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     env:
-      # An exported CEF distribution, shared by the build and, on Linux and Windows, loaded by the tests.
+      # An exported CEF distribution, shared by every build instead of a download per build.
       CEF_PATH: ${{ github.workspace }}/../cef
     steps:
       - uses: actions/checkout@v4
@@ -32,18 +29,8 @@ jobs:
 
       - name: Export CEF
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        shell: bash
         run: |
           cargo install --locked export-cef-dir --version =156.0.0
           export-cef-dir --force "$CEF_PATH"
-
-      - name: Load CEF from its directory (Linux)
-        if: runner.os == 'Linux'
-        run: echo "LD_LIBRARY_PATH=$CEF_PATH" >> "$GITHUB_ENV"
-
-      - name: Load CEF from its directory (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: echo "$CEF_PATH" >> "$GITHUB_PATH"
 
       - run: mise run check
