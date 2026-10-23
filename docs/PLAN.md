@@ -67,6 +67,9 @@ The UI is HTML/TS, but it must behave like a native UI. These rules apply from p
   they must work even when the web page has focus.
 - **Native where it shows**: app menus and native context menus, window translucency (macOS vibrancy, Windows
   Mica), macOS window buttons, cursors, native scrolling.
+- **No title bar, like Arc**: a frameless window (`IsFrameless`) that keeps the macOS window buttons
+  (`WithStandardWindowButtons`) at the top of the sidebar (`GetTitlebarHeight`); the window is dragged by the
+  sidebar's empty areas, declared with the `-webkit-app-region: drag` CSS property.
 - **Overlays above the page** (Command Bar, Peek, rich menus): overlay views of the window
   (`CefOverlayController`), designed in phase 0.
 - **Animate only `transform` and `opacity`**, so animations stay smooth.
@@ -242,7 +245,8 @@ Rules in [CONTRIBUTING.md](../CONTRIBUTING.md#commits). Every commit builds and 
 | 12 | | `feat(engine): report title, url, favicon and loading progress` |
 | 13 | | `feat(ui): render tabs and select the active one` |
 | 14 | | `feat(app): restore the previous session on launch` |
-| 15 | `feat/native-shell` | `feat(app): handle keyboard shortcuts through native menus` |
+| 15 | `feat/native-shell` | `feat(app): use a frameless window with its buttons in the sidebar` |
+| | | `feat(app): handle keyboard shortcuts through native menus` |
 | 16 | | `feat(ui): show an overlay above the page` |
 | 17 | `perf/prototype` | `test(perf): generate a 500-tab benchmark scenario` |
 | 18 | | `test(perf): measure tab switching, drag and command bar latency` |
