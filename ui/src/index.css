@@ -44,3 +44,45 @@ body {
 .toolbar button:hover {
   background: var(--hover);
 }
+
+.toolbar button:disabled {
+  opacity: 0.35;
+  background: none;
+}
+
+.page {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--hover);
+}
+
+.favicon {
+  width: 16px;
+  height: 16px;
+}
+
+.page-text {
+  min-width: 0;
+}
+
+.title,
+.url {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.url {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.progress {
+  width: 100%;
+  height: 2px;
+  margin-top: 6px;
+}

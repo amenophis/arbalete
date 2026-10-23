@@ -6,6 +6,7 @@
 use crate::command::Command;
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
+use serde::Serialize;
 use std::cell::{Cell, RefCell};
 
 /// The UI is served by the app itself under this origin.
@@ -18,9 +19,47 @@ const START_URL: &str = "https://www.wikipedia.org/";
 
 thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    static SIDEBAR: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static CONTENT: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static STATE: RefCell<UiState> = RefCell::default();
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
+}
+
+/// What the UI shows, sent whole on every change.
+#[derive(Default, Serialize)]
+struct UiState {
+    page: Page,
+}
+
+/// The page in the content view.
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Page {
+    url: String,
+    title: String,
+    favicon: Option<String>,
+    /// From 0 to 1.
+    progress: f64,
+    loading: bool,
+    can_go_back: bool,
+    can_go_forward: bool,
+}
+
+/// Changes the state and sends it to the UI.
+fn update(change: impl FnOnce(&mut UiState)) {
+    STATE.with_borrow_mut(change);
+    send_state();
+}
+
+fn send_state() {
+    let json = STATE.with_borrow(|state| serde_json::to_string(state).expect("serializable"));
+    let frame = SIDEBAR.with_borrow(|view| view.as_ref()?.browser()?.main_frame());
+    if let Some(frame) = frame {
+        let code =
+            format!(r#"dispatchEvent(new CustomEvent("arbalette:state", {{ detail: {json} }}))"#);
+        frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
+    }
 }
 
 /// Closes the main window, which quits the app once its browser is closed. Called by the macOS
@@ -83,6 +122,7 @@ wrap_window_delegate! {
                 .expect("box layout");
             let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH);
             let content = browser_view(ContentClient::new(), START_URL, 0);
+            SIDEBAR.set(Some(sidebar.clone()));
             CONTENT.set(Some(content.clone()));
             for (view, flex) in [(sidebar, 0), (content, 1)] {
                 let mut view = View::from(&view);
@@ -179,6 +219,55 @@ wrap_client! {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             Some(QuitOnLastClose::new())
         }
+
+        fn display_handler(&self) -> Option<DisplayHandler> {
+            Some(ContentDisplayHandler::new())
+        }
+
+        fn load_handler(&self) -> Option<LoadHandler> {
+            Some(ContentLoadHandler::new())
+        }
+    }
+}
+
+wrap_display_handler! {
+    struct ContentDisplayHandler {}
+
+    impl DisplayHandler {
+        fn on_address_change(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
+            if frame.is_some_and(|frame| frame.is_main() == 1) {
+                let url = url.map(CefString::to_string).unwrap_or_default();
+                update(|state| state.page.url = url);
+            }
+        }
+
+        fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
+            let title = title.map(CefString::to_string).unwrap_or_default();
+            update(|state| state.page.title = title);
+        }
+
+        fn on_favicon_urlchange(&self, _browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
+            let favicon = icon_urls.and_then(|urls| urls.clone().into_iter().next());
+            update(|state| state.page.favicon = favicon);
+        }
+
+        fn on_loading_progress_change(&self, _browser: Option<&mut Browser>, progress: f64) {
+            update(|state| state.page.progress = progress);
+        }
+    }
+}
+
+wrap_load_handler! {
+    struct ContentLoadHandler {}
+
+    impl LoadHandler {
+        fn on_loading_state_change(&self, _browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
+            update(|state| {
+                state.page.loading = is_loading == 1;
+                state.page.can_go_back = can_go_back == 1;
+                state.page.can_go_forward = can_go_forward == 1;
+            });
+        }
     }
 }
 
@@ -262,10 +351,14 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
+            if self.command == Command::Ready {
+                return send_state();
+            }
             let Some(browser) = CONTENT.with_borrow(|view| view.as_ref()?.browser()) else {
                 return;
             };
             match self.command {
+                Command::Ready => {}
                 Command::Back => browser.go_back(),
                 Command::Forward => browser.go_forward(),
                 Command::Reload => browser.reload(),
@@ -289,7 +382,13 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 
 #[cfg(test)]
 mod tests {
-    use super::ui_file;
+    use super::{UiState, ui_file};
+
+    #[test]
+    fn sends_the_state_in_camel_case() {
+        let json = serde_json::to_value(UiState::default()).unwrap();
+        assert_eq!(json["page"]["canGoBack"], false);
+    }
 
     #[test]
     fn serves_the_built_ui() {
