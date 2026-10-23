@@ -25,12 +25,11 @@ With [mise](https://mise.jdx.dev/) installed:
 
 ```sh
 mise install     # install the tools
-mise run setup   # install bundle-cef-app, the CEF bundling tool
+mise run setup   # download CEF and install bundle-cef-app, the CEF bundling tool
 mise run run     # build the UI, bundle the app and run it
 ```
 
-The first build downloads CEF (about 350 MB). Set `CEF_PATH` to an exported CEF directory to share it between
-builds.
+`mise run setup` downloads CEF (about 350 MB) to `~/cef` once; every build uses it through `CEF_PATH`.
 
 ## Contributing
 
