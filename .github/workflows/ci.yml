@@ -13,8 +13,8 @@ jobs:
   check:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
       - uses: Swatinem/rust-cache@v2
 
       # An exported CEF distribution, shared by every build instead of a download per build.
@@ -24,7 +24,7 @@ jobs:
 
       - name: Cache CEF
         id: cef-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/cef
           key: cef-156.0.7-${{ runner.os }}-${{ runner.arch }}
