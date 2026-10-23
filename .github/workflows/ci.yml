@@ -21,6 +21,9 @@ jobs:
           # runner images; the version that matters is pinned in mise.toml.
           add-rust-environment-hash-key: false
           key: ${{ hashFiles('.config/mise.toml') }}
+          # Pull requests read main's cache (GitHub falls back to the base branch) without saving
+          # their own: the repository's 10 GB of cache stays for main.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # An exported CEF distribution, shared by every build instead of a download per build.
       # actions/cache needs a path without "..": keep it in the home directory.
