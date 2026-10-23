@@ -1,0 +1,32 @@
+[package]
+name = "arbalette"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+publish = false
+autobins = false
+
+[[bin]]
+name = "arbalette"
+path = "src/main.rs"
+
+[[bin]]
+name = "arbalette_helper"
+path = "src/bin/helper.rs"
+
+[package.metadata.cef.bundle]
+helper_name = "arbalette_helper"
+
+[dependencies]
+cef = { version = "=156.0.0", features = ["sandbox"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.3"
+objc2-foundation = "0.3.2"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "NSApplication",
+    "NSEvent",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
+] }

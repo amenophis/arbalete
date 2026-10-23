@@ -18,6 +18,20 @@ Built with Rust and React on Chromium.
 
 See [docs/PLAN.md](docs/PLAN.md) for the full plan.
 
+## Development
+
+The tools (Rust, Node.js, pnpm, CMake, Ninja) are pinned in [.config/mise.toml](.config/mise.toml).
+With [mise](https://mise.jdx.dev/) installed:
+
+```sh
+mise install     # install the tools
+mise run setup   # install bundle-cef-app, the CEF bundling tool
+mise run run     # build the UI, bundle the app and run it
+```
+
+The first build downloads CEF (about 350 MB). Set `CEF_PATH` to an exported CEF directory to share it between
+builds.
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) first: simplicity is the project's doctrine.

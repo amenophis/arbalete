@@ -1,0 +1,32 @@
+[tools]
+rust = "1.99.1"
+node = "24.22.0"
+pnpm = "12.15.0"
+# Needed by the cef crate to build CEF's C++ wrapper.
+cmake = "4.4.4"
+ninja = "1.13.2"
+
+[tasks.setup]
+description = "Install the CEF bundling tool"
+run = "cargo install --locked cef --version =156.0.0 --features build-util --bin bundle-cef-app"
+
+[tasks.ui]
+description = "Build the UI"
+dir = "ui"
+run = ["pnpm install --frozen-lockfile", "pnpm build"]
+
+[tasks.app]
+description = "Build the UI and bundle the app"
+depends = ["ui"]
+dir = "app"
+run = [
+  # Bundling in place over a previous build invalidates its code signature on macOS.
+  "rm -rf target/bundle",
+  "bundle-cef-app arbalette -o target/bundle -i net.leherpeur.arbalette -d Arbalette",
+  "codesign --force --deep -s - target/bundle/arbalette.app",
+]
+
+[tasks.run]
+description = "Build and run the app"
+depends = ["app"]
+run = "app/target/bundle/arbalette.app/Contents/MacOS/arbalette"
