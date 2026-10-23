@@ -12,4 +12,4 @@ Cross-platform browser inspired by Arc: Rust + React/TypeScript on Chromium (CEF
 - **English only**: code, comments, documentation, commit messages and pull requests.
 - **Commits**: follow [CONTRIBUTING.md](CONTRIBUTING.md#commits). Sole author `Jérémy LEHERPEUR <amenophis@leherpeur.net>`.
   **No mention of Claude or any tool** in commits and pull requests: no `Co-Authored-By`, no "Generated with" line.
-- Every commit builds and passes `cargo test`, `cargo clippy`, `pnpm test` and `pnpm lint`.
+- Every commit builds and passes `mise run check`.

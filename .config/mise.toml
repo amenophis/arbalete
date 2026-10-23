@@ -15,6 +15,17 @@ description = "Build the UI"
 dir = "ui"
 run = ["pnpm install --frozen-lockfile", "pnpm build"]
 
+[tasks.check]
+description = "Run every check listed in CONTRIBUTING.md"
+depends = ["ui"]
+run = [
+  "pnpm --dir ui lint",
+  "pnpm --dir ui test",
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets -- -D warnings",
+  "cargo test --workspace",
+]
+
 [tasks.app]
 description = "Build the UI and bundle the app"
 depends = ["ui"]

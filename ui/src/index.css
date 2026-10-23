@@ -1,6 +1,9 @@
 :root {
   color-scheme: light dark;
-  font: 13px -apple-system, system-ui, sans-serif;
+  font:
+    13px -apple-system,
+    system-ui,
+    sans-serif;
   --background: #ece8f4;
 }
 

@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 // Fixed file names: the app embeds these files at compile time.
 export default defineConfig({
@@ -12,5 +12,8 @@ export default defineConfig({
         assetFileNames: "assets/[name][extname]",
       },
     },
+  },
+  test: {
+    environment: "jsdom",
   },
 });
