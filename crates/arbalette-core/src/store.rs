@@ -8,6 +8,9 @@ use std::{fs, io, path::Path};
 
 const VERSION: u32 = 1;
 
+/// The session's file name in the data directory.
+pub const FILE_NAME: &str = "session.json";
+
 #[derive(Serialize, Deserialize)]
 struct Saved {
     version: u32,

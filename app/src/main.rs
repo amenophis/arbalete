@@ -28,7 +28,7 @@ fn main() {
         cache_path: CefString::from(root.join("Default").to_str().unwrap()),
         ..Default::default()
     };
-    let mut app = shell::ArbaletteApp::new(root.join("session.json"));
+    let mut app = shell::ArbaletteApp::new(root.join(arbalette_core::store::FILE_NAME));
     assert_eq!(
         initialize(
             Some(args.as_main_args()),
@@ -46,13 +46,20 @@ fn main() {
 }
 
 /// Where Arbalette keeps its data, resolved because CEF compares paths after resolving symlinks.
+/// `ARBALETTE_DATA_DIR` overrides it, to run the app on another session (benchmarks, tests).
 fn data_dir() -> PathBuf {
+    let dir = std::env::var_os("ARBALETTE_DATA_DIR").map_or_else(default_data_dir, PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.canonicalize().unwrap()
+}
+
+fn default_data_dir() -> PathBuf {
     let home = PathBuf::from(
         std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .unwrap(),
     );
-    let dir = if cfg!(target_os = "macos") {
+    if cfg!(target_os = "macos") {
         home.join("Library/Application Support/Arbalette")
     } else if cfg!(target_os = "windows") {
         PathBuf::from(std::env::var_os("APPDATA").unwrap()).join("Arbalette")
@@ -60,7 +67,5 @@ fn data_dir() -> PathBuf {
         std::env::var_os("XDG_DATA_HOME")
             .map_or_else(|| home.join(".local/share"), PathBuf::from)
             .join("arbalette")
-    };
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.canonicalize().unwrap()
+    }
 }
