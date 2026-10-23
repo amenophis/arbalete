@@ -18,6 +18,9 @@ const UI_ORIGIN: &str = "https://arbalette.ui/";
 
 const SIDEBAR_WIDTH: i32 = 260;
 
+/// The height of the sidebar's toolbar, which holds the window buttons on macOS (ui/src/index.css).
+const TOOLBAR_HEIGHT: f32 = 40.0;
+
 /// The first tab of a new session.
 const START_URL: &str = "https://www.wikipedia.org/";
 
@@ -240,6 +243,20 @@ wrap_window_delegate! {
             closed
         }
 
+        // No title bar, like Arc: the window buttons sit in the sidebar's toolbar. Only macOS
+        // keeps standard window buttons in a frameless window.
+        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
+            cfg!(target_os = "macos").into()
+        }
+
+        // The window buttons are centered vertically in this height.
+        fn titlebar_height(&self, _window: Option<&mut Window>, height: Option<&mut f32>) -> i32 {
+            if let Some(height) = height {
+                *height = TOOLBAR_HEIGHT;
+            }
+            1
+        }
+
         fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
@@ -298,6 +315,24 @@ wrap_client! {
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             Some(BrowserLifeSpan::new())
+        }
+
+        fn drag_handler(&self) -> Option<DragHandler> {
+            Some(UiDragHandler::new())
+        }
+    }
+}
+
+// Lets the UI's `-webkit-app-region: drag` areas move the window.
+wrap_drag_handler! {
+    struct UiDragHandler {}
+
+    impl DragHandler {
+        // The sidebar sits at the window's origin: its coordinates are the window's.
+        fn on_draggable_regions_changed(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, regions: Option<&[DraggableRegion]>) {
+            if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+                window.set_draggable_regions(regions);
+            }
         }
     }
 }
