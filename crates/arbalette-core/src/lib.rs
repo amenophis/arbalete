@@ -3,3 +3,4 @@
 //! This crate does not depend on the engine, so all of it can be tested without launching CEF.
 
 pub mod sidebar;
+pub mod store;
