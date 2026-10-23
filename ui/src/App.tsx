@@ -31,6 +31,10 @@ export function App() {
       {page?.loading && (
         <progress className="progress" aria-label="Loading" value={page.progress} />
       )}
+      <button type="button" className="tab" onClick={() => send("overlay/show")}>
+        <span className="favicon">+</span>
+        <span className="title">New tab</span>
+      </button>
       <ul className="tabs">
         {state?.tabs.map((tab) => (
           <li key={tab.id}>

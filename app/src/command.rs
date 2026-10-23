@@ -2,7 +2,7 @@
 
 use arbalette_core::sidebar::NodeId;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// The UI is listening: send it the current state.
     Ready,
@@ -11,6 +11,10 @@ pub enum Command {
     Reload,
     /// Shows a tab in the content view: `select/<tab id>`.
     Select(NodeId),
+    ShowOverlay,
+    HideOverlay,
+    /// Opens a tab: `open/<percent-encoded url>`.
+    Open(String),
 }
 
 impl Command {
@@ -20,12 +24,33 @@ impl Command {
             "back" => Some(Self::Back),
             "forward" => Some(Self::Forward),
             "reload" => Some(Self::Reload),
+            "overlay/show" => Some(Self::ShowOverlay),
+            "overlay/hide" => Some(Self::HideOverlay),
             _ => {
-                let id = path.strip_prefix("select/")?;
-                serde_json::from_str(id).ok().map(Self::Select)
+                if let Some(id) = path.strip_prefix("select/") {
+                    return serde_json::from_str(id).ok().map(Self::Select);
+                }
+                percent_decode(path.strip_prefix("open/")?).map(Self::Open)
             }
         }
     }
+}
+
+/// Decodes what `encodeURIComponent` encodes.
+fn percent_decode(text: &str) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut rest = text.as_bytes();
+    while let Some((&byte, tail)) = rest.split_first() {
+        if byte == b'%' {
+            let hex = std::str::from_utf8(tail.get(..2)?).ok()?;
+            bytes.push(u8::from_str_radix(hex, 16).ok()?);
+            rest = &tail[2..];
+        } else {
+            bytes.push(byte);
+            rest = tail;
+        }
+    }
+    String::from_utf8(bytes).ok()
 }
 
 #[cfg(test)]
@@ -38,6 +63,18 @@ mod tests {
         assert_eq!(Command::parse("back"), Some(Command::Back));
         assert_eq!(Command::parse("forward"), Some(Command::Forward));
         assert_eq!(Command::parse("reload"), Some(Command::Reload));
+        assert_eq!(Command::parse("overlay/show"), Some(Command::ShowOverlay));
+        assert_eq!(Command::parse("overlay/hide"), Some(Command::HideOverlay));
+    }
+
+    #[test]
+    fn parses_an_encoded_url() {
+        assert_eq!(
+            Command::parse("open/https%3A%2F%2Fexample.com%2F%C3%A9t%C3%A9"),
+            Some(Command::Open("https://example.com/été".to_string()))
+        );
+        assert_eq!(Command::parse("open/%zz"), None);
+        assert_eq!(Command::parse("open/%C3"), None);
     }
 
     #[test]

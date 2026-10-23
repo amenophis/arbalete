@@ -39,6 +39,11 @@ define_class!(
         }
 
         // Menu actions reach the application at the end of the responder chain.
+        #[unsafe(method(arbaletteNewTab:))]
+        fn new_tab(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowOverlay);
+        }
+
         #[unsafe(method(arbaletteBack:))]
         fn back(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Back);
@@ -97,6 +102,15 @@ pub fn setup_menu() {
                 ns_string!("Quit Arbalette"),
                 sel!(terminate:),
                 ns_string!("q"),
+            )],
+        ),
+        (
+            ns_string!("File"),
+            vec![item(
+                mtm,
+                ns_string!("New Tab"),
+                sel!(arbaletteNewTab:),
+                ns_string!("t"),
             )],
         ),
         (
