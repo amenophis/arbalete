@@ -90,7 +90,7 @@ build(app): add a single-instance lock for external links
 
 - **One commit = one coherent change** that stands on its own and can be summarized in one line.
 - **Every commit builds and passes the checks**: `mise run check` (UI lint and tests, `rustfmt`, `clippy`,
-  Rust tests).
+  Rust tests, `cargo-deny`).
 - **Code and its tests go in the same commit.**
 - **No mixing**: a refactoring and a feature are two commits.
 - **An added dependency** is justified in the commit body.

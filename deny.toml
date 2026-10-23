@@ -1,0 +1,25 @@
+# Dependencies must be compatible with Arbalette's MPL-2.0 license (CONTRIBUTING.md).
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Zlib",
+  # Permissive licenses of build-time dependencies of the cef crate, which downloads CEF.
+  "bzip2-1.0.6",
+  "CDLA-Permissive-2.0",
+]
+
+[advisories]
+yanked = "deny"
+
+[bans]
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
