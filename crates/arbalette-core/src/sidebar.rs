@@ -3,25 +3,26 @@
 //! Every Space has two root containers: its pinned tabs and its "Today" tabs. Tabs and folders are
 //! nodes of a single tree, stored flat and linked by `parent` and `children`.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProfileId(u64);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SpaceId(u64);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(u64);
 
 /// Isolated web data (cookies, history, extensions), shared by the Spaces attached to it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
     pub id: ProfileId,
     pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Space {
     pub id: SpaceId,
     pub title: String,
@@ -30,7 +31,7 @@ pub struct Space {
     pub today: NodeId,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
     pub parent: Option<NodeId>,
@@ -38,7 +39,7 @@ pub struct Node {
     pub kind: NodeKind,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NodeKind {
     /// A Space's root: its pinned tabs or its "Today" tabs.
     Container,
@@ -49,7 +50,7 @@ pub enum NodeKind {
     Tab(Tab),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tab {
     pub url: String,
     pub title: String,
@@ -68,7 +69,7 @@ pub enum Error {
     RootNode,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sidebar {
     profiles: Vec<Profile>,
     spaces: Vec<Space>,
