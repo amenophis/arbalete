@@ -16,6 +16,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The default key hashes every Rust version installed on the runner, which varies between
+          # runner images; the version that matters is pinned in mise.toml.
+          add-rust-environment-hash-key: false
+          key: ${{ hashFiles('.config/mise.toml') }}
 
       # An exported CEF distribution, shared by every build instead of a download per build.
       # actions/cache needs a path without "..": keep it in the home directory.
