@@ -2,7 +2,8 @@
 
 Goal: a browser that brings back the ideas that made Arc popular (vertical sidebar, Spaces, profiles, link
 routing…), **cross-platform (macOS, Linux, Windows)**, starting with macOS.
-Stack: **Rust + React/TypeScript on Chromium, through CEF directly** (no Tauri: see the extension test results).
+Stack: **Rust + React/TypeScript on Chromium, through CEF in Alloy style** (see
+[decision 0001](decisions/0001-web-engine.md)).
 
 Arbalette is an independent project, not affiliated with The Browser Company. Arc is mentioned only to describe
 the features we take inspiration from and to import user data.
@@ -36,54 +37,20 @@ the features we take inspiration from and to import user data.
   Shared types generated from Rust (`specta`).
 - **Tabs**: each tab is a content view of the window, placed to the right of the UI view.
 
-### The key decision: the web engine
+### The web engine
 
-Chrome extension support settles the engine question: **only Chromium runs Chrome extensions**. The system
-WebViews that Tauri 2 uses cannot:
+Decided in [0001 — Web engine](decisions/0001-web-engine.md), after a spike on macOS:
 
-| OS | Tauri 2 engine | Profile isolation | Extensions |
-|---|---|---|---|
-| macOS | WKWebView (WebKit, like Safari) | `data_store_identifier` (macOS 14+) | `WKWebExtension` (macOS 15.4+): Safari's WebExtensions API, no Chrome Web Store |
-| Windows | WebView2 (Chromium) | one `data_directory` per profile | Limited: unpacked extensions only, partial APIs, no Web Store |
-| Linux | WebKitGTK | one `data_directory` per profile | None |
+- **Chromium through CEF**, driven from Rust with the `cef` crate. Only Chromium runs Chrome extensions, and CEF
+  gives every OS the same engine.
+- **Alloy-style browsers in CEF Views windows**: one window holds the sidebar, the tabs, Split View and overlays.
+  CEF's Chrome style supports extensions fully but allows only one page per window.
+- **An extension compatibility layer** fills what Alloy style lacks: Arbalette hosts extension popups and answers
+  `tabs.query`, `windows.*`, `tabs.create` and `tabs.update` through a shim injected with the DevTools protocol.
+- **Fallback**: a maintained CEF patch allowing several Chrome-style pages per window.
 
-The target engine is therefore **Chromium on all three OSes, through CEF** (Chromium Embedded Framework), which
-also gives every user the same rendering and the same behavior. Two ways to get there, both keeping Rust for the
-logic and React/TypeScript for the UI:
-
-| Option | + | − |
-|---|---|---|
-| **Tauri 3 with its CEF runtime** | Keeps Tauri's tooling, commands, plugins and bundler. | In alpha; no confirmed support for Chrome extensions yet. |
-| **CEF directly from Rust** (`cef` crate, maintained by the Tauri team), React UI in a CEF view | Full access to CEF, including Chrome-style browsers and their extension support. | We write the window, IPC and packaging glue that Tauri would provide. |
-
-#### Extension test results (October 2026)
-
-Tested with the official `cefclient` sample of CEF 156.0.8 (Chromium 156) on macOS arm64, with an MV3 probe
-extension and uBlock Origin Lite from the Chrome Web Store:
-
-| Check | Chrome style (CEF Views window) | Alloy style (native parent view, as in Tauri) |
-|---|---|---|
-| Content scripts, service worker, `chrome.storage`, `tabs.get` | ✅ | ✅ |
-| `tabs.query` | ✅ | ⚠️ returns no tab |
-| `tabs.update`, `tabs.create` | ✅ | ❌ "No current window" |
-| Action popup | ✅ | ❌ "Could not find an active browser window" |
-| Install from the Chrome Web Store | ✅ once the app accepts the `.crx` download | not tested |
-
-Findings:
-- **Only Chrome style supports extensions properly.** In Alloy style an extension cannot find the active tab,
-  which breaks password managers and most action popups.
-- **Tauri 3 cannot offer Chrome style on macOS**: its CEF runtime hosts every browser in a native parent view,
-  which CEF forces to Alloy style (CEF issue #3294, open since 2022). The runtime also states that it does not
-  support extensions. Making it possible would take months of upstream work with uncertain acceptance.
-- **Web Store installs go through the app's download handler**: the app must accept the extension's `.crx`
-  download silently; Chrome then completes the installation.
-
-**Decision: CEF directly from Rust**, with CEF Views windows and Chrome-style browsers. The phase 0 spike now
-only has to validate the app shell with the `cef` crate.
-
-Whatever the outcome, all tab control lives in a single Rust module, `engine` (create, navigate, back, forward,
-reload, snapshot, title/URL/favicon/loading events, extensions). The rest of the code never touches the engine
-directly. Following the doctrine, this module becomes a trait only if a second engine actually exists.
+All engine code lives in a single Rust module, `engine` (tabs, navigation, events, extensions). The rest of the code
+never touches CEF directly. Following the doctrine, this module becomes a trait only if a second engine exists.
 
 ### UI rules (performance and native feel)
 
@@ -100,8 +67,8 @@ The UI is HTML/TS, but it must behave like a native UI. These rules apply from p
   they must work even when the web page has focus.
 - **Native where it shows**: app menus and native context menus, window translucency (macOS vibrancy, Windows
   Mica), macOS window buttons, cursors, native scrolling.
-- **Overlays above the page** (Command Bar, Peek, rich menus): a transparent UI view brought to the front,
-  designed in phase 0.
+- **Overlays above the page** (Command Bar, Peek, rich menus): overlay views of the window
+  (`CefOverlayController`), designed in phase 0.
 - **Animate only `transform` and `opacity`**, so animations stay smooth.
 - **No heavy computation in the UI**: search, ranking and sorting happen in Rust.
 
@@ -215,26 +182,15 @@ CI builds all three OSes from phase 0.
 
 ### Phase 0 — Foundations
 
-#### Engine spike
+#### Engine spike — done
 
-Before any scaffolding, a throwaway prototype with the `cef` crate is built on macOS and checked against this
-list:
-
-- One CEF Views window holding a React UI view and Chrome-style content views side by side, with an overlay
-  above the page (`CefOverlayController`).
-- Rust ↔ UI messages in both directions.
-- Install extensions from the Chrome Web Store by accepting `.crx` downloads: uBlock Origin Lite, Bitwarden,
-  1Password, Dark Reader. Their popups open from our own UI.
-- Two profiles (request contexts) with isolated cookies, storage and extensions.
-- Freeze a hidden page and resume it; unload a browser and recreate it from its URL; measure the memory saved.
-- Build, bundle and sign a macOS app; build on Linux and Windows in CI.
-
-The spike code is not merged. Its result, together with the extension tests above, is recorded as a decision
-document in `docs/decisions/`.
+Results and decision in [0001 — Web engine](decisions/0001-web-engine.md). Its open questions are answered before
+phase 4, which builds the extension compatibility layer.
 
 #### Foundations
-- Project scaffold for the chosen option (React/TypeScript UI, Cargo workspace), CI on three OSes.
-- Window: UI view (sidebar) + one content view, synchronized resizing.
+- Project scaffold (CEF through the `cef` crate, React/TypeScript UI, Cargo workspace), CI on three OSes.
+- One CEF Views window holding the sidebar and the content views (Alloy style), with an overlay view above the
+  page.
 - `engine` module: navigation (back, forward, reload), progress, title, URL, favicon.
 - JSON persistence, session restore with lazy loading (a restored tab loads only when selected).
 - **Performance prototype** (below), to be validated before starting phase 1.
@@ -292,7 +248,7 @@ Rules in [CONTRIBUTING.md](../CONTRIBUTING.md#commits). Every commit builds and 
 | 18 | | `test(perf): measure tab switching, drag and command bar latency` |
 | 19 | | `docs(perf): record phase 0 measurements` |
 
-The engine spike itself lives on throwaway branches and is not part of this sequence.
+The engine spike lives on the throwaway branch `spike/cef-shell` and is not part of this sequence.
 
 Each following phase starts the same way: define its commit sequence before writing code.
 
@@ -315,10 +271,12 @@ Each following phase starts the same way: define its commit sequence before writ
 - Arc: profiles, Spaces, Favorites, pinned tabs, folders, archive, link routing rules.
 
 ### Phase 4 — Chrome extensions
+- First, answer the open questions of [decision 0001](decisions/0001-web-engine.md).
+- Compatibility layer: popups hosted by Arbalette; shim in popups and service workers for `tabs.query`, `windows.*`,
+  `tabs.create` and `tabs.update`; extension actions shown in the sidebar.
 - Install from the Chrome Web Store and from a local folder (developer mode), update, enable, disable, remove.
 - Extensions are installed **per profile**, like their data.
-- Toolbar actions in the sidebar (pinned extensions, then an overflow menu), popups, options pages, permission
-  prompts.
+- Extension actions in the sidebar (pinned extensions, then an overflow menu), options pages, permission prompts.
 - Acceptance list: uBlock Origin Lite, Bitwarden, 1Password, Dark Reader, plus the most used extensions found in
   imported Chromium profiles.
 
@@ -357,5 +315,5 @@ Sync, password import.
 
 ## 6. Open points
 
-1. **Engine**: CEF directly from Rust, pending the app-shell spike in phase 0.
+1. **Extensions**: the open questions of [decision 0001](decisions/0001-web-engine.md), to answer before phase 4.
 2. **Phase order**: imports in phase 3 (right after profiles and Spaces) to ease migration from Arc.
