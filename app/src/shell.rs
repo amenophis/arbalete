@@ -14,7 +14,9 @@ thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
 }
 
-/// Closes the main window, which quits the app once its browser is closed.
+/// Closes the main window, which quits the app once its browser is closed. Called by the macOS
+/// app menu; the window's own close button does the same on every OS.
+#[cfg(target_os = "macos")]
 pub fn close() {
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
         window.close();
