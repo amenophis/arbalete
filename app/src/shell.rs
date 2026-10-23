@@ -3,6 +3,7 @@
 //! The `cef` crate's default callbacks return 0, which means "no" or "cancel": every callback the app
 //! relies on is implemented explicitly.
 
+use crate::command::Command;
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
 use std::cell::{Cell, RefCell};
@@ -17,6 +18,7 @@ const START_URL: &str = "https://www.wikipedia.org/";
 
 thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    static CONTENT: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
 }
@@ -81,6 +83,7 @@ wrap_window_delegate! {
                 .expect("box layout");
             let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH);
             let content = browser_view(ContentClient::new(), START_URL, 0);
+            CONTENT.set(Some(content.clone()));
             for (view, flex) in [(sidebar, 0), (content, 1)] {
                 let mut view = View::from(&view);
                 window.add_child_view(Some(&mut view));
@@ -237,9 +240,36 @@ wrap_resource_request_handler! {
             request: Option<&mut Request>,
         ) -> Option<ResourceHandler> {
             let url = CefString::from(&request?.url()).to_string();
-            let (mime, body) = ui_file(&url[UI_ORIGIN.len()..])?;
+            let path = &url[UI_ORIGIN.len()..];
+            let (mime, body) = match path.strip_prefix("command/").and_then(Command::parse) {
+                Some(command) => {
+                    post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
+                    ("application/json", b"{}".as_slice())
+                }
+                None => ui_file(path)?,
+            };
             let stream = stream_reader_create_for_data(body.as_ptr() as *mut u8, body.len());
             Some(StreamResourceHandler::new(200, "OK".to_string(), mime.to_string(), None, stream))
+        }
+    }
+}
+
+// Requests arrive on the IO thread; browsers are driven from the UI thread.
+wrap_task! {
+    struct RunCommand {
+        command: Command,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let Some(browser) = CONTENT.with_borrow(|view| view.as_ref()?.browser()) else {
+                return;
+            };
+            match self.command {
+                Command::Back => browser.go_back(),
+                Command::Forward => browser.go_forward(),
+                Command::Reload => browser.reload(),
+            }
         }
     }
 }
