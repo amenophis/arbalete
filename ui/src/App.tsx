@@ -11,7 +11,7 @@ import {
   useAppState,
   useRenaming,
 } from "./bridge";
-import { useDrag } from "./drag";
+import { favoriteColumns, previewTiles, type TilePreview, useDrag } from "./drag";
 import { Icon } from "./Icon";
 import { Library } from "./Library";
 import { NewMenu } from "./NewMenu";
@@ -22,7 +22,7 @@ import { NewSpace, Spaces } from "./Spaces";
 export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalette:rename");
-  const { indicator, onPointerDown } = useDrag();
+  const { indicator, preview, onPointerDown } = useDrag(state);
   const [profiles, setProfiles] = useState(false);
   const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
   // The displayed Space's color tints the sidebar and the window, and blends into the next one's
@@ -100,6 +100,7 @@ export function App() {
                 displayed={onSpace && index === displayed}
                 renaming={renaming}
                 onRename={setRenaming}
+                preview={preview}
               />
             );
           })}
@@ -149,6 +150,7 @@ function Sections({
   displayed,
   renaming,
   onRename,
+  preview,
 }: {
   page: SpacePage;
   space: Space;
@@ -156,8 +158,11 @@ function Sections({
   displayed: boolean;
   renaming: number | null;
   onRename: Rename;
+  preview: TilePreview | null;
 }) {
-  const { roots, favorites, selected } = page;
+  const { roots, selected } = page;
+  // While a tile or a row is dragged over them, the favorites open its slot.
+  const favorites = previewTiles(page.favorites, roots.favorites, preview);
   return (
     <section
       className="space-page"
@@ -175,15 +180,19 @@ function Sections({
         {favorites.length === 0 && (
           <li className="favorites-empty">Drag tabs here to keep them close</li>
         )}
-        {favorites.map((tab) => (
-          <Favorite
-            key={tab.id}
-            id={tab.id}
-            title={tab.title || tab.url}
-            favicon={tab.favicon}
-            active={tab.id === selected}
-          />
-        ))}
+        {favorites.map((tab) =>
+          tab ? (
+            <Favorite
+              key={tab.id}
+              id={tab.id}
+              title={tab.title || tab.url}
+              favicon={tab.favicon}
+              active={tab.id === selected}
+            />
+          ) : (
+            <li key="slot" className="favorite-slot" />
+          ),
+        )}
       </ul>
       <div className="scroll">
         {/* A click collapses or expands the Space; hovered, its icon shows which. */}
@@ -248,13 +257,6 @@ function Sections({
       </div>
     </section>
   );
-}
-
-// The favorites share rows of up to 4 tiles, as evenly as they can: 6 make two rows of 3, not 4
-// and 2. Without favorites, the placeholder takes the whole row.
-export function favoriteColumns(count: number): number {
-  const rows = Math.max(1, Math.ceil(count / 4));
-  return Math.max(1, Math.ceil(count / rows));
 }
 
 // What the url bar shows of a page's address: its host, without "www.", or the whole address

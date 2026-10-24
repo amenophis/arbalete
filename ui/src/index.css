@@ -16,6 +16,8 @@
   --panel: #f8f6fb;
   --menu: #fdfcff;
   --menu-border: #0000001a;
+  --ghost: #ffffffcc;
+  --drop-line: #1f1d2b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -30,6 +32,8 @@
     --panel: #1e1a28;
     --menu: #1a1723;
     --menu-border: #ffffff1a;
+    --ghost: #ffffff33;
+    --drop-line: #ffffff;
   }
 }
 
@@ -573,6 +577,72 @@ button.folder:hover {
   opacity: 0.4;
 }
 
+/* The dragged tile itself moves with the pointer, above the others (ui/src/drag.ts). */
+.lifted {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* The slot a row dragged over the favorites opens among them. */
+.favorite-slot {
+  box-sizing: border-box;
+  height: 47px;
+  border: 1.5px dashed color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 10px;
+}
+
+/* A copy of the dragged row follows the pointer; over the favorites, it turns into a tile. */
+.drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  width: var(--width);
+  color: var(--text);
+  filter: drop-shadow(0 2px 6px #0000004d);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.ghost-pill {
+  background-color: var(--ghost);
+}
+
+.drag-ghost.tile {
+  width: 47px;
+}
+
+.drag-ghost.tile .ghost-pill {
+  justify-content: center;
+  height: 47px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+}
+
+.drag-ghost.tile .title,
+.drag-ghost.hidden {
+  display: none;
+}
+
+/* Over the middle of a tab row, the split it would make takes the row's place. */
+.split-preview {
+  position: fixed;
+  z-index: 10;
+  color: var(--text);
+  pointer-events: none;
+}
+
+.split-preview .half {
+  background: var(--active);
+}
+
+/* Hidden yet under the pointer, so the preview stays while the pointer is over it. */
+.split-target {
+  opacity: 0;
+}
+
 .scroll > * {
   flex: none;
 }
@@ -584,16 +654,24 @@ button.folder:hover {
 .drop-indicator {
   display: none;
   position: fixed;
+  z-index: 10;
+  height: 1.5px;
   border-radius: 1px;
-  background: var(--accent);
+  background: var(--drop-line);
   pointer-events: none;
 }
 
-.drop-indicator.into {
+/* A small ring at the line's left end. */
+.drop-indicator::before {
+  content: "";
+  position: absolute;
+  top: -2.75px;
+  left: -7px;
   box-sizing: border-box;
-  border: 2px solid var(--accent);
-  border-radius: 8px;
-  background: none;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--drop-line);
+  border-radius: 50%;
 }
 
 /* The Library button, then one icon per Space in the middle, then the "+" menu. */

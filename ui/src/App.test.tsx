@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App, DOUBLE_CLICK_MS, domain, favoriteColumns } from "./App";
+import { App, DOUBLE_CLICK_MS, domain } from "./App";
 import { COLORS, type Item, type Page, type Space, type Tab, windowColors } from "./bridge";
+import { favoriteColumns } from "./drag";
 
 const fetch = vi.fn();
 
@@ -857,4 +858,64 @@ test("a right-click elsewhere shows no menu, but in a text field", () => {
   fireEvent.doubleClick(shown().getByRole("button", { name: "Docs" }));
   expect(rightClick(screen.getByRole("textbox", { name: "Folder name" }))).toBe(true);
   expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/menu/"), expect.anything());
+});
+
+// Drags `row` with the pointer to `y` px from the top of every row, which the layout below puts
+// at 0, `under` being under the pointer; the favorites lie far above.
+function dragTo(row: HTMLElement, under: Element, y: number) {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return this.matches(".favorites") ? new DOMRect(0, -500, 250, 47) : new DOMRect(0, 0, 250, 40);
+  });
+  document.elementFromPoint = () => under;
+  fireEvent.pointerDown(row, { button: 0, clientX: 20, clientY: 10 });
+  fireEvent.pointerMove(window, { clientX: 20, clientY: y });
+}
+
+const dragCommands = () =>
+  fetch.mock.calls.map(([url]) => String(url)).filter((url) => /\/(move|split)\//.test(url));
+
+test("dragging a row leaves it dimmed in place, a ghost of it following the pointer", () => {
+  render(<App />);
+  receive({});
+  const other = shown().getByRole("button", { name: "Other" });
+  dragTo(other, shown().getByRole("button", { name: "Example" }), 4);
+  expect(other.closest("li")?.classList.contains("dragged")).toBe(true);
+  expect(document.querySelector(".drag-ghost")?.textContent).toBe("Other");
+  const line = document.querySelector<HTMLElement>(".drop-indicator");
+  expect(line?.style.display).toBe("block");
+  fireEvent.pointerUp(window);
+  expect(dragCommands()).toEqual(["/command/move/4/12/0"]);
+  expect(document.querySelector(".drag-ghost")).toBeNull();
+  expect(line?.style.display).toBe("");
+  vi.restoreAllMocks();
+});
+
+test("over the middle of a tab row, a dragged tab previews the split it drops as", () => {
+  render(<App />);
+  receive({});
+  const other = shown().getByRole("button", { name: "Other" });
+  dragTo(other, shown().getByRole("button", { name: "Example" }), 20);
+  const halves = [...document.querySelectorAll(".split-preview .half")];
+  expect(halves.map((half) => half.textContent)).toEqual(["Example", "Other"]);
+  expect(document.querySelector(".split-target")?.getAttribute("data-id")).toBe("3");
+  expect(document.querySelector<HTMLElement>(".drop-indicator")?.style.display).toBe("");
+  fireEvent.pointerUp(window);
+  expect(dragCommands()).toEqual(["/command/split/4/3"]);
+  expect(document.querySelector(".split-preview, .split-target")).toBeNull();
+  vi.restoreAllMocks();
+});
+
+test("Escape cancels a drag: nothing moves, and the release selects nothing", () => {
+  render(<App />);
+  receive({});
+  const other = shown().getByRole("button", { name: "Other" });
+  dragTo(other, shown().getByRole("button", { name: "Example" }), 4);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(other.closest("li")?.classList.contains("dragged")).toBe(false);
+  expect(document.querySelector(".drag-ghost")).toBeNull();
+  fireEvent.pointerUp(window);
+  fireEvent.click(other);
+  expect(dragCommands()).toEqual([]);
+  expect(fetch).not.toHaveBeenCalledWith("/command/select/4", expect.anything());
+  vi.restoreAllMocks();
 });

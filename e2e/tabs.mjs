@@ -1,6 +1,6 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
-// between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
-// between sections, painting the window with the Space's color, hiding and revealing the sidebar, keeping
+// between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs and favorites with the mouse
+// between sections and into splits, painting the window with the Space's color, hiding and revealing the sidebar, keeping
 // profiles' web data apart, switching Spaces, creating, renaming and coloring profiles, creating
 // Spaces from the page after the last one and editing them, switching Spaces by number and by
 // swiping between their pages, reopening closed tabs from the library before the first Space,
@@ -287,6 +287,134 @@ try {
     "dropping a tab after the last favorite makes it a favorite",
     `e2e.rows()[0].scrollIntoView({ block: "nearest" }); e2e.drag(e2e.rows()[0], e2e.tiles()[5], 0.8, 0.5)`,
     `e2e.tiles().length === 7 && e2e.tiles()[6].closest("li").dataset.id === e2e.moved && !e2e.has(e2e.rows(), e2e.moved)`,
+  );
+  // Real drags: the mouse pressed, moved in steps and released through DevTools, as Chromium turns
+  // it into pointer events. `from` and `to` are expressions for elements, `to` aimed at fractions
+  // of its width and height once nothing slides; the press lifts on the center of `from`.
+  const press = (type, { x, y }) =>
+    sidebar.call("Input.dispatchMouseEvent", {
+      type,
+      x,
+      y,
+      button: "left",
+      buttons: type === "mouseReleased" ? 0 : 1,
+      clickCount: 1,
+    });
+  const point = (element, fx, fy) =>
+    sidebar.eval(`(() => {
+      const rect = (${element}).getBoundingClientRect();
+      return { x: rect.left + rect.width * ${fx}, y: rect.top + rect.height * ${fy} };
+    })()`);
+  const hold = async (from, to, fx, fy) => {
+    // Rows still sliding from the last drop are not where they will rest.
+    await sidebar.eval(waitFor(`document.getAnimations().length === 0`));
+    const [start, end] = [await point(from, 0.5, 0.5), await point(to, fx, fy)];
+    await press("mousePressed", start);
+    for (let step = 1; step <= 8; step++) {
+      const t = step / 8;
+      await press("mouseMoved", { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t });
+    }
+    return end;
+  };
+  const release = (end) => press("mouseReleased", end);
+  // Unless motion is reduced, some row slides to its new place with a transition.
+  const slides = `(matchMedia("(prefers-reduced-motion: reduce)").matches
+    || [...e2e.page().querySelectorAll("li[data-id], .folder")].some((row) => row.style.transition.includes("transform")))`;
+
+  await sidebar.eval(`e2e.lifted = e2e.tiles()[1].closest("li"); e2e.liftedId = e2e.lifted.dataset.id; 0`);
+  let end = await hold(`e2e.tiles()[1]`, `e2e.tiles()[2]`, 0.5, 0.5);
+  await check(
+    "a dragged favorite moves with the pointer itself and the others slide to open its slot",
+    ``,
+    `(() => {
+      const rect = e2e.lifted.getBoundingClientRect();
+      return e2e.lifted.classList.contains("lifted") && e2e.tiles()[2].closest("li") === e2e.lifted
+        && Math.abs(rect.left + rect.width / 2 - ${end.x}) <= 2 && Math.abs(rect.top + rect.height / 2 - ${end.y}) <= 2;
+    })()`,
+  );
+  await release(end);
+  await check(
+    "dropping the favorite settles it in its new slot",
+    ``,
+    `e2e.tiles()[2].closest("li").dataset.id === e2e.liftedId && !e2e.lifted.classList.contains("lifted")`,
+  );
+  const liftedId = Number(await sidebar.eval(`e2e.liftedId`));
+  await checkSession("the session saves the favorites' new order", (saved) =>
+    saved.nodes[saved.profiles[0].favorites].children[2] === liftedId,
+  );
+
+  await sidebar.eval(`e2e.rows()[0].scrollIntoView({ block: "center" }); e2e.dragged = e2e.rows()[4]; e2e.target = e2e.rows()[1]; 0`);
+  end = await hold(`e2e.dragged`, `e2e.target`, 0.5, 0.1);
+  await check(
+    "a dragged row stays in place, dimmed, while its ghost follows and a line marks the slot",
+    ``,
+    `(() => {
+      const line = e2e.indicator().getBoundingClientRect();
+      const ghost = document.querySelector(".drag-ghost")?.getBoundingClientRect();
+      return e2e.dragged.classList.contains("dragged") && e2e.rows()[4] === e2e.dragged && !!ghost
+        && ghost.top <= ${end.y} && ghost.bottom >= ${end.y}
+        && Math.abs(line.top + line.height / 2 - e2e.target.getBoundingClientRect().top) <= 1.5 && line.height === 1.5;
+    })()`,
+  );
+  await release(end);
+  await check(
+    "dropping the row moves it to the line, the rows below sliding",
+    ``,
+    `e2e.rows()[1] === e2e.dragged && !e2e.dragged.classList.contains("dragged")
+      && !document.querySelector(".drag-ghost") && getComputedStyle(e2e.indicator()).display === "none" && ${slides}`,
+  );
+
+  await sidebar.eval(`e2e.reading.scrollIntoView({ block: "center" }); e2e.dragged = e2e.rows()[0]; e2e.moved = e2e.dragged.dataset.id; 0`);
+  end = await hold(`e2e.dragged`, `e2e.reading`, 0.5, 0.8);
+  await check(
+    "over the lower half of a folder, the line shows under it, indented",
+    ``,
+    `(() => {
+      const line = e2e.indicator().getBoundingClientRect();
+      const folder = e2e.reading.getBoundingClientRect();
+      return Math.abs(line.top + line.height / 2 - folder.bottom) <= 1.5 && line.left >= folder.left + 12;
+    })()`,
+  );
+  await release(end);
+  await check(
+    "dropping it there makes the tab the folder's first",
+    ``,
+    `e2e.reading.parentElement.querySelector(".folder-tabs > li")?.dataset.id === e2e.moved && !e2e.has(e2e.rows(), e2e.moved)`,
+  );
+
+  await sidebar.eval(`e2e.rows()[0].scrollIntoView({ block: "center" }); e2e.dragged = e2e.rows()[1]; e2e.target = e2e.rows()[0];
+    e2e.pair = [e2e.target.dataset.id, e2e.dragged.dataset.id]; 0`);
+  end = await hold(`e2e.dragged`, `e2e.target`, 0.5, 0.5);
+  await check(
+    "over the middle of another tab row, the row previews the split, without a line",
+    ``,
+    `document.querySelectorAll(".split-preview .half").length === 2 && e2e.target.classList.contains("split-target")
+      && getComputedStyle(e2e.indicator()).display === "none"`,
+  );
+  await release(end);
+  await check(
+    "dropping it there makes a split row of both tabs",
+    ``,
+    `(() => {
+      const split = e2e.page().querySelector(".today > .split-row");
+      const halves = [...(split?.querySelectorAll(".half") ?? [])].map((half) => half.dataset.tab);
+      return split && split.getBoundingClientRect().height === 41 && halves.join() === e2e.pair.join()
+        && !document.querySelector(".split-preview, .split-target");
+    })()`,
+  );
+  const pair = (await sidebar.eval(`e2e.pair`)).map(Number);
+  await checkSession("the session saves the split", (saved) =>
+    Object.values(saved.nodes).some((node) => node.kind === "Split" && node.children.join() === pair.join()),
+  );
+  await check(
+    "clicking a half of the split selects its tab",
+    `e2e.page().querySelector(".split-row .half:last-child").click()`,
+    `e2e.page().querySelector(".split-row .half:last-child").getAttribute("aria-current") === "page"`,
+  );
+  await check(
+    "closing a half leaves the other tab as a normal row",
+    `e2e.send("close/" + e2e.pair[1])`,
+    `!e2e.page().querySelector(".split-row") && e2e.rows()[0].dataset.id === e2e.pair[0]`,
   );
   await check(
     "the sidebar page does not scroll or bounce, only its tab list scrolls",
