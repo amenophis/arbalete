@@ -58,12 +58,30 @@ impl UiState {
     /// Sent whole to the UI on every change. Only the first Space is shown for now.
     fn to_json(&self) -> serde_json::Value {
         let home = &self.sidebar.spaces()[0];
+        let profile = self
+            .sidebar
+            .profiles()
+            .iter()
+            .find(|p| p.id == home.profile);
         json!({
             "page": self.page,
+            "favorites": self.tabs(profile.expect("a known profile").favorites),
             "pinned": self.items(home.pinned),
             "today": self.items(home.today),
             "active": home.selected,
         })
+    }
+
+    /// The tabs directly inside a container, like the favorites, which hold no folders.
+    fn tabs(&self, parent: NodeId) -> Vec<serde_json::Value> {
+        let node = self.sidebar.node(parent).expect("a known container");
+        node.children
+            .iter()
+            .filter_map(|&id| match &self.sidebar.node(id)?.kind {
+                NodeKind::Tab(tab) => Some(tab_json(id, tab)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The tabs and folders inside a container or a folder, folders with their own content.
@@ -72,12 +90,7 @@ impl UiState {
         node.children
             .iter()
             .filter_map(|&id| match &self.sidebar.node(id)?.kind {
-                NodeKind::Tab(tab) => Some(json!({
-                    "id": id,
-                    "url": tab.url,
-                    "title": tab.title,
-                    "favicon": tab.favicon,
-                })),
+                NodeKind::Tab(tab) => Some(tab_json(id, tab)),
                 NodeKind::Folder { title, expanded } => Some(json!({
                     "id": id,
                     "title": title,
@@ -88,6 +101,15 @@ impl UiState {
             })
             .collect()
     }
+}
+
+fn tab_json(id: NodeId, tab: &Tab) -> serde_json::Value {
+    json!({
+        "id": id,
+        "url": tab.url,
+        "title": tab.title,
+        "favicon": tab.favicon,
+    })
 }
 
 /// The loading state of the content view; its title and url belong to the active tab.
@@ -197,30 +219,41 @@ fn select_tab(id: NodeId) {
 }
 
 /// Closes a tab; closing the selected one shows the next tab, or the overlay when none is left.
+/// A favorite stays in the favorites: closing it only deselects it.
 fn close_tab(tab: Option<NodeId>) {
-    let (selected, next) = STATE.with_borrow_mut(|state| {
+    let (selected, tab) = STATE.with_borrow_mut(|state| {
         let selected = state.sidebar.spaces()[0].selected;
         let tab = tab
             .or(selected)
             .filter(|&id| state.sidebar.tab_mut(id).is_some());
-        (
-            selected,
-            tab.map(|tab| (tab, state.sidebar.next_after_close(tab))),
-        )
+        (selected, tab)
     });
-    let Some((tab, next)) = next else { return };
-    STATE.with_borrow_mut(|state| {
-        let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
-        state.closed.push(closed);
-    });
-    update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
-    if selected == Some(tab) {
-        match next {
-            Some(next) => select_tab(next),
-            None => {
-                load("about:blank");
-                show_overlay(true);
-            }
+    let Some(tab) = tab else { return };
+    let next = if STATE.with_borrow(|state| state.sidebar.is_favorite(tab)) {
+        if selected != Some(tab) {
+            return;
+        }
+        update_sidebar(|sidebar| {
+            let home = sidebar.spaces()[0].id;
+            sidebar.close_favorite(home, tab).expect("the first Space")
+        })
+    } else {
+        let next = STATE.with_borrow_mut(|state| {
+            let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
+            state.closed.push(closed);
+            state.sidebar.next_after_close(tab)
+        });
+        update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
+        if selected != Some(tab) {
+            return;
+        }
+        next
+    };
+    match next {
+        Some(next) => select_tab(next),
+        None => {
+            load("about:blank");
+            show_overlay(true);
         }
     }
 }
@@ -697,6 +730,22 @@ mod tests {
             json["pinned"][0]["children"][0]["url"],
             "https://example.com/"
         );
+        assert_eq!(json["today"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn sends_the_favorites_of_the_first_space() {
+        let mut state = UiState::default();
+        let home = state.sidebar.spaces()[0].id;
+        let favorites = state.sidebar.profiles()[0].favorites;
+        let tab = state
+            .sidebar
+            .open_tab(home, "https://example.com/")
+            .unwrap();
+        state.sidebar.move_node(tab, favorites, 0).unwrap();
+        let json = state.to_json();
+        assert_eq!(json["favorites"][0]["url"], "https://example.com/");
+        assert_eq!(json["favorites"][0]["id"], serde_json::json!(tab));
         assert_eq!(json["today"], serde_json::json!([]));
     }
 

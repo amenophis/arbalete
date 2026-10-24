@@ -203,11 +203,7 @@ impl Sidebar {
     /// The tab to show once `tab` is closed: the tab it was opened from if still open, else the
     /// next tab in its container, else the previous one.
     pub fn next_after_close(&self, tab: NodeId) -> Option<NodeId> {
-        let opener = match &self.nodes.get(&tab)?.kind {
-            NodeKind::Tab(Tab { opener, .. }) => *opener,
-            _ => None,
-        };
-        if let Some(opener) = opener.filter(|&id| self.is_tab(id)) {
+        if let Some(opener) = self.open_opener(tab) {
             return Some(opener);
         }
         let siblings = &self.nodes.get(&self.nodes.get(&tab)?.parent?)?.children;
@@ -220,6 +216,23 @@ impl Sidebar {
         tabs.get(index + 1)
             .or(index.checked_sub(1).and_then(|i| tabs.get(i)))
             .copied()
+    }
+
+    pub fn is_favorite(&self, id: NodeId) -> bool {
+        let parent = self.nodes.get(&id).and_then(|node| node.parent);
+        self.profiles.iter().any(|p| Some(p.favorites) == parent)
+    }
+
+    /// Favorites stay when closed: closing one only deselects it in `space`. Returns the tab to
+    /// show instead: the tab it was opened from if still open, else the Space's last "Today" tab,
+    /// rather than a neighbor favorite.
+    pub fn close_favorite(&mut self, space: SpaceId, tab: NodeId) -> Result<Option<NodeId>, Error> {
+        let opener = self.open_opener(tab);
+        let space = self.spaces.iter_mut().find(|s| s.id == space);
+        let space = space.ok_or(Error::UnknownSpace)?;
+        space.selected = None;
+        let today = &self.nodes[&space.today].children;
+        Ok(opener.or_else(|| today.iter().rev().copied().find(|&id| self.is_tab(id))))
     }
 
     /// Removes a tab or a folder with everything it contains.
@@ -262,6 +275,14 @@ impl Sidebar {
             self.children_mut(parent).push(id);
         }
         id
+    }
+
+    /// The tab `tab` was opened from, if it is still open.
+    fn open_opener(&self, tab: NodeId) -> Option<NodeId> {
+        match &self.nodes.get(&tab)?.kind {
+            NodeKind::Tab(Tab { opener, .. }) => opener.filter(|&id| self.is_tab(id)),
+            _ => None,
+        }
     }
 
     fn is_tab(&self, id: NodeId) -> bool {
@@ -378,10 +399,48 @@ mod tests {
         sidebar.select(home.id, a).unwrap();
         sidebar.select(work, a).unwrap();
         assert_eq!(sidebar.spaces()[1].selected, Some(a));
-        assert_eq!(sidebar.next_after_close(a), Some(b));
         sidebar.remove(a).unwrap();
         assert_eq!(sidebar.spaces()[0].selected, None);
         assert_eq!(sidebar.spaces()[1].selected, None);
+    }
+
+    #[test]
+    fn closing_a_favorite_deselects_it_and_keeps_it() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let a = sidebar.open_tab(home.id, "a").unwrap();
+        let b = sidebar.open_tab(home.id, "b").unwrap();
+        let favorite = sidebar.open_tab(home.id, "favorite").unwrap();
+        let other = sidebar.open_tab(home.id, "other").unwrap();
+        sidebar.move_node(favorite, favorites, usize::MAX).unwrap();
+        sidebar.move_node(other, favorites, usize::MAX).unwrap();
+        assert!(sidebar.is_favorite(favorite));
+        assert!(!sidebar.is_favorite(a));
+        sidebar.select(home.id, favorite).unwrap();
+        assert_eq!(sidebar.close_favorite(home.id, favorite), Ok(Some(b)));
+        assert_eq!(sidebar.spaces()[0].selected, None);
+        assert_eq!(children(&sidebar, favorites), [favorite, other]);
+        sidebar.remove(a).unwrap();
+        sidebar.remove(b).unwrap();
+        assert_eq!(sidebar.close_favorite(home.id, favorite), Ok(None));
+    }
+
+    #[test]
+    fn closing_a_favorite_returns_to_its_opener() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let opener = sidebar.open_tab(home.id, "opener").unwrap();
+        sidebar.open_tab(home.id, "last").unwrap();
+        sidebar.select(home.id, opener).unwrap();
+        let favorite = sidebar.open_tab(home.id, "favorite").unwrap();
+        sidebar.move_node(favorite, favorites, 0).unwrap();
+        assert_eq!(sidebar.close_favorite(home.id, favorite), Ok(Some(opener)));
+        assert_eq!(
+            sidebar.close_favorite(SpaceId(999), favorite),
+            Err(Error::UnknownSpace)
+        );
     }
 
     #[test]
