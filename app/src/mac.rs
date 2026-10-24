@@ -1,6 +1,7 @@
 //! The NSApplication subclass CEF requires on macOS, and the menus.
 
 use crate::command::Command;
+use crate::swipe::{Phase, Scroll};
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::{
     ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, extern_methods,
@@ -10,9 +11,9 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApp, NSApplication, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags,
-    NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSRightArrowFunctionKey, NSUpArrowFunctionKey,
-    NSView, NSWindowButton,
+    NSApp, NSApplication, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags, NSEventPhase,
+    NSEventType, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSRightArrowFunctionKey,
+    NSUpArrowFunctionKey, NSView, NSWindowButton,
 };
 use objc2_foundation::{NSString, ns_string};
 use std::cell::{Cell, RefCell};
@@ -36,6 +37,10 @@ define_class!(
     impl ArbaletteApplication {
         #[unsafe(method(sendEvent:))]
         unsafe fn send_event(&self, event: &NSEvent) {
+            // Seen on their way to the page, which still scrolls with them.
+            if event.r#type() == NSEventType::ScrollWheel {
+                crate::shell::scroll(scroll(event));
+            }
             let was_sending = self.ivars().handling_send_event.get();
             self.ivars().handling_send_event.set(Bool::YES);
             let _: () = msg_send![super(self), sendEvent: event];
@@ -157,6 +162,30 @@ impl ArbaletteApplication {
     extern_methods! {
         #[unsafe(method(sharedApplication))]
         fn shared_application() -> Retained<Self>;
+    }
+}
+
+/// Only scroll events have phases and deltas.
+fn scroll(event: &NSEvent) -> Scroll {
+    let phase = event.phase();
+    let phase = if phase.is_empty() {
+        Phase::None
+    } else if phase.contains(NSEventPhase::Began) {
+        Phase::Began
+    } else if phase.contains(NSEventPhase::Changed) {
+        Phase::Changed
+    } else if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled) {
+        Phase::Ended
+    } else {
+        Phase::Other
+    };
+    Scroll {
+        phase,
+        momentum: !event.momentumPhase().is_empty(),
+        dx: event.scrollingDeltaX(),
+        dy: event.scrollingDeltaY(),
+        time: event.timestamp(),
+        inside: crate::shell::is_over_sidebar(event.locationInWindow().x),
     }
 }
 

@@ -1,50 +1,30 @@
 import { expect, test } from "vitest";
-import { GESTURE_END_MS, SWIPE_DISTANCE, swipeTracker } from "./swipe";
+import { type Gesture, SWIPE_DISTANCE, swipeTracker } from "./swipe";
 
-// Wheel events 10 ms apart, all in one gesture.
-function gesture(track: ReturnType<typeof swipeTracker>, deltas: [number, number][], start = 0) {
-  return deltas.map(([x, y], i) => track(x, y, start + i * 10));
+// A swipe from touch to lift, moving the content by each of `deltas`.
+function swipe(track: ReturnType<typeof swipeTracker>, deltas: number[]) {
+  const gestures: Gesture[] = deltas.map((dx, i) => ({
+    phase: i === 0 ? "begin" : "move",
+    dx,
+    time: i * 10,
+  }));
+  gestures.push({ phase: "end", dx: 0, time: deltas.length * 10 });
+  return gestures.map(track);
 }
 
-test("switches to the next Space once a leftward swipe passes the distance", () => {
+test("switches to the next Space when a swipe moving the content left lifts past the distance", () => {
   const track = swipeTracker();
-  const step = SWIPE_DISTANCE / 4;
-  expect(
-    gesture(track, [
-      [step, 0],
-      [step, 0],
-      [step, 0],
-      [step, 0],
-    ]),
-  ).toEqual([null, null, null, "space/next"]);
+  const step = -SWIPE_DISTANCE / 4;
+  expect(swipe(track, [step, step, step, step])).toEqual([null, null, null, null, "space/next"]);
 });
 
-test("switches to the previous Space on a rightward swipe", () => {
+test("switches to the previous Space when the content moves right", () => {
   const track = swipeTracker();
-  expect(track(-SWIPE_DISTANCE, 0, 0)).toBe("space/previous");
+  expect(swipe(track, [SWIPE_DISTANCE]).at(-1)).toBe("space/previous");
 });
 
-test("switches only once per gesture, momentum included", () => {
+test("a short swipe keeps the Space, and the next one starts from zero", () => {
   const track = swipeTracker();
-  const results = gesture(track, Array(20).fill([SWIPE_DISTANCE, 0]));
-  expect(results.filter(Boolean)).toEqual(["space/next"]);
-});
-
-test("a pause ends the gesture, so the next one switches again", () => {
-  const track = swipeTracker();
-  expect(track(SWIPE_DISTANCE, 0, 0)).toBe("space/next");
-  expect(track(SWIPE_DISTANCE, 0, GESTURE_END_MS)).toBeNull();
-  expect(track(-SWIPE_DISTANCE, 0, 2 * GESTURE_END_MS + 1)).toBe("space/previous");
-});
-
-test("a pause also forgets a short swipe", () => {
-  const track = swipeTracker();
-  expect(track(SWIPE_DISTANCE - 1, 0, 0)).toBeNull();
-  expect(track(SWIPE_DISTANCE - 1, 0, GESTURE_END_MS + 1)).toBeNull();
-});
-
-test("leaves mostly vertical scrolling alone", () => {
-  const track = swipeTracker();
-  const results = gesture(track, Array(20).fill([SWIPE_DISTANCE, SWIPE_DISTANCE + 1]));
-  expect(results.filter(Boolean)).toEqual([]);
+  expect(swipe(track, [SWIPE_DISTANCE - 1]).at(-1)).toBeNull();
+  expect(swipe(track, [SWIPE_DISTANCE - 1]).at(-1)).toBeNull();
 });
