@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App, DOUBLE_CLICK_MS, domain } from "./App";
+import { App, COPIED_MS, DOUBLE_CLICK_MS, domain } from "./App";
 import { COLORS, type Item, type Page, type Space, type Tab, windowColors } from "./bridge";
-import { favoriteColumns } from "./drag";
+import { FULL_HINT_MS, favoriteColumns, MAX_FAVORITES } from "./drag";
 
 const fetch = vi.fn();
 
@@ -66,8 +66,10 @@ function receive(
   favoriteTabs = favorites,
   displayed = 13,
   collapsed = false,
+  hiddenHint = false,
 ) {
   const empty = { favorites: [], pinned: [], today: [], selected: null, collapsed: false };
+  const favoritesHint = !hiddenHint;
   const shown = spaces.findIndex(({ id }) => id === displayed);
   const detail = {
     page: { progress: 1, loading: false, canGoBack: true, canGoForward: true, ...page },
@@ -77,6 +79,7 @@ function receive(
       .map(({ id }, index) => ({
         space: id,
         roots: { favorites: 1, pinned: 2 + index * 100, today: 12 + index * 100 },
+        favoritesHint,
         ...(index === 0
           ? { favorites: favoriteTabs, pinned, today, selected: active, collapsed }
           : { ...empty }),
@@ -137,12 +140,26 @@ test("shows a page's domain in the url bar", () => {
   expect(domain("not a url")).toBe("not a url");
 });
 
+test("the url bar's copy button copies the link and says so for a moment", () => {
+  vi.useFakeTimers();
+  render(<App />);
+  receive({});
+  const copy = screen.getByRole("button", { name: "Copy link" });
+  fireEvent.click(copy);
+  expect(fetch).toHaveBeenLastCalledWith("/command/link/copy", { method: "POST" });
+  expect(within(copy).getByRole("status").textContent).toBe("Copied");
+  act(() => vi.advanceTimersByTime(COPIED_MS));
+  expect(within(copy).queryByRole("status")).toBeNull();
+  vi.useRealTimers();
+});
+
 test("keeps the url bar without a selected tab", () => {
   render(<App />);
   receive({ loading: true }, 99);
   const url = document.querySelector(".url");
   expect(url?.textContent).toBe("");
   expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
 });
 
 test("selects a tab", () => {
@@ -283,13 +300,21 @@ test("selects a favorite", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/select/10", { method: "POST" });
 });
 
-test("shows a placeholder to drop tabs on when there are no favorites", () => {
+test("shows a hint box to drop tabs on when there are no favorites, which its × hides", () => {
   render(<App />);
   receive({}, 3, []);
   const grid = shown().getByRole("list", { name: "Favorites" });
   expect(grid.dataset.parent).toBe("1");
-  expect(within(grid).getByText("Drag tabs here to keep them close")).toBeDefined();
-  expect(within(grid).queryAllByRole("button")).toHaveLength(0);
+  const hint = grid.querySelector(".favorites-empty") as HTMLElement;
+  expect(hint.querySelector("svg[aria-hidden=true]")).not.toBeNull();
+  expect(within(hint).getByText("Drag tabs here to keep them close")).toBeDefined();
+  expect(within(hint).getByText(/every Space of this profile/)).toBeDefined();
+  fireEvent.click(within(grid).getByRole("button", { name: "Hide this hint" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/favorites/hide-hint/13", { method: "POST" });
+  receive({}, 3, [], 13, false, true);
+  expect(grid.children).toHaveLength(0);
+  receive({}, 3, favorites, 13, false, true);
+  expect(grid.querySelector(".favorites-empty")).toBeNull();
 });
 
 test("balances the favorites' rows, up to 4 tiles a row", () => {
@@ -903,6 +928,33 @@ test("over the middle of a tab row, a dragged tab previews the split it drops as
   expect(dragCommands()).toEqual(["/command/split/4/3"]);
   expect(document.querySelector(".split-preview, .split-target")).toBeNull();
   vi.restoreAllMocks();
+});
+
+test("over full favorites, a dragged tab opens no slot, says they are full, and drops nothing", () => {
+  vi.useFakeTimers();
+  render(<App />);
+  const many = Array.from({ length: MAX_FAVORITES }, (_, i) => ({
+    id: 100 + i,
+    url: `https://example.com/${i}`,
+    title: `F${i}`,
+    favicon: null,
+  }));
+  receive({}, 3, many);
+  const other = shown().getByRole("button", { name: "Other" });
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return this.matches(".favorites") ? new DOMRect(0, -500, 250, 160) : new DOMRect(0, 0, 250, 40);
+  });
+  fireEvent.pointerDown(other, { button: 0, clientX: 20, clientY: 10 });
+  fireEvent.pointerMove(window, { clientX: 20, clientY: -450 });
+  expect(shown().getByRole("status").textContent).toBe("Favorites are full");
+  expect(document.querySelector(".favorite-slot")).toBeNull();
+  fireEvent.pointerUp(window);
+  expect(dragCommands()).toEqual([]);
+  expect(shown().getByRole("status")).toBeDefined();
+  act(() => vi.advanceTimersByTime(FULL_HINT_MS));
+  expect(shown().queryByRole("status")).toBeNull();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 test("Escape cancels a drag: nothing moves, and the release selects nothing", () => {

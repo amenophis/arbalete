@@ -48,6 +48,11 @@ pub enum Command {
     CloseFolderTabs(NodeId),
     /// Removes a tab from the favorites, from its menu.
     RemoveFavorite(NodeId),
+    /// Hides the box inviting to drag tabs into the empty favorites of a Space's profile:
+    /// `favorites/hide-hint/<space id>`.
+    HideFavoritesHint(SpaceId),
+    /// Puts the url of the displayed Space's selected tab on the clipboard: `link/copy`.
+    CopyLink,
     /// Moves a tab to another Space's "Today" tabs, from its menu.
     MoveToSpace(NodeId, SpaceId),
     /// Opens the native menu of a sidebar row at the pointer: `menu/node/<tab or folder id>`, or
@@ -182,6 +187,7 @@ impl Command {
             "reopen" => Some(Self::Reopen(0)),
             "pin" => Some(Self::Pin(None)),
             "folder/new" => Some(Self::NewFolder(None)),
+            "link/copy" => Some(Self::CopyLink),
             "next" => Some(Self::NextTab),
             "previous" => Some(Self::PreviousTab),
             "profile/new" => Some(Self::NewProfile),
@@ -281,6 +287,9 @@ impl Command {
                 {
                     let id = serde_json::from_str(id).ok()?;
                     return parse_color(color).map(|color| Self::ColorSpace(id, color));
+                }
+                if let Some(id) = path.strip_prefix("favorites/hide-hint/") {
+                    return serde_json::from_str(id).ok().map(Self::HideFavoritesHint);
                 }
                 if let Some(id) = path.strip_prefix("space/toggle/") {
                     return serde_json::from_str(id).ok().map(Self::ToggleSpace);
@@ -405,6 +414,12 @@ mod tests {
             Some(Command::Close(Some(_)))
         ));
         assert_eq!(Command::parse("pin"), Some(Command::Pin(None)));
+        assert_eq!(Command::parse("link/copy"), Some(Command::CopyLink));
+        assert!(matches!(
+            Command::parse("favorites/hide-hint/4"),
+            Some(Command::HideFavoritesHint(_))
+        ));
+        assert_eq!(Command::parse("favorites/hide-hint/x"), None);
         assert!(matches!(
             Command::parse("pin/3"),
             Some(Command::Pin(Some(_)))

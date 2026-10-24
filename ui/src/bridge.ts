@@ -36,6 +36,8 @@ export type SpacePage = {
   // The containers of the sections, to move tabs and folders into.
   roots: { favorites: number; pinned: number; today: number };
   favorites: Tab[];
+  // The empty favorites show a box inviting to drag tabs there: the profile has not hidden it.
+  favoritesHint: boolean;
   pinned: Item[];
   today: Item[];
 };

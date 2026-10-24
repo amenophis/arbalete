@@ -11,6 +11,12 @@ export const END = Number.MAX_SAFE_INTEGER;
 // How far the pointer moves before a press becomes a drag, so clicks still select.
 const THRESHOLD = 4;
 
+// How many favorites a profile holds at most (MAX_FAVORITES in crates/arbalette-core/src/sidebar.rs).
+export const MAX_FAVORITES = 12;
+
+// How long "Favorites are full" stays once the pointer leaves full favorites.
+export const FULL_HINT_MS = 1500;
+
 // A favorite tile's height and the gap between tiles (index.css).
 const TILE = 47;
 const GAP = 8;
@@ -99,11 +105,14 @@ type Found = { place: Place; line: Line } | { split: HTMLElement };
 // or a tile. A row stays in place, dimmed, while a ghost of it follows the pointer and a line
 // shows where it would land, or the row it would split with shows both tabs. A tile moves with
 // the pointer itself, the other tiles sliding to open its slot; a row over the favorites becomes
-// a tile ghost and opens a slot too. Escape cancels. The drop sends one command; once the app
-// answers with the new state, the rows that moved slide to their place.
+// a tile ghost and opens a slot too, unless the favorites are full: `full` then names them, to say
+// so, and the drop does nothing. Escape cancels. The drop sends one command; once the app answers
+// with the new state, the rows that moved slide to their place.
 export function useDrag(state: unknown) {
   const indicator = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [full, setFull] = useState<number | null>(null);
+  const fullTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Set on a drop, until the state that follows: the rows' places before it, to slide from.
   const dropped = useRef<{ state: unknown; before: Map<string, DOMRect> } | null>(null);
   const latest = useRef(state);
@@ -144,6 +153,15 @@ export function useDrag(state: unknown) {
     // Where the lifted tile rests in the grid, which its transform starts from.
     let base = start;
     let drop: Drop = { place: null, split: null };
+    let overFull = false;
+    // Says the favorites are full while the pointer is over them, and a moment after.
+    const flagFull = (over: boolean) => {
+      if (over === overFull) return;
+      overFull = over;
+      clearTimeout(fullTimer.current);
+      if (over) setFull(favorites);
+      else fullTimer.current = setTimeout(() => setFull(null), FULL_HINT_MS);
+    };
     const origin = { x: event.clientX, y: event.clientY };
     let pointer = origin;
 
@@ -199,8 +217,17 @@ export function useDrag(state: unknown) {
         x <= rect.right + 4 &&
         y >= rect.top - 4 &&
         y <= rect.bottom + 4;
+      const tiles = grid.querySelectorAll("li[data-id]").length;
+      if (overGrid && kind !== "tile" && tiles >= MAX_FAVORITES) {
+        flagFull(true);
+        showLine(indicator.current, null);
+        showSplit(null);
+        drop = { place: null, split: null };
+        return;
+      }
+      flagFull(false);
       if (overGrid) {
-        const count = grid.querySelectorAll("li[data-id]").length + (kind === "tile" ? 0 : 1);
+        const count = tiles + (kind === "tile" ? 0 : 1);
         const next = tileSlot(x, y, rect, count);
         showSlot(next);
         ghost?.classList.add("tile");
@@ -245,6 +272,7 @@ export function useDrag(state: unknown) {
       removeEventListener("pointercancel", cancel);
       removeEventListener("keydown", onKey, true);
       if (!started) return;
+      flagFull(false);
       const command = commit ? commandOf(id, from, drop) : null;
       // The dropped row slides from where its ghost was.
       const before = rowRects(page);
@@ -290,7 +318,7 @@ export function useDrag(state: unknown) {
     addEventListener("pointerup", up);
     addEventListener("pointercancel", cancel);
   };
-  return { indicator, preview: shown, onPointerDown };
+  return { indicator, preview: shown, full, onPointerDown };
 }
 
 function dragKind(item: HTMLElement): Kind {

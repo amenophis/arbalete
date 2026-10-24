@@ -1,4 +1,4 @@
-import { type CSSProperties, type KeyboardEvent, memo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, memo, useEffect, useRef, useState } from "react";
 import {
   type Item,
   type Space,
@@ -12,6 +12,7 @@ import {
   useRenaming,
 } from "./bridge";
 import { favoriteColumns, previewTiles, type TilePreview, useDrag } from "./drag";
+import { useFaviconColor } from "./faviconColor";
 import { Icon } from "./Icon";
 import { Library, LibraryButton } from "./Library";
 import { NewMenu } from "./NewMenu";
@@ -22,7 +23,7 @@ import { NewSpace, Spaces } from "./Spaces";
 export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalette:rename");
-  const { indicator, preview, onPointerDown } = useDrag(state);
+  const { indicator, preview, full, onPointerDown } = useDrag(state);
   const [profiles, setProfiles] = useState(false);
   const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
   // The displayed Space's color tints the sidebar and the window, and blends into the next one's
@@ -82,6 +83,7 @@ export function App() {
       {/* Kept empty without a selected tab, so the sections below do not move. */}
       <div className="url" title={active?.url}>
         <span className="title">{active && domain(active.url)}</span>
+        {active && <CopyLink />}
         {active && page?.loading && (
           <progress className="progress" aria-label="Loading" value={page.progress} />
         )}
@@ -101,6 +103,7 @@ export function App() {
                 renaming={renaming}
                 onRename={setRenaming}
                 preview={preview}
+                full={full === spacePage.roots.favorites}
               />
             );
           })}
@@ -147,6 +150,7 @@ function Sections({
   renaming,
   onRename,
   preview,
+  full,
 }: {
   page: SpacePage;
   space: Space;
@@ -155,6 +159,8 @@ function Sections({
   renaming: number | null;
   onRename: Rename;
   preview: TilePreview | null;
+  // A tab dragged over the favorites finds them full.
+  full: boolean;
 }) {
   const { roots, selected } = page;
   // While a tile or a row is dragged over them, the favorites open its slot.
@@ -166,15 +172,18 @@ function Sections({
       inert={!displayed}
       style={{ left: `${index * 100}%` }}
     >
-      {/* Without favorites, a placeholder takes their place and receives the dropped tab. */}
+      {/* Without favorites, a box invites to drag tabs there, until it is dismissed. */}
       <ul
         className="favorites"
         aria-label="Favorites"
         data-parent={roots.favorites}
         style={{ "--columns": favoriteColumns(favorites.length) } as CSSProperties}
       >
-        {favorites.length === 0 && (
-          <li className="favorites-empty">Drag tabs here to keep them close</li>
+        {favorites.length === 0 && page.favoritesHint && <FavoritesHint space={page.space} />}
+        {full && (
+          <li className="favorites-full" role="status">
+            Favorites are full
+          </li>
         )}
         {favorites.map((tab) =>
           tab ? (
@@ -487,6 +496,8 @@ const Favorite = memo(function Favorite({
   favicon: string | null;
   active: boolean;
 }) {
+  // The selected tile takes its icon's color.
+  const color = useFaviconColor(active ? favicon : null);
   return (
     <li data-id={id}>
       <button
@@ -495,6 +506,7 @@ const Favorite = memo(function Favorite({
         aria-label={title}
         title={title}
         aria-current={active ? "page" : undefined}
+        style={color ? ({ "--tile-color": color } as CSSProperties) : undefined}
         onClick={() => send(`select/${id}`)}
       >
         {favicon ? <img className="favicon" src={favicon} alt="" /> : <span className="favicon" />}
@@ -502,6 +514,67 @@ const Favorite = memo(function Favorite({
     </li>
   );
 });
+
+// The empty favorites' invitation to drag tabs there; its × hides it for the profile until it has
+// favorites again.
+function FavoritesHint({ space }: { space: number }) {
+  return (
+    <li className="favorites-empty">
+      <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true">
+        <path
+          d="m8 2.2 1.75 3.6 3.95.55-2.87 2.77.7 3.93L8 11.18l-3.53 1.87.7-3.93L2.3 6.35l3.95-.55z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <strong>Drag tabs here to keep them close</strong>
+      <span>Favorites stay one click away in every Space of this profile</span>
+      <button
+        type="button"
+        className="hint-close"
+        aria-label="Hide this hint"
+        title="Hide this hint"
+        onClick={() => send(`favorites/hide-hint/${space}`)}
+      >
+        ×
+      </button>
+    </li>
+  );
+}
+
+// How long the url bar says the link was copied.
+export const COPIED_MS = 1200;
+
+// Copies the selected tab's url, as its menu's Copy Link does, and says so for a moment.
+function CopyLink() {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      className="copy-link"
+      aria-label="Copy link"
+      title="Copy link"
+      data-copied={copied || undefined}
+      onClick={() => {
+        send("link/copy");
+        setCopied(true);
+      }}
+    >
+      {copied ? (
+        <span role="status">Copied</span>
+      ) : (
+        <Icon d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.2-2.2a2.6 2.6 0 0 0-3.7-3.7l-.9.9M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.3 9a2.6 2.6 0 0 0 3.7 3.7l.9-.9" />
+      )}
+    </button>
+  );
+}
 
 // A folder, open while its tabs show.
 function FolderIcon({ open }: { open: boolean }) {

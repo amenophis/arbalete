@@ -278,12 +278,18 @@ impl UiState {
             .sidebar
             .favorites_of(space.id)
             .expect("a known profile");
+        let profile = self
+            .sidebar
+            .profiles()
+            .iter()
+            .find(|p| p.id == space.profile);
         json!({
             "space": space.id,
             "selected": space.selected,
             "collapsed": space.collapsed,
             "roots": { "favorites": favorites, "pinned": space.pinned, "today": space.today },
             "favorites": self.tabs(favorites),
+            "favoritesHint": profile.is_some_and(|p| !p.favorites_hint_hidden),
             "pinned": self.items(space.pinned),
             "today": self.items(space.today),
         })
@@ -1434,6 +1440,17 @@ pub fn run(command: Command) {
         (Command::NewFolder(parent), _) => new_folder(parent),
         (Command::CloseFolderTabs(folder), _) => close_folder_tabs(folder),
         (Command::RemoveFavorite(tab), _) => remove_favorite(tab),
+        // Like a selection, an unknown Space from the UI is ignored.
+        (Command::HideFavoritesHint(space), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.hide_favorites_hint(space));
+        }
+        (Command::CopyLink, _) => {
+            let url = STATE
+                .with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()));
+            if let Some(url) = url {
+                crate::mac::copy(&url);
+            }
+        }
         (Command::MoveToSpace(tab, space), _) => move_to_space(tab, space),
         (Command::Menu(target), _) => show_menu(target),
         (Command::MenuTargets { revealed, targets }, _) => {
@@ -2324,6 +2341,27 @@ mod tests {
             office["roots"]["favorites"],
             serde_json::json!(work_favorites)
         );
+        assert_eq!(office["favoritesHint"], true);
+        let work = state.sidebar.spaces()[1].id;
+        state.sidebar.hide_favorites_hint(work).unwrap();
+        assert_eq!(state.to_json()["pages"][1]["favoritesHint"], false);
+    }
+
+    #[test]
+    fn sends_the_closed_tabs_with_when_they_closed() {
+        let mut state = UiState::default();
+        let tab = arbalette_core::sidebar::Tab {
+            url: "https://example.com/".into(),
+            title: "Example".into(),
+            favicon: None,
+            opener: None,
+            saved_url: None,
+        };
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(60);
+        state.closed.push((tab, at));
+        let closed = &state.to_json()["closed"][0];
+        assert_eq!(closed["url"], "https://example.com/");
+        assert_eq!(closed["closedAt"], 60_000);
     }
 
     #[test]
