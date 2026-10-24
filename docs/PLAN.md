@@ -386,6 +386,10 @@ Commit sequence (Arc first, the browser Arbalette users are most likely to come 
   everywhere, several windows and profiles).
 - Record each finding with what Arc does and whether Arbalette has it; turn the missing ones into plan entries,
   ranked by how much users coming from Arc rely on them.
+- The audit is also the design reference, the goal being pixel perfect: for every screen, state and motion,
+  record measurements (sizes, spacing, radii, colors, type, timings and easing) from screenshots and screen
+  recordings, compare Arbalette side by side at the same window size, and fix every difference. Arbalette draws
+  its own icons and copies no asset.
 
 ### Later
 Sync, password import.
