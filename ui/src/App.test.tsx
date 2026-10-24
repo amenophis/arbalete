@@ -69,6 +69,7 @@ function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites, disp
       }))
       .filter((_, index) => Math.abs(index - shown) <= 1),
     profiles: [{ id: 1, name: "Default", color: "purple" }],
+    closed: [{ url: "https://example.com/gone", title: "Gone", favicon: null }],
   };
   act(() => {
     dispatchEvent(new CustomEvent("arbalette:state", { detail }));
@@ -363,12 +364,14 @@ test("a flick displays the next Space in its direction", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/space/13", { method: "POST" });
 });
 
-test("the first Space resists a swipe towards the one before", async () => {
+test("the library resists a swipe towards a page before it", async () => {
   reduceMotion();
   render(<App />);
   receive({});
+  swipe(10, 20, 50);
+  await frame();
+  expect(position()).toBe("translateX(100%)");
   fetch.mockClear();
-  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(200);
   act(() => {
     dispatchEvent(
       new CustomEvent("arbalette:swipe", { detail: { phase: "begin", dx: 1000, time: 0 } }),
@@ -376,15 +379,15 @@ test("the first Space resists a swipe towards the one before", async () => {
   });
   await frame();
   const offset = Number.parseFloat(position().replace("translateX(", ""));
-  expect(offset).toBeGreaterThan(0);
-  expect(offset).toBeLessThan(25);
+  expect(offset).toBeGreaterThan(100);
+  expect(offset).toBeLessThan(125);
   act(() => {
     dispatchEvent(
       new CustomEvent("arbalette:swipe", { detail: { phase: "end", dx: 0, time: 500 } }),
     );
   });
   await frame();
-  expect(position()).toBe("translateX(0%)");
+  expect(position()).toBe("translateX(100%)");
   expect(fetch).not.toHaveBeenCalled();
 });
 
@@ -491,4 +494,37 @@ test("creating a Space shows its page where the new Space's was", async () => {
   } finally {
     spaces.pop();
   }
+});
+
+const library = () => document.querySelector<HTMLElement>(".library");
+
+test("a swipe before the first Space shows the library, without telling the app", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  fetch.mockClear();
+  expect(library()?.style.left).toBe("-100%");
+  expect(library()?.hasAttribute("inert")).toBe(true);
+  swipe(10, 20, 50);
+  await frame();
+  expect(position()).toBe("translateX(100%)");
+  expect(library()?.hasAttribute("inert")).toBe(false);
+  expect(document.querySelectorAll(".space-page:not([inert])")).toHaveLength(0);
+  expect(screen.getByRole("navigation").style.getPropertyValue("--space")).toBe(
+    "var(--background)",
+  );
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("the library reopens a closed tab in the displayed Space and slides back to it", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  swipe(10, 20, 50);
+  await frame();
+  fireEvent.click(within(library() as HTMLElement).getByRole("button", { name: "Gone" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/reopen/0", { method: "POST" });
+  await frame();
+  expect(position()).toBe("translateX(0%)");
+  expect(library()?.hasAttribute("inert")).toBe(true);
 });

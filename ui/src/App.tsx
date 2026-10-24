@@ -1,6 +1,7 @@
 import { type KeyboardEvent, memo, useRef } from "react";
 import { type Item, type SpacePage, send, type Tab, useAppState, useRenaming } from "./bridge";
 import { type Dragging, useDrag } from "./drag";
+import { Library } from "./Library";
 import { Profiles } from "./Profiles";
 import { usePager } from "./pager";
 import { NewSpace, Spaces } from "./Spaces";
@@ -69,6 +70,13 @@ export function App() {
               />
             );
           })}
+          {state && (
+            <Library
+              closed={state.closed}
+              shown={pager.settled === -1}
+              onReopen={() => pager.go(displayed)}
+            />
+          )}
           {state && <NewSpace index={count} shown={pager.settled === count} />}
         </div>
       </div>
