@@ -2,7 +2,8 @@
 // Shared by the end-to-end checks (e2e/tabs.mjs, e2e/import.mjs) and the benchmark (perf/measure.mjs).
 // Needs Node.js 22 or later (global WebSocket).
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -29,6 +30,18 @@ export function launch(dataDir, home = join(tmpdir(), "arbalette-no-home")) {
     stdio: "ignore",
     // Not the repository, which may sit in Documents: macOS asks before an app reads it.
     cwd: tmpdir(),
+  });
+}
+
+// Quits the app started by launch() as the app menu's Quit does, with the quit request macOS
+// sends to that process alone, and resolves once it has exited.
+export async function quit(app) {
+  const script = `ObjC.import("AppKit");
+    $.NSRunningApplication.runningApplicationWithProcessIdentifier(${app.pid}).terminate`;
+  const exited = once(app, "exit", { signal: AbortSignal.timeout(TIMEOUT) });
+  execFile("osascript", ["-l", "JavaScript", "-e", script]);
+  await exited.catch(() => {
+    throw new Error("the app did not exit after quitting");
   });
 }
 

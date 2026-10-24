@@ -126,6 +126,8 @@ thread_local! {
     static HISTORIES: RefCell<HashMap<ProfileId, History>> = RefCell::default();
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
+    /// The window was asked to close, by quitting or its close button.
+    static CLOSING: Cell<bool> = const { Cell::new(false) };
     #[cfg(target_os = "macos")]
     static SWIPE: RefCell<crate::swipe::Tracker> = RefCell::default();
     /// Where the docked sidebar's rows and Space header are, then the revealed one's.
@@ -1524,9 +1526,8 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
     }
 }
 
-/// Closes the main window, which quits the app once its browser is closed. Called by the macOS
+/// Closes the main window, which quits the app once its browsers are closed. Called by the macOS
 /// app menu; the window's own close button does the same on every OS.
-#[cfg(target_os = "macos")]
 pub fn close() {
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
         window.close();
@@ -1646,8 +1647,9 @@ wrap_window_delegate! {
             }
         }
 
-        /// Asks every browser to close; the window closes once they all have.
+        /// Asks every browser to close; the window closes once they all can.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
+            CLOSING.set(true);
             let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW]
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
@@ -1975,6 +1977,10 @@ wrap_life_span_handler! {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() - 1);
             if OPEN_BROWSERS.get() == 0 {
                 quit_message_loop();
+            } else if CLOSING.get() {
+                // A browser ready to close while another is not yet cancels the window's close,
+                // and with it the ready one's: ask again, or the last ones never close.
+                close();
             }
         }
     }

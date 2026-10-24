@@ -5,7 +5,8 @@
 // Spaces from the page after the last one and editing them, switching Spaces by number and by
 // swiping between their pages, reopening closed tabs from the library before the first Space,
 // showing the displayed profile's favorites, recording each profile's history, running the items
-// of the rows' and the Spaces' native menus, and collapsing and deleting Spaces, in the real app.
+// of the rows' and the Spaces' native menus, collapsing and deleting Spaces, and quitting, in the
+// real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -13,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
-import { connect, launch, pages, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs";
+import { connect, launch, pages, quit, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs";
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error("usage: node e2e/tabs.mjs <data dir>");
@@ -1152,6 +1153,8 @@ try {
   await checkSession("the session saves the Space with its new profile", (saved) =>
     saved.profiles.find((profile) => profile.id === saved.spaces[0].profile)?.name === "New Profile",
   );
+  await quit(app);
+  console.log("ok - quitting once closes every browser and exits the app");
 } finally {
   app.kill();
 }
