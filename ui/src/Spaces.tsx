@@ -2,9 +2,8 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { type Color, firstGrapheme, type Space, send } from "./bridge";
 import { keepOnEscape, NameField, Swatches } from "./Profiles";
 
-// One icon per Space, its emoji or a dot, then a button to create one, which slide the
-// sidebar to their page with `onPage`. The Space whose page shows, if any, is marked aria-current;
-// clicking its icon again opens its editor.
+// One icon per Space, its emoji or a dot, which slides the sidebar to its page with `onPage`. The
+// Space whose page shows, if any, is marked aria-current; clicking its icon again opens its editor.
 export function Spaces({
   spaces,
   displayed,
@@ -42,20 +41,6 @@ export function Spaces({
             </li>
           );
         })}
-        <li>
-          <button
-            type="button"
-            className="new-space"
-            aria-label="New Space"
-            title="New Space"
-            onClick={() => {
-              setOpen(false);
-              onPage(spaces.length);
-            }}
-          >
-            +
-          </button>
-        </li>
       </ul>
       {editing && (
         <SpaceEditor

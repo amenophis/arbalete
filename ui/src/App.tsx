@@ -1,4 +1,4 @@
-import { type CSSProperties, type KeyboardEvent, memo, useRef } from "react";
+import { type CSSProperties, type KeyboardEvent, memo, useRef, useState } from "react";
 import {
   COLORS,
   type Item,
@@ -13,6 +13,7 @@ import {
 import { useDrag } from "./drag";
 import { Icon } from "./Icon";
 import { Library } from "./Library";
+import { NewMenu } from "./NewMenu";
 import { Profiles } from "./Profiles";
 import { usePager } from "./pager";
 import { NewSpace, Spaces } from "./Spaces";
@@ -21,6 +22,7 @@ export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalette:rename");
   const { indicator, onPointerDown } = useDrag();
+  const [profiles, setProfiles] = useState(false);
   const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
   // The displayed Space's color tints the sidebar, and blends into the next one's on the way.
   const pager = usePager(state?.spaces ?? [], displayed);
@@ -118,7 +120,8 @@ export function App() {
           displayed={onSpace ? state?.space : undefined}
           onPage={pager.go}
         />
-        <Profiles profiles={state?.profiles ?? []} />
+        <NewMenu onNewSpace={() => pager.go(count)} onProfiles={() => setProfiles(true)} />
+        <Profiles profiles={state?.profiles ?? []} open={profiles} onOpen={setProfiles} />
       </div>
       <div className="drop-indicator" ref={indicator} />
     </nav>

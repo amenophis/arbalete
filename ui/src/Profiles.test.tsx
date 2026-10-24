@@ -4,8 +4,10 @@ import type { Profile } from "./bridge";
 import { Profiles } from "./Profiles";
 
 const fetch = vi.fn();
+const onOpen = vi.fn();
 
 beforeEach(() => {
+  onOpen.mockReset();
   fetch.mockReset().mockResolvedValue(new Response("{}"));
   vi.stubGlobal("fetch", fetch);
 });
@@ -18,22 +20,27 @@ const profiles: Profile[] = [
 ];
 
 function open() {
-  render(<Profiles profiles={profiles} />);
-  fireEvent.click(screen.getByRole("button", { name: "Profiles" }));
+  render(<Profiles profiles={profiles} open onOpen={onOpen} />);
 }
 
 const names = () => screen.getAllByRole("textbox", { name: "Profile name" }) as HTMLInputElement[];
 
-test("opens and closes the list of profiles", () => {
-  render(<Profiles profiles={profiles} />);
-  const toggle = screen.getByRole("button", { name: "Profiles" });
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+test("lists the profiles only while open", () => {
+  const { rerender } = render(<Profiles profiles={profiles} open={false} onOpen={onOpen} />);
   expect(screen.queryByRole("list", { name: "Profiles" })).toBeNull();
-  fireEvent.click(toggle);
-  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  rerender(<Profiles profiles={profiles} open onOpen={onOpen} />);
   expect(names().map((input) => input.value)).toEqual(["Default", "Work"]);
-  fireEvent.click(toggle);
-  expect(screen.queryByRole("list", { name: "Profiles" })).toBeNull();
+});
+
+test("closes on Escape or a press outside, not on a press inside", () => {
+  open();
+  fireEvent.pointerDown(screen.getByRole("button", { name: "+ New profile" }));
+  expect(onOpen).not.toHaveBeenCalled();
+  fireEvent.pointerDown(document.body);
+  expect(onOpen).toHaveBeenLastCalledWith(false);
+  onOpen.mockReset();
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(onOpen).toHaveBeenLastCalledWith(false);
 });
 
 test("creates a profile", () => {
@@ -78,20 +85,19 @@ test("shows the color of each profile and picks another", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/profile/color/7/green", { method: "POST" });
 });
 
-test("opens and edits the name of the profile the app has just created", () => {
-  render(<Profiles profiles={profiles} />);
-  fireEvent.click(screen.getByRole("button", { name: "Profiles" }));
+test("edits the name of the profile the app has just created, then stays open", () => {
+  render(<Profiles profiles={profiles} open={false} onOpen={onOpen} />);
   act(() => {
     dispatchEvent(new CustomEvent("arbalette:rename-profile", { detail: 7 }));
   });
   const input = names()[1];
   expect(document.activeElement).toBe(input);
   fireEvent.blur(input);
-  expect(screen.getByRole("list", { name: "Profiles" })).toBeDefined();
+  expect(onOpen).toHaveBeenLastCalledWith(true);
 });
 
 test("opens the list to edit the name of a profile the app has just created", () => {
-  render(<Profiles profiles={profiles} />);
+  render(<Profiles profiles={profiles} open={false} onOpen={onOpen} />);
   act(() => {
     dispatchEvent(new CustomEvent("arbalette:rename-profile", { detail: 1 }));
   });
