@@ -19,6 +19,13 @@
   }
 }
 
+/* The page itself never scrolls nor bounces: only the tab list does, without bouncing either. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   height: 100vh;
@@ -42,6 +49,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: none;
 }
 
 /* Drags the window, and leaves room for the macOS window buttons (TOOLBAR_HEIGHT in shell.rs). */
