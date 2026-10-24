@@ -384,6 +384,9 @@ Commit sequence (Arc first, the browser Arbalette users are most likely to come 
 - Use Arc as a user, systematically, to find the features this plan misses: every menu and submenu, keyboard
   shortcut, context menu, setting and empty state, with edge cases (many tabs, long titles, drag and drop
   everywhere, several windows and profiles).
+- Start from an empty Arc (a fresh user account or a cleared Arc data folder, never the user's own) to audit the
+  onboarding: first launch, sign-in or skip, import offer, theme and Space setup, default Favorites, tips and
+  every screen until the first browsing session. Arbalette's first launch is then designed from it.
 - Record each finding with what Arc does and whether Arbalette has it; turn the missing ones into plan entries,
   ranked by how much users coming from Arc rely on them.
 - The audit is also the design reference, the goal being pixel perfect: for every screen, state and motion,
