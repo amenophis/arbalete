@@ -53,6 +53,7 @@ pub fn load(path: &Path) -> Result<Option<Sidebar>, LoadError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sidebar::Color;
     use std::path::PathBuf;
 
     /// A fresh directory per test, so tests can run in parallel.
@@ -74,6 +75,8 @@ mod tests {
         sidebar.move_node(tab, folder, 0).unwrap();
         let work = sidebar.add_space("Work", home.profile).unwrap();
         sidebar.display(work).unwrap();
+        sidebar.set_space_emoji(work, "💼").unwrap();
+        sidebar.set_space_color(work, Color::Green).unwrap();
 
         save(&sidebar, &path).unwrap();
         assert_eq!(load(&path).unwrap(), Some(sidebar));

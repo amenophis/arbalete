@@ -53,8 +53,8 @@ function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites) {
     active,
     space: 13,
     spaces: [
-      { id: 13, title: "Home" },
-      { id: 14, title: "work" },
+      { id: 13, title: "Home", emoji: null, color: "blue" },
+      { id: 14, title: "work", emoji: null, color: "green" },
     ],
     profiles: [{ id: 1, name: "Default", color: "purple" }],
   };
@@ -262,7 +262,7 @@ test("shows one icon per Space at the bottom, the displayed one marked", () => {
   render(<App />);
   receive({});
   const spaces = within(screen.getByRole("list", { name: "Spaces" })).getAllByRole("button");
-  expect(spaces.map((space) => space.textContent)).toEqual(["H", "W"]);
+  expect(spaces.map((space) => space.textContent)).toEqual(["H", "W", "+"]);
   expect(spaces[0].getAttribute("aria-current")).toBe("true");
   expect(spaces[1].hasAttribute("aria-current")).toBe(false);
 });
@@ -272,4 +272,11 @@ test("switches to a Space when its icon is clicked", () => {
   receive({});
   fireEvent.click(screen.getByRole("button", { name: "work" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/space/14", { method: "POST" });
+});
+
+test("tints the sidebar with the displayed Space's color", () => {
+  render(<App />);
+  receive({});
+  const sidebar = screen.getByRole("navigation");
+  expect(sidebar.style.getPropertyValue("--space")).toBe("#3e7bfa");
 });
