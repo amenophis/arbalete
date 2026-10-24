@@ -290,13 +290,47 @@ fn set_sidebar(mode: SidebarMode) {
     }
     place_card();
     place_reveal();
+    update_drag_regions();
+    #[cfg(target_os = "macos")]
+    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+        crate::mac::sidebar_shown(window.window_handle(), shown);
+    }
+}
+
+/// The window moves by the sidebar's drag areas, its margins around the card among them. The
+/// hidden sidebar paints nothing: the margins then move it by themselves.
+fn update_drag_regions() {
     let Some(window) = WINDOW.with_borrow(Clone::clone) else {
         return;
     };
-    let regions = DRAG_REGIONS.with_borrow(|regions| if shown { regions.clone() } else { vec![] });
+    let regions = if SIDEBAR_MODE.get() == SidebarMode::Shown {
+        DRAG_REGIONS.with_borrow(Clone::clone)
+    } else {
+        margin_regions(window.size())
+    };
     window.set_draggable_regions(Some(&regions));
-    #[cfg(target_os = "macos")]
-    crate::mac::sidebar_shown(window.window_handle(), shown);
+}
+
+/// The four margins around the card of a window of `size` without the sidebar.
+fn margin_regions(size: Size) -> Vec<DraggableRegion> {
+    let (width, height) = (size.width, size.height);
+    [
+        (0, 0, width, CARD_MARGIN),
+        (0, height - CARD_MARGIN, width, CARD_MARGIN),
+        (0, 0, CARD_MARGIN, height),
+        (width - CARD_MARGIN, 0, CARD_MARGIN, height),
+    ]
+    .into_iter()
+    .map(|(x, y, width, height)| DraggableRegion {
+        bounds: Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+        draggable: 1,
+    })
+    .collect()
 }
 
 /// Insets the card from the window's edges, and from the sidebar while it is shown.
@@ -1063,10 +1097,11 @@ wrap_window_delegate! {
             Size { width: 1280, height: 820 }
         }
 
-        // The card and the revealed sidebar follow the window's size.
+        // The card, the revealed sidebar and the margins follow the window's size.
         fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
             place_card();
             place_reveal();
+            update_drag_regions();
         }
     }
 
@@ -1226,11 +1261,7 @@ wrap_drag_handler! {
                 return;
             }
             DRAG_REGIONS.set(regions.unwrap_or_default().to_vec());
-            if SIDEBAR_MODE.get() == SidebarMode::Shown
-                && let Some(window) = WINDOW.with_borrow(Clone::clone)
-            {
-                window.set_draggable_regions(regions);
-            }
+            update_drag_regions();
         }
     }
 }
@@ -1469,7 +1500,33 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UiState, ui_file, ui_path};
+    use super::{CARD_MARGIN, Size, UiState, margin_regions, ui_file, ui_path};
+
+    #[test]
+    fn the_margins_around_the_card_move_the_window_without_the_sidebar() {
+        let regions = margin_regions(Size {
+            width: 1000,
+            height: 600,
+        });
+        let bounds: Vec<_> = regions
+            .iter()
+            .map(|region| {
+                let rect = &region.bounds;
+                (rect.x, rect.y, rect.width, rect.height)
+            })
+            .collect();
+        let m = CARD_MARGIN;
+        assert_eq!(
+            bounds,
+            [
+                (0, 0, 1000, m),
+                (0, 600 - m, 1000, m),
+                (0, 0, m, 600),
+                (1000 - m, 0, m, 600)
+            ]
+        );
+        assert!(regions.iter().all(|region| region.draggable == 1));
+    }
 
     #[test]
     fn sends_the_page_and_the_tabs() {
