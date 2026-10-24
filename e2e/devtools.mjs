@@ -110,13 +110,19 @@ export async function connect(url) {
 }
 
 // An expression that resolves once `condition` is truthy, checked on every frame, and rejects
-// after a timeout. A hidden page draws no frame: it is then checked on a timer.
+// after a timeout. A hidden page draws no frame: it is then checked on a timer. A condition that
+// throws counts as false: thrown from a frame callback, it would leave the promise pending.
 export function waitFor(condition) {
   return `new Promise((resolve, reject) => {
     const deadline = performance.now() + ${TIMEOUT};
+    let thrown = "";
     const check = () => {
-      if (${condition}) return resolve(${condition});
-      if (performance.now() > deadline) return reject(new Error(${JSON.stringify(`timed out waiting for ${condition}`)}));
+      try {
+        if (${condition}) return resolve(${condition});
+      } catch (error) {
+        thrown = " (" + error + ")";
+      }
+      if (performance.now() > deadline) return reject(new Error(${JSON.stringify(`timed out waiting for ${condition}`)} + thrown));
       let checked = false;
       const next = () => checked || ((checked = true), check());
       requestAnimationFrame(next);

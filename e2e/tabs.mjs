@@ -66,6 +66,9 @@ try {
     // The commands the sidebar sends, the window's colors among them.
     sent: [],
     colors: () => e2e.sent.filter((url) => url.includes("/window/colors/")).at(-1),
+    // The last command a check caused, past those the sidebar sends after any state update,
+    // such as a favicon cached meanwhile.
+    lastCommand: () => e2e.sent.filter((url) => !["/menu/targets/", "/window/colors/"].some((part) => url.includes(part))).at(-1),
   }`);
   await sidebar.eval(`{
     const fetchCommand = fetch;
@@ -996,7 +999,7 @@ try {
     `e2e.swipe(20, 15, 50)`,
     `e2e.library()?.querySelector(".tab")?.textContent === e2e.closedText && e2e.offset() === 100
       && e2e.state.space === e2e.spaces[0] && !e2e.page()
-      && e2e.sent.at(-1).endsWith("/library/show")`,
+      && e2e.lastCommand().endsWith("/library/show")`,
   );
   // On the library, the sidebar and the window around it are untinted alike: no seam.
   const untinted = await sidebar.eval(`(() => {
@@ -1112,7 +1115,7 @@ try {
        .find((tab) => String(tab.id) === id)?.url`,
     `e2e.settled(0) && (e2e.menuTab = e2e.rows()[0].dataset.id)
       && e2e.rightClick(e2e.rows()[0].querySelector(".title"))
-      && e2e.sent.at(-1).endsWith("/command/menu/node/" + e2e.menuTab)`,
+      && e2e.lastCommand().endsWith("/command/menu/node/" + e2e.menuTab)`,
   );
   await check(
     "a right-click elsewhere in the sidebar shows no menu at all",
@@ -1239,7 +1242,7 @@ try {
     `e2e.header = () => e2e.page().querySelector(".space-toggle");
      e2e.chooseSpace = (item) => e2e.send("menu/choose/space/" + e2e.spaces[0] + "/" + item);
      e2e.prevented = e2e.rightClick(e2e.header())`,
-    `e2e.prevented && e2e.sent.at(-1).endsWith("/command/menu/space/" + e2e.spaces[0])`,
+    `e2e.prevented && e2e.lastCommand().endsWith("/command/menu/space/" + e2e.spaces[0])`,
   );
   await check(
     "the header's options button asks for it too",
@@ -1367,7 +1370,7 @@ try {
   await check(
     "the menu's New Tab opens the overlay to type an address",
     `e2e.menu("New Tab")`,
-    `e2e.sent.at(-1).endsWith("/command/overlay/show") && !document.querySelector(".menu")`,
+    `e2e.lastCommand().endsWith("/command/overlay/show") && !document.querySelector(".menu")`,
   );
   await sidebar.eval(`e2e.send("overlay/hide")`);
   await check(
@@ -1438,7 +1441,7 @@ try {
   await check(
     "the url bar's copy button copies the link and says so",
     `document.querySelector(".copy-link").click()`,
-    `e2e.sent.at(-1).endsWith("/command/link/copy") && document.querySelector(".copy-link").textContent === "Copied"`,
+    `e2e.lastCommand().endsWith("/command/link/copy") && document.querySelector(".copy-link").textContent === "Copied"`,
   );
   await check(
     "the × of a pinned tab its Space does not show removes it, to the closed tabs",
