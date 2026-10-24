@@ -71,6 +71,8 @@ body {
   padding: 0 3px 8px 7px;
   color: var(--text);
   user-select: none;
+  /* The footer's menu and popover: a dark panel tinted by the displayed Space. */
+  --menu-panel: color-mix(in srgb, var(--space, var(--accent)) 22%, #16141d);
   /* The Space's color, at a strength from 0 to 1 (tint in pager.ts). */
   --tint: color-mix(
     in srgb,
@@ -786,20 +788,112 @@ button.folder:hover {
   transform: rotate(45deg);
 }
 
-/* Rises a few pixels above the footer as it fades in. */
+/* A dark panel (--menu-panel), which rises a few pixels above the footer as it fades
+   in, its arrow pointing at the "+" (the footer's last button, 28 px wide). */
 .menu {
   position: absolute;
-  right: 0;
-  bottom: calc(100% + 4px);
-  left: 0;
+  right: -2px;
+  bottom: calc(100% + 10px);
   display: flex;
   flex-direction: column;
-  padding: 4px;
-  border: 1px solid var(--menu-border);
-  border-radius: 10px;
-  background: var(--menu);
-  box-shadow: 0 8px 24px #00000059;
+  width: 224px;
+  padding: 5px;
+  border-radius: 12px;
+  background: var(--menu-panel);
+  color: #f2f0f7;
+  box-shadow:
+    0 0 0 1px #ffffff1a,
+    0 10px 28px #00000066;
+  transform-origin: calc(100% - 16px) 100%;
   animation: rise 100ms ease-out;
+}
+
+.menu::after {
+  content: "";
+  position: absolute;
+  right: 11px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 0 0 2px;
+  background: var(--menu-panel);
+  box-shadow: 1px 1px 0 #ffffff1a;
+  transform: rotate(45deg);
+}
+
+/* Above the footer's left end, with a transparent strip below it down to the Library button, so
+   the pointer crosses from one to the other without leaving them. */
+.library-popover {
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  width: 240px;
+  padding-bottom: 6px;
+}
+
+.popover-panel {
+  padding: 6px 5px 5px;
+  border-radius: 12px;
+  background: var(--menu-panel);
+  color: #f2f0f7;
+  box-shadow:
+    0 0 0 1px #ffffff1a,
+    0 10px 28px #00000066;
+  animation: rise 100ms ease-out;
+}
+
+.popover-panel h3 {
+  margin: 0;
+  padding: 2px 8px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.popover-panel .library-empty {
+  padding: 4px 8px 6px;
+}
+
+.popover-panel ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.popover-panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.popover-panel button:hover,
+.popover-panel button:focus-visible {
+  background: #ffffff1f;
+  outline: none;
+}
+
+.popover-panel .closed-title {
+  flex: 1;
+}
+
+.popover-panel .when {
+  flex: none;
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.popover-panel .favicon.placeholder {
+  background: #ffffff26;
 }
 
 @keyframes rise {
@@ -810,19 +904,36 @@ button.folder:hover {
 }
 
 .menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   height: 30px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: none;
   color: inherit;
   font: inherit;
   text-align: left;
 }
 
+.menu [role="menuitem"] svg {
+  flex: none;
+  opacity: 0.8;
+}
+
+.menu .label {
+  flex: 1;
+}
+
+.menu kbd {
+  font: inherit;
+  opacity: 0.5;
+}
+
 .menu button:hover,
 .menu button:focus-visible {
-  background: var(--hover);
+  background: #ffffff1f;
   outline: none;
 }
 
@@ -831,7 +942,8 @@ button.folder:hover {
     transition: none;
   }
 
-  .menu {
+  .menu,
+  .popover-panel {
     animation: none;
   }
 }
@@ -1018,6 +1130,13 @@ button.folder:hover {
 
 :root[data-instant] .sidebar > * {
   transition: none;
+}
+
+.menu hr {
+  width: calc(100% - 16px);
+  margin: 4px auto;
+  border: 0;
+  border-top: 1px solid #ffffff1f;
 }
 
 @media (prefers-reduced-motion: reduce) {

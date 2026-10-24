@@ -83,7 +83,7 @@ function receive(
       }))
       .filter((_, index) => Math.abs(index - shown) <= 1),
     profiles: [{ id: 1, name: "Default", color: "purple" }],
-    closed: [{ url: "https://example.com/gone", title: "Gone", favicon: null }],
+    closed: [{ url: "https://example.com/gone", title: "Gone", favicon: null, closedAt: 0 }],
   };
   act(() => {
     dispatchEvent(new CustomEvent("arbalette:state", { detail }));

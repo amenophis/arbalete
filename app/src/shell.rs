@@ -227,8 +227,8 @@ const RECENTLY_CLOSED: usize = 10;
 struct UiState {
     page: Page,
     sidebar: Sidebar,
-    /// Closed tabs, the last one at the end, until the app quits.
-    closed: Vec<Tab>,
+    /// Closed tabs, the last one at the end, with when they closed, until the app quits.
+    closed: Vec<(Tab, SystemTime)>,
 }
 
 impl UiState {
@@ -262,10 +262,11 @@ impl UiState {
                 "name": p.name,
                 "color": p.color,
             })).collect::<Vec<_>>(),
-            "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|tab| json!({
+            "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, at)| json!({
                 "url": tab.url,
                 "title": tab.title,
                 "favicon": tab.favicon,
+                "closedAt": at.duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64),
             })).collect::<Vec<_>>(),
         })
     }
@@ -1003,7 +1004,7 @@ fn close_tab(tab: Option<NodeId>) {
 fn remove_tab(tab: NodeId) -> Option<NodeId> {
     let next = STATE.with_borrow_mut(|state| {
         let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
-        state.closed.push(closed);
+        state.closed.push((closed, SystemTime::now()));
         state.sidebar.next_after_close(tab)
     });
     update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
@@ -1212,7 +1213,7 @@ fn reopen_tab(rank: usize) {
         let index = state.closed.len().checked_sub(rank + 1)?;
         Some(state.closed.remove(index))
     });
-    let Some(closed) = closed else { return };
+    let Some((closed, _)) = closed else { return };
     open_tab(&closed.url);
     update_sidebar(|sidebar| {
         if let Some(tab) = active_tab(sidebar) {

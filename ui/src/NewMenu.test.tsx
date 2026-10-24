@@ -26,14 +26,26 @@ test("the + button opens the menu on its first item, and closes it again", () =>
   fireEvent.click(toggle());
   expect(toggle().getAttribute("aria-expanded")).toBe("true");
   expect(screen.getAllByRole("menuitem").map((button) => button.textContent)).toEqual([
-    "New Tab",
-    "New Folder",
     "New Space",
+    "New Folder⇧⌘N",
+    "New Tab⌘T",
     "Profiles…",
   ]);
-  expect(document.activeElement).toBe(item("New Tab"));
+  expect(document.activeElement).toBe(item("New Space"));
   fireEvent.click(toggle());
   expect(menu()).toBeNull();
+});
+
+test("the items show a line icon, their shortcut, and separators between groups", () => {
+  fireEvent.click(toggle());
+  const children = [...(menu()?.children ?? [])].map((child) => child.tagName);
+  expect(children).toEqual(["BUTTON", "BUTTON", "HR", "BUTTON", "HR", "BUTTON"]);
+  for (const button of screen.getAllByRole("menuitem")) {
+    expect(button.querySelector("svg[aria-hidden=true]")).not.toBeNull();
+  }
+  expect(item("New Tab").getAttribute("aria-keyshortcuts")).toBe("Meta+T");
+  expect(item("New Tab").querySelector("kbd")?.textContent).toBe("⌘T");
+  expect(item("New Space").querySelector("kbd")).toBeNull();
 });
 
 test("each item does its action and closes the menu", () => {
@@ -59,9 +71,11 @@ test("the arrow keys move between the items, around the ends", () => {
   fireEvent.keyDown(document.activeElement as Element, { key: "ArrowUp" });
   expect(focused()).toBe("Profiles…");
   fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
-  expect(focused()).toBe("New Tab");
+  expect(focused()).toBe("New Space");
   fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
-  expect(focused()).toBe("New Folder");
+  expect(focused()).toBe("New Folder⇧⌘N");
+  fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
+  expect(focused()).toBe("New Tab⌘T");
 });
 
 test("Escape closes the menu and gives the keyboard back to the + button", () => {

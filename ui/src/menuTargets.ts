@@ -9,14 +9,19 @@ export type HitTarget = {
   height: number;
 };
 
+// The panels the footer opens above the rows.
+const COVERS = ".menu, .library-popover, .profiles, .space-editor";
+
 // The rows and the Space header of the displayed Space's page, as much of them as shows in
-// `viewport`. Real right-clicks reach no `contextmenu` listener on macOS: the app finds what is
+// `viewport` and no floating panel covers. Real right-clicks reach no `contextmenu` listener on macOS: the app finds what is
 // under the pointer among them and shows its menu at once, like a native view
 // (menu_at in app/src/shell.rs).
 export function menuTargets(root: ParentNode, viewport: DOMRect): HitTarget[] {
   const page = root.querySelector<HTMLElement>(".space-page:not([inert])");
   if (!page) return [];
   const scroll = page.querySelector(".scroll")?.getBoundingClientRect() ?? viewport;
+  // A right-click on a panel the footer opened is the panel's, not the rows' below it.
+  const covers = [...root.querySelectorAll(COVERS)].map((cover) => cover.getBoundingClientRect());
   const targets: HitTarget[] = [];
   const add = (target: HitTarget["target"], element: Element | null, clip: DOMRect) => {
     if (!element) return;
@@ -26,6 +31,11 @@ export function menuTargets(root: ParentNode, viewport: DOMRect): HitTarget[] {
     const right = Math.min(rect.right, clip.right, viewport.right);
     const bottom = Math.min(rect.bottom, clip.bottom, viewport.bottom);
     if (right <= left || bottom <= top) return;
+    const covered = covers.some(
+      (cover) =>
+        cover.left < right && left < cover.right && cover.top < bottom && top < cover.bottom,
+    );
+    if (covered) return;
     targets.push({ target, x: left, y: top, width: right - left, height: bottom - top });
   };
   // The tile being dragged follows the pointer, out of reach.
