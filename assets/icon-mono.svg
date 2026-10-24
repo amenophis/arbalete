@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="112 112 800 800" role="img" aria-label="Arbalette">
+  <title>Arbalette</title>
+  <g>
+    <path d="M316 792 L478 334 Q512 246 546 334 L708 792" fill="none" stroke="#000" stroke-width="124" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M236 622 L800 622" fill="none" stroke="#000" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M792 548 L866 622 L792 696 Z" fill="#000" stroke="#000" stroke-width="48" stroke-linejoin="round"/>
+    <path d="M182 562 L234 622 L182 682" fill="none" stroke="#000" stroke-width="66" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

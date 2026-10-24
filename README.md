@@ -41,6 +41,12 @@ and name it in `.config/mise.local.toml`, which is not committed:
 ARBALETTE_SIGN_IDENTITY = "Arbalette Dev"
 ```
 
+## Logo
+
+The app icon is [assets/icon.svg](assets/icon.svg), with a single-color version in
+[assets/icon-mono.svg](assets/icon-mono.svg). The macOS icon, `app/resources/mac/arbalette.icns`, is rendered
+from it (16 to 1024 px) with `iconutil`.
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) first: simplicity is the project's doctrine.
