@@ -8,35 +8,25 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::{fs, io, path::Path};
 
-#[derive(Debug)]
-pub enum Error {
-    Io(io::Error),
-    Invalid(serde_json::Error),
-}
-
-/// Adds the Spaces and the favorites of one Arc profile, the one in `User Data/<directory>`, to
-/// `profile`, from the sidebar in Arc's data directory `dir`. Nothing when Arc saved none there.
-pub fn add(
-    sidebar: &mut Sidebar,
-    dir: &Path,
-    directory: &str,
-    profile: ProfileId,
-) -> Result<(), Error> {
+/// Reads the sidebar in Arc's data directory `dir`, `StorableSidebar.json`. `None` when Arc saved
+/// none there.
+pub fn read(dir: &Path) -> io::Result<Option<String>> {
     match fs::read_to_string(dir.join("StorableSidebar.json")) {
-        Ok(json) => add_json(sidebar, &json, directory, profile),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(Error::Io(error)),
+        Ok(json) => Ok(Some(json)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
-/// The same from the content of `StorableSidebar.json`.
-fn add_json(
+/// Adds the Spaces and the favorites of one Arc profile, the one in `User Data/<directory>`, to
+/// `profile`, from the content of `StorableSidebar.json`.
+pub fn add(
     sidebar: &mut Sidebar,
     storable_sidebar: &str,
     directory: &str,
     profile: ProfileId,
-) -> Result<(), Error> {
-    let json: Value = serde_json::from_str(storable_sidebar).map_err(Error::Invalid)?;
+) -> Result<(), serde_json::Error> {
+    let json: Value = serde_json::from_str(storable_sidebar)?;
     let containers = json["sidebar"]["containers"].as_array();
     let Some(container) = containers
         .into_iter()
@@ -213,7 +203,7 @@ mod tests {
         let mut sidebar = Sidebar::empty();
         for (directory, name) in [("Default", "Personal"), ("Profile 1", "Work")] {
             let profile = sidebar.add_profile(name);
-            add_json(&mut sidebar, SIDEBAR, directory, profile).unwrap();
+            add(&mut sidebar, SIDEBAR, directory, profile).unwrap();
         }
         sidebar
     }
@@ -237,7 +227,7 @@ mod tests {
     fn imports_only_the_spaces_and_favorites_of_one_arc_profile_into_another() {
         let mut sidebar = Sidebar::default();
         let profile = sidebar.profiles()[0].id;
-        add_json(&mut sidebar, SIDEBAR, "Profile 1", profile).unwrap();
+        add(&mut sidebar, SIDEBAR, "Profile 1", profile).unwrap();
         let titles: Vec<_> = sidebar.spaces().iter().map(|s| s.title.as_str()).collect();
         assert_eq!(titles, ["Home", "Office"]);
         assert_eq!(sidebar.spaces()[1].profile, profile);
@@ -340,7 +330,7 @@ mod tests {
         }]}});
         let mut sidebar = Sidebar::empty();
         let profile = sidebar.add_profile("Default");
-        add_json(&mut sidebar, &json.to_string(), "Default", profile).unwrap();
+        add(&mut sidebar, &json.to_string(), "Default", profile).unwrap();
         let space = &sidebar.spaces()[0];
         assert_eq!(content(&sidebar, space.pinned), ["Loop[]"]);
         assert!(content(&sidebar, space.today).is_empty());
@@ -351,23 +341,19 @@ mod tests {
     #[test]
     fn reads_the_sidebar_in_arc_s_data_directory() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/arc");
-        let mut sidebar = Sidebar::empty();
-        let profile = sidebar.add_profile("Personal");
-        add(&mut sidebar, &dir, "Default", profile).unwrap();
-        assert_eq!(sidebar.spaces().len(), 2);
-        add(&mut sidebar, &dir.join("missing"), "Default", profile).unwrap();
-        assert_eq!(sidebar.spaces().len(), 2);
+        assert_eq!(read(&dir).unwrap().as_deref(), Some(SIDEBAR));
+        assert_eq!(read(&dir.join("missing")).unwrap(), None);
     }
 
     #[test]
     fn imports_nothing_from_a_file_without_spaces() {
         let mut sidebar = Sidebar::default();
         let profile = sidebar.profiles()[0].id;
-        let invalid = add_json(&mut sidebar, "not json", "Default", profile);
-        assert!(matches!(invalid, Err(Error::Invalid(_))));
+        let invalid = add(&mut sidebar, "not json", "Default", profile);
+        assert!(invalid.is_err());
         let empty = json!({ "sidebar": { "containers": [{ "global": {} }, { "spaces": [] }] } });
         for json in ["{}".to_string(), empty.to_string()] {
-            add_json(&mut sidebar, &json, "Default", profile).unwrap();
+            add(&mut sidebar, &json, "Default", profile).unwrap();
         }
         assert_eq!(sidebar, Sidebar::default());
     }

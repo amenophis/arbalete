@@ -29,6 +29,26 @@ pub struct Choice {
     pub bar: Bar,
 }
 
+/// A chosen browser profile, read: what it adds to the sidebar and its history, or why it could
+/// not be read. Reading takes long, a large history above all, and touches no state of the app:
+/// it can run on a thread of its own.
+#[derive(Debug)]
+pub struct Source {
+    choice: Choice,
+    /// The name of a new profile, or Space, for it.
+    name: String,
+    /// The browser and profile, for errors.
+    label: String,
+    data: Result<(Data, Vec<Entry>), String>,
+}
+
+#[derive(Debug)]
+enum Data {
+    /// Arc's sidebar, if any, and the directory of the profile in `User Data`.
+    Arc(Option<String>, String),
+    Bookmarks(Bookmarks),
+}
+
 /// What is left to the app once the sidebar has its imports.
 #[derive(Debug, Default)]
 pub struct Imported {
@@ -38,34 +58,44 @@ pub struct Imported {
     pub errors: Vec<String>,
 }
 
-/// Imports each chosen browser profile into `sidebar`: Arc's Spaces and favorites, other browsers'
+/// Reads each chosen browser profile. Choices that name no known browser profile are skipped.
+pub fn read(browsers: &[Browser], choices: &[Choice]) -> Vec<Source> {
+    let read = |choice: &Choice| {
+        let browser = browsers.get(choice.browser)?;
+        let source = browser.profiles.get(choice.profile)?;
+        Some(Source {
+            choice: choice.clone(),
+            name: profile_name(browser, choice.profile),
+            label: format!("{} {}", browser.name, source.name),
+            data: read_profile(browser.family, &source.path),
+        })
+    };
+    choices.iter().filter_map(read).collect()
+}
+
+/// Adds the browser profiles read to `sidebar`: Arc's Spaces and favorites, other browsers'
 /// bookmarks into the profile's first Space. Every profile imported into has a Space, even when
-/// its browser's data cannot be read, so that it shows. Choices that name no known browser
-/// profile or Arbalette profile are skipped.
-pub fn import(sidebar: &mut Sidebar, browsers: &[Browser], choices: &[Choice]) -> Imported {
+/// its browser's data cannot be read, so that it shows. Sources going into an Arbalette profile
+/// the sidebar no longer has are skipped. Quick: it only changes the sidebar in memory.
+pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
     let mut imported = Imported::default();
-    for choice in choices {
-        let Some(browser) = browsers.get(choice.browser) else {
-            continue;
-        };
-        let Some(source) = browser.profiles.get(choice.profile) else {
-            continue;
-        };
-        let name = profile_name(browser, choice.profile);
-        let profile = match choice.into {
-            None => sidebar.add_profile(&name),
+    for source in sources {
+        let profile = match source.choice.into {
+            None => sidebar.add_profile(&source.name),
             Some(id) if sidebar.profiles().iter().any(|p| p.id == id) => id,
             Some(_) => continue,
         };
         let target = Target {
             profile,
-            name: &name,
+            name: &source.name,
         };
-        match add(sidebar, browser.family, &source.path, target, choice.bar) {
+        let added = source.data.and_then(|(data, history)| {
+            add(sidebar, data, target, source.choice.bar)?;
+            Ok(history)
+        });
+        match added {
             Ok(history) => imported.histories.push((profile, history)),
-            Err(error) => imported
-                .errors
-                .push(format!("{} {}: {error}", browser.name, source.name)),
+            Err(error) => imported.errors.push(format!("{}: {error}", source.label)),
         }
         target.space(sidebar);
     }
@@ -99,37 +129,38 @@ impl Target<'_> {
     }
 }
 
-/// Adds a browser profile's sidebar or bookmarks to `target` and returns its history.
-fn add(
-    sidebar: &mut Sidebar,
-    family: Family,
-    path: &Path,
-    target: Target,
-    bar: Bar,
-) -> Result<Vec<Entry>, String> {
-    let add_bookmarks = |sidebar: &mut Sidebar, bookmarks: Bookmarks| {
-        let space = target.space(sidebar);
-        bookmarks::add(sidebar, space, &bookmarks, bar).map_err(debug)
-    };
-    match family {
+/// Reads a browser profile's sidebar or bookmarks, and its history.
+fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>), String> {
+    let data = match family {
         Family::Arc => {
             // Arc's data directory holds `User Data`, which holds its profiles.
             let dir = path.parent().and_then(Path::parent).unwrap_or(path);
             let directory = path.file_name().and_then(|name| name.to_str());
-            arc::add(sidebar, dir, directory.unwrap_or_default(), target.profile).map_err(debug)?;
-            chromium::read_history(path).map_err(debug)
+            let sidebar = arc::read(dir).map_err(debug)?;
+            Data::Arc(sidebar, directory.unwrap_or_default().to_string())
         }
-        Family::Chromium => {
-            add_bookmarks(sidebar, chromium::read_bookmarks(path).map_err(debug)?)?;
-            chromium::read_history(path).map_err(debug)
+        Family::Chromium => Data::Bookmarks(chromium::read_bookmarks(path).map_err(debug)?),
+        Family::Firefox => Data::Bookmarks(firefox::read_bookmarks(path).map_err(debug)?),
+        Family::Safari => Data::Bookmarks(safari::read_bookmarks(path).map_err(debug)?),
+    };
+    let history = match family {
+        Family::Arc | Family::Chromium => chromium::read_history(path).map_err(debug),
+        Family::Firefox => firefox::read_history(path).map_err(debug),
+        Family::Safari => safari::read_history(path).map_err(debug),
+    };
+    Ok((data, history?))
+}
+
+/// Adds a browser profile's sidebar or bookmarks to `target`.
+fn add(sidebar: &mut Sidebar, data: Data, target: Target, bar: Bar) -> Result<(), String> {
+    match data {
+        Data::Arc(None, _) => Ok(()),
+        Data::Arc(Some(json), directory) => {
+            arc::add(sidebar, &json, &directory, target.profile).map_err(debug)
         }
-        Family::Firefox => {
-            add_bookmarks(sidebar, firefox::read_bookmarks(path).map_err(debug)?)?;
-            firefox::read_history(path).map_err(debug)
-        }
-        Family::Safari => {
-            add_bookmarks(sidebar, safari::read_bookmarks(path).map_err(debug)?)?;
-            safari::read_history(path).map_err(debug)
+        Data::Bookmarks(bookmarks) => {
+            let space = target.space(sidebar);
+            bookmarks::add(sidebar, space, &bookmarks, bar).map_err(debug)
         }
     }
 }
@@ -286,7 +317,7 @@ mod tests {
             choice(0, 1, None, Bar::Favorites),
             choice(1, 0, None, Bar::Favorites),
         ];
-        let imported = import(&mut sidebar, &browsers, &choices);
+        let imported = apply(&mut sidebar, read(&browsers, &choices));
         assert!(imported.errors.is_empty(), "{:?}", imported.errors);
         let names: Vec<_> = sidebar.profiles().iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Personal (Arc)", "Work (Arc)", "Chrome"]);
@@ -318,7 +349,7 @@ mod tests {
             choice(1, 0, Some(default), Bar::PinnedFolder),
             choice(0, 1, Some(default), Bar::Favorites),
         ];
-        let imported = import(&mut sidebar, &browsers, &choices);
+        let imported = apply(&mut sidebar, read(&browsers, &choices));
         assert_eq!(sidebar.profiles().len(), 1);
         let spaces: Vec<_> = sidebar.spaces().iter().map(|s| s.title.as_str()).collect();
         assert_eq!(spaces, ["Home", "Office"]);
@@ -337,11 +368,8 @@ mod tests {
         let browsers = browsers(&chrome);
         chrome.write("Bookmarks", "not json");
         let mut sidebar = Sidebar::empty();
-        let imported = import(
-            &mut sidebar,
-            &browsers,
-            &[choice(1, 0, None, Bar::Favorites)],
-        );
+        let sources = read(&browsers, &[choice(1, 0, None, Bar::Favorites)]);
+        let imported = apply(&mut sidebar, sources);
         assert_eq!(imported.errors.len(), 1);
         assert!(imported.errors[0].starts_with("Chrome Default: Invalid"));
         assert_eq!(sidebar.spaces()[0].title, "Chrome");
@@ -359,9 +387,31 @@ mod tests {
             choice(1, 1, None, Bar::Favorites),
             choice(1, 0, Some(unknown), Bar::Favorites),
         ];
-        let imported = import(&mut sidebar, &browsers, &choices);
+        let imported = apply(&mut sidebar, read(&browsers, &choices));
         assert_eq!(sidebar, Sidebar::default());
         assert!(imported.histories.is_empty() && imported.errors.is_empty());
+    }
+
+    #[test]
+    fn applies_what_was_read_to_the_sidebar_as_it_is_then() {
+        let chrome = TestDir::new("import-later");
+        let browsers = browsers(&chrome);
+        let mut sidebar = Sidebar::default();
+        let default = sidebar.profiles()[0].id;
+        let sources = read(&browsers, &[choice(1, 0, Some(default), Bar::Favorites)]);
+        // The files are gone, and the sidebar changed, before the read is applied.
+        drop(chrome);
+        let today = sidebar.spaces()[0].today;
+        sidebar
+            .add_tab(today, "https://later.example.com/", "Later")
+            .unwrap();
+        let imported = apply(&mut sidebar, sources);
+        assert!(imported.errors.is_empty(), "{:?}", imported.errors);
+        assert_eq!(urls(&sidebar, today), ["https://later.example.com/"]);
+        let favorites = urls(&sidebar, sidebar.profiles()[0].favorites);
+        assert_eq!(favorites, ["https://mail.example.com/"]);
+        assert_eq!(imported.histories.len(), 1);
+        assert_eq!(imported.histories[0].1.len(), 1);
     }
 
     #[test]

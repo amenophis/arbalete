@@ -80,6 +80,21 @@ test("merges a profile into an existing one, with its bar as a pinned folder", (
   expect(lastRun()).toEqual([{ browser: 1, profile: 0, into: 7, bar: "pinnedFolder" }]);
 });
 
+test("shows the import running until the app sends the browsers again", () => {
+  render(<Import />);
+  receive(sources);
+  fireEvent.click(screen.getByRole("button", { name: "Import" }));
+  expect(screen.getByRole("button", { name: "Importing…" })).toHaveProperty("disabled", true);
+  expect(screen.getByRole("button", { name: "Not now" })).toHaveProperty("disabled", true);
+  // Disabled by its fieldset.
+  expect(screen.getByRole("checkbox", { name: "Import Arc Work" }).matches(":disabled")).toBe(true);
+  receive(sources);
+  expect(screen.getByRole("button", { name: "Import" })).toHaveProperty("disabled", false);
+  expect(screen.getByRole("checkbox", { name: "Import Arc Work" }).matches(":disabled")).toBe(
+    false,
+  );
+});
+
 test("imports nothing until a profile is picked", () => {
   render(<Import />);
   receive({ ...sources, browsers: [sources.browsers[1]] });

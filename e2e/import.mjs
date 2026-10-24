@@ -2,7 +2,8 @@
 // fictitious home (Arc's fixture from crates/arbalette-core/tests/fixtures/arc, a Chrome profile
 // and a Safari that needs Full Disk Access), importing Arc and Chrome, reopening it from the
 // "Import…" command to merge into an existing profile, skipping it, and later launches keeping
-// the session.
+// the session. Chrome's history is large, to check that the window keeps answering while it is
+// imported.
 // Usage: `mise run e2e`, with an empty directory outside the repository.
 
 import { once } from "node:events";
@@ -47,6 +48,13 @@ chromeHistory.exec(`
   CREATE TABLE urls (url TEXT, title TEXT, visit_count INTEGER, last_visit_time INTEGER, hidden INTEGER);
   INSERT INTO urls VALUES ('https://shop.example.org/', 'Shop', 4, 13350000000000000, 0);
 `);
+const HISTORY_SIZE = 200_000;
+const insert = chromeHistory.prepare("INSERT INTO urls VALUES (?, ?, 1, ?, 0)");
+chromeHistory.exec("BEGIN");
+for (let i = 0; i < HISTORY_SIZE; i++) {
+  insert.run(`https://site${i}.example.com/`, `Site ${i}`, 13350000000000000 + i);
+}
+chromeHistory.exec("COMMIT");
 chromeHistory.close();
 // Unreadable, as Safari's data is to an app without Full Disk Access.
 mkdirSync(join(home, "Library/Safari"));
@@ -91,6 +99,12 @@ const helpers = `window.e2e = {
   },
   spaces: () => [...document.querySelectorAll(".spaces .space")].map((icon) => icon.getAttribute("aria-label")).join(),
   tiles: () => [...document.querySelectorAll(".favorites .favorite")].map((tile) => tile.getAttribute("aria-label")).join(),
+  // How long the app takes to answer a command with its state, in ms: the UI thread is free.
+  roundTrip: () => new Promise((resolve) => {
+    const start = performance.now();
+    addEventListener("arbalette:state", () => resolve(performance.now() - start), { once: true });
+    e2e.send("ready");
+  }),
 }`;
 
 const dataDir = join(dir, "data");
@@ -124,7 +138,30 @@ try {
   console.log("ok - nothing is saved before a choice");
   await assistant.eval(`e2e.box("Import Chrome Personal").click()`);
   await assistant.eval(waitFor(`e2e.box("Import Chrome Personal").checked`));
+  const sidebar = await connect(SIDEBAR);
+  await sidebar.eval(helpers);
+  const started = performance.now();
   await assistant.eval(`document.querySelector('button[type="submit"]').click()`);
+  await check(
+    assistant,
+    "the assistant shows the import running, with its buttons disabled",
+    ``,
+    `[...document.querySelectorAll("button")].every((b) => b.matches(":disabled"))
+      && document.querySelector('button[type="submit"]').textContent === "Importing…"`,
+  );
+  // The session is saved once the import is applied.
+  const roundTrips = [];
+  while (!existsSync(sessionFile(dataDir))) roundTrips.push(await sidebar.eval(`e2e.roundTrip()`));
+  const imported = performance.now() - started;
+  const slowest = Math.max(...roundTrips);
+  if (roundTrips.length === 0 || slowest > 250) {
+    throw new Error(
+      `not ok - the window answers while the import runs (${roundTrips.length} round trips, slowest ${Math.round(slowest)} ms)`,
+    );
+  }
+  console.log(
+    `ok - the window answers while the import runs: ${roundTrips.length} round trips, slowest ${Math.round(slowest)} ms, import applied after ${Math.round(imported)} ms`,
+  );
   await checkSession(
     dataDir,
     "importing Arc and Chrome replaces the default session with their profiles and Spaces",
@@ -143,8 +180,6 @@ try {
     throw new Error("not ok - Chrome's folders are pinned");
   console.log("ok - Chrome's other bookmarks become a pinned folder of its Space");
 
-  const sidebar = await connect(SIDEBAR);
-  await sidebar.eval(helpers);
   await check(
     sidebar,
     "the sidebar shows the imported Spaces, and an imported tab of the first",
@@ -175,13 +210,15 @@ try {
       const row = db
         .prepare("SELECT visit_count FROM urls WHERE url = ?")
         .get("https://shop.example.org/");
-      return row?.visit_count === 4;
+      const { count } = db.prepare("SELECT COUNT(*) AS count FROM urls").get();
+      return row?.visit_count === 4 && count === HISTORY_SIZE + 1;
     } catch {
       return false;
     } finally {
       db.close();
     }
   });
+  console.log(`  (history merged ${Math.round(performance.now() - started)} ms after the click)`);
 
   await check(
     assistant,
