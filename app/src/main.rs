@@ -56,11 +56,7 @@ fn data_dir() -> PathBuf {
 }
 
 fn default_data_dir() -> PathBuf {
-    let home = PathBuf::from(
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .unwrap(),
-    );
+    let home = home();
     if cfg!(target_os = "macos") {
         home.join("Library/Application Support/Arbalette")
     } else if cfg!(target_os = "windows") {
@@ -70,4 +66,21 @@ fn default_data_dir() -> PathBuf {
             .map_or_else(|| home.join(".local/share"), PathBuf::from)
             .join("arbalette")
     }
+}
+
+/// Where Arc keeps its data, imported on the first launch. `ARBALETTE_ARC_DIR` overrides it, so
+/// that tests import their own data and never the machine's.
+fn arc_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("ARBALETTE_ARC_DIR") {
+        return Some(dir.into());
+    }
+    cfg!(target_os = "macos").then(|| home().join("Library/Application Support/Arc"))
+}
+
+fn home() -> PathBuf {
+    PathBuf::from(
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .unwrap(),
+    )
 }

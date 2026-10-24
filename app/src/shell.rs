@@ -5,7 +5,7 @@
 
 use crate::command::Command;
 use arbalette_core::sidebar::{NodeId, NodeKind, ProfileId, Sidebar, SpaceId, Tab};
-use arbalette_core::store;
+use arbalette_core::{import, store};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
 use serde::Serialize;
@@ -253,18 +253,35 @@ fn place_reveal() {
     reveal.set_visible((mode != SidebarMode::Shown).into());
 }
 
-/// Loads the sidebar saved by the previous session; a file that cannot be read is replaced on the
-/// next save.
+/// Loads the sidebar saved by the previous session, or on the first launch imports Arc's; a file
+/// that cannot be read is replaced on the next save.
 fn restore(path: PathBuf) {
     match store::load(&path) {
         Ok(Some(sidebar)) => STATE.with_borrow_mut(|state| state.sidebar = sidebar),
-        Ok(None) => {}
+        Ok(None) => {
+            if let Some(sidebar) = import_arc() {
+                // Saved at once, so that the next launch restores it instead of importing again.
+                if let Err(error) = store::save(&sidebar, &path) {
+                    eprintln!("cannot save the session: {error}");
+                }
+                STATE.with_borrow_mut(|state| state.sidebar = sidebar);
+            }
+        }
         Err(error) => eprintln!("cannot restore the session: {error:?}"),
     }
     SESSION_FILE.set(Some(path));
     if STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_none()) {
         open_tab(START_URL);
     }
+}
+
+/// Arc's sidebar, when Arc was used on this machine; an import that fails leaves the default one.
+fn import_arc() -> Option<Sidebar> {
+    let dir = crate::arc_dir()?;
+    import::arc::read(&dir).unwrap_or_else(|error| {
+        eprintln!("cannot import Arc: {error:?}");
+        None
+    })
 }
 
 fn active_tab(sidebar: &mut Sidebar) -> Option<&mut Tab> {

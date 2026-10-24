@@ -1,10 +1,10 @@
 // Runs the bundled app and drives its UI pages through the DevTools protocol.
-// Shared by the end-to-end check (e2e/tabs.mjs) and the benchmark (perf/measure.mjs).
+// Shared by the end-to-end checks (e2e/tabs.mjs, e2e/arc.mjs) and the benchmark (perf/measure.mjs).
 // Needs Node.js 22 or later (global WebSocket).
 
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const APP = resolve("target/bundle/arbalette.app/Contents/MacOS/arbalette");
@@ -15,10 +15,16 @@ export const SIDEBAR = "https://arbalette.ui/index.html";
 export const OVERLAY = `${SIDEBAR}#overlay`;
 export const REVEAL = `${SIDEBAR}#reveal`;
 
-// Starts the app on the session in `dataDir`; the caller kills it.
-export function launch(dataDir) {
+// Starts the app on the session in `dataDir`, importing Arc's data from `arcDir` on a first launch;
+// the caller kills it. By default no Arc data, never the machine's.
+export function launch(dataDir, arcDir = join(tmpdir(), "arbalette-no-arc")) {
   return spawn(APP, [], {
-    env: { ...process.env, ARBALETTE_DATA_DIR: dataDir, ARBALETTE_DEBUG_PORT: String(PORT) },
+    env: {
+      ...process.env,
+      ARBALETTE_DATA_DIR: dataDir,
+      ARBALETTE_ARC_DIR: arcDir,
+      ARBALETTE_DEBUG_PORT: String(PORT),
+    },
     stdio: "ignore",
     // Not the repository, which may sit in Documents: macOS asks before an app reads it.
     cwd: tmpdir(),
