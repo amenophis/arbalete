@@ -20,6 +20,17 @@ import { Profiles } from "./Profiles";
 import { usePager } from "./pager";
 import { NewSpace, Spaces } from "./Spaces";
 
+// The revealed sidebar taking the focus makes Chromium focus its first button as if tabbed to,
+// with a ring: only the Tab key may leave a toolbar button focused.
+let tabbed = false;
+addEventListener("keydown", (event) => {
+  tabbed = event.key === "Tab";
+});
+
+function unlessTabbed(event: { target: EventTarget }) {
+  if (!tabbed && event.target instanceof HTMLElement) event.target.blur();
+}
+
 export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalette:rename");
@@ -50,7 +61,7 @@ export function App() {
       onPointerDown={onPointerDown}
       onContextMenu={showMenu}
     >
-      <div className="toolbar">
+      <div className="toolbar" role="toolbar" onFocus={unlessTabbed}>
         <button
           type="button"
           aria-label="Toggle sidebar"
