@@ -49,17 +49,19 @@ export function App() {
           ))}
         </ul>
       )}
-      <ul className="tabs pinned">
-        <Items items={state?.pinned ?? []} active={state?.active} />
-      </ul>
-      <hr className="divider" />
-      <button type="button" className="tab" onClick={() => send("overlay/show")}>
-        <span className="favicon">+</span>
-        <span className="title">New tab</span>
-      </button>
-      <ul className="tabs today">
-        <Items items={state?.today ?? []} active={state?.active} />
-      </ul>
+      <div className="scroll">
+        <ul className="tabs pinned">
+          <Items items={state?.pinned ?? []} active={state?.active} />
+        </ul>
+        <hr className="divider" />
+        <button type="button" className="tab" onClick={() => send("overlay/show")}>
+          <span className="favicon">+</span>
+          <span className="title">New tab</span>
+        </button>
+        <ul className="tabs today">
+          <Items items={state?.today ?? []} active={state?.active} />
+        </ul>
+      </div>
     </nav>
   );
 }
