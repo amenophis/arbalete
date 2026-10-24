@@ -61,3 +61,10 @@ test("selects a tab", () => {
   fireEvent.click(screen.getByRole("button", { name: "Other" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/select/4", { method: "POST" });
 });
+
+test("closes a tab", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "Close Other" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/close/4", { method: "POST" });
+});

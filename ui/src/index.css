@@ -103,8 +103,39 @@ body {
   text-align: left;
 }
 
+.tab-row {
+  position: relative;
+}
+
+.tab-row .tab {
+  padding-right: 30px;
+}
+
 .tab:hover {
   background: var(--hover);
+}
+
+.close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font-size: 11px;
+  opacity: 0;
+}
+
+.tab-row:hover .close {
+  opacity: 0.6;
+}
+
+.close:hover {
+  background: var(--hover);
+  opacity: 1;
 }
 
 .tab[aria-current] {

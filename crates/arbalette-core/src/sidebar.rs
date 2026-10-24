@@ -191,6 +191,20 @@ impl Sidebar {
         Ok(())
     }
 
+    /// The tab to show once `tab` is closed: the next tab in its container, else the previous one.
+    pub fn next_after_close(&self, tab: NodeId) -> Option<NodeId> {
+        let siblings = &self.nodes.get(&self.nodes.get(&tab)?.parent?)?.children;
+        let tabs: Vec<_> = siblings
+            .iter()
+            .copied()
+            .filter(|&id| id == tab || matches!(self.nodes[&id].kind, NodeKind::Tab(_)))
+            .collect();
+        let index = tabs.iter().position(|&id| id == tab)?;
+        tabs.get(index + 1)
+            .or(index.checked_sub(1).and_then(|i| tabs.get(i)))
+            .copied()
+    }
+
     /// Removes a tab or a folder with everything it contains.
     pub fn remove(&mut self, id: NodeId) -> Result<(), Error> {
         let parent = self.movable(id)?;
@@ -351,6 +365,20 @@ mod tests {
         );
         sidebar.remove(tab).unwrap();
         assert_eq!(sidebar.spaces()[0].selected, None);
+    }
+
+    #[test]
+    fn shows_the_next_tab_after_closing_one() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let a = sidebar.open_tab(home.id, "a").unwrap();
+        let b = sidebar.open_tab(home.id, "b").unwrap();
+        let c = sidebar.open_tab(home.id, "c").unwrap();
+        assert_eq!(sidebar.next_after_close(b), Some(c));
+        assert_eq!(sidebar.next_after_close(c), Some(b));
+        sidebar.remove(b).unwrap();
+        sidebar.remove(c).unwrap();
+        assert_eq!(sidebar.next_after_close(a), None);
     }
 
     #[test]
