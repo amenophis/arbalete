@@ -627,6 +627,25 @@ impl Sidebar {
         Ok(opener.or_else(|| today.iter().rev().copied().find(|&id| self.is_tab(id))))
     }
 
+    /// Removes everything among a Space's "Today" tabs, folders and splits included, and returns
+    /// the tabs removed, in the order the sidebar shows them, so they may be reopened.
+    pub fn clear_today(&mut self, space: SpaceId) -> Result<Vec<Tab>, Error> {
+        let today = self.space(space)?.today;
+        let mut tabs = Vec::new();
+        self.push_tabs(today, &mut tabs);
+        let removed = tabs
+            .iter()
+            .filter_map(|&id| match &self.nodes[&id].kind {
+                NodeKind::Tab(tab) => Some(tab.clone()),
+                _ => None,
+            })
+            .collect();
+        for id in self.nodes[&today].children.clone() {
+            self.remove(id)?;
+        }
+        Ok(removed)
+    }
+
     /// Removes a tab, a folder or a split with everything it contains; the other tab of a split
     /// left alone takes the split's place.
     pub fn remove(&mut self, id: NodeId) -> Result<(), Error> {
@@ -755,6 +774,16 @@ impl Sidebar {
                 tab.saved_url = save.then(|| tab.url.clone());
             }
             pending.extend(node.children.iter().copied());
+        }
+    }
+
+    /// Appends every tab inside `parent`, collapsed folders included, depth first.
+    fn push_tabs(&self, parent: NodeId, tabs: &mut Vec<NodeId>) {
+        for &id in &self.nodes[&parent].children {
+            match &self.nodes[&id].kind {
+                NodeKind::Tab(_) => tabs.push(id),
+                _ => self.push_tabs(id, tabs),
+            }
         }
     }
 
@@ -989,6 +1018,44 @@ mod tests {
         let json = r#"{ "id": 1, "name": "Default", "favorites": 2 }"#;
         let profile: Profile = serde_json::from_str(json).unwrap();
         assert!(!profile.favorites_hint_hidden);
+    }
+
+    #[test]
+    fn clears_the_today_tabs_of_a_space_and_returns_them() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let a = sidebar.open_tab(home.id, "https://a.test/").unwrap();
+        let folder = sidebar.add_folder(home.today, "Folder").unwrap();
+        let b = sidebar.add_tab(folder, "https://b.test/", "b").unwrap();
+        sidebar.toggle_folder(folder).unwrap();
+        let c = sidebar.open_tab(home.id, "https://c.test/").unwrap();
+        let d = sidebar.open_tab(home.id, "https://d.test/").unwrap();
+        sidebar.split(d, c).unwrap();
+        let pinned = sidebar
+            .add_tab(home.pinned, "https://p.test/", "p")
+            .unwrap();
+        sidebar.select(home.id, a).unwrap();
+        let removed = sidebar.clear_today(home.id).unwrap();
+        let urls: Vec<_> = removed.iter().map(|tab| tab.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "https://a.test/",
+                "https://b.test/",
+                "https://c.test/",
+                "https://d.test/"
+            ]
+        );
+        assert!(children(&sidebar, home.today).is_empty());
+        assert!(
+            [a, b, c, d, folder]
+                .iter()
+                .all(|&id| sidebar.node(id).is_none())
+        );
+        assert_eq!(children(&sidebar, home.pinned), [pinned]);
+        assert_eq!(sidebar.displayed().selected, None);
+        assert_eq!(sidebar.clear_today(home.id).unwrap(), []);
+        assert_eq!(sidebar.clear_today(SpaceId(999)), Err(Error::UnknownSpace));
     }
 
     #[test]
