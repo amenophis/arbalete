@@ -1,9 +1,9 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
 // between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
-// Spaces, creating, renaming and coloring profiles, creating and editing Spaces, and switching
-// Spaces by number and by swiping between their pages, showing the displayed profile's favorites,
-// and recording each profile's history, in the real app.
+// Spaces, creating, renaming and coloring profiles, creating Spaces from the page after the last
+// one and editing them, switching Spaces by number and by swiping between their pages, showing the
+// displayed profile's favorites, and recording each profile's history, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -494,22 +494,52 @@ try {
   });
 
   const spaceCount = session.spaces.length + 1;
+  // Typed through DevTools, as the keyboard would.
+  const type = (text) => sidebar.call("Input.insertText", { text });
+  const pressEnter = async () => {
+    const key = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 };
+    await sidebar.call("Input.dispatchKeyEvent", { type: "keyDown", ...key, text: "\r" });
+    await sidebar.call("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+  };
   await check(
-    "the new Space button creates a Space, displays it empty and edits its name",
+    "the new Space button slides to the page creating one, untinted, its name field focused",
     `e2e.spaceField = (name) => document.querySelector('[aria-label="Space ' + name + '"]');
+     e2e.newField = (name) => document.querySelector('[aria-label="New Space ' + name + '"]');
+     e2e.newPage = () => document.querySelector(".new-space-page:not([inert])");
      e2e.last = () => e2e.spaceIcons().at(-1);
      e2e.tint = () => getComputedStyle(document.querySelector(".sidebar"));
      e2e.background = e2e.tint().backgroundColor;
      document.querySelector(".new-space").click()`,
+    `e2e.newPage() && document.activeElement === e2e.newField("name")
+      && document.querySelector(".pages").style.transform === "translateX(-${spaceCount * 100}%)"
+      && document.querySelector(".sidebar").style.getPropertyValue("--space") === "var(--background)"
+      && e2e.spaceIcons().length === ${spaceCount}`,
+  );
+  await type("Novels");
+  await sidebar.eval(`e2e.newField("emoji").focus()`);
+  await type("📖");
+  await sidebar.eval(`document.querySelector('[aria-label="Color of the new Space"] [aria-label="blue"]').click();
+    e2e.newField("name").focus()`);
+  await pressEnter();
+  await check(
+    "Enter creates the Space with its name, emoji and color, and displays it empty",
+    ``,
     `e2e.spaceIcons().length === ${spaceCount + 1} && e2e.last().getAttribute("aria-current") === "true"
-      && e2e.rows().length === 0 && document.activeElement === e2e.spaceField("name")
-      && e2e.spaceField("name").value === "New Space"`,
+      && e2e.last().getAttribute("aria-label") === "Novels" && e2e.last().textContent === "📖"
+      && e2e.page()?.dataset.space && e2e.rows().length === 0 && !e2e.newPage()
+      && document.querySelector(".pages").style.transform === "translateX(-${spaceCount * 100}%)"
+      && e2e.tint().getPropertyValue("--space") === "#3e7bfa" && e2e.newField("name").value === ""`,
   );
   await check(
-    "Enter saves the Space's name, whose initial the switcher shows",
-    `e2e.input = document.activeElement; e2e.input.value = "Reading";
+    "clicking the displayed Space's icon opens its editor",
+    `e2e.last().click()`,
+    `e2e.spaceField("name")?.value === "Novels"`,
+  );
+  await check(
+    "Enter saves the Space's name in its editor",
+    `e2e.input = e2e.spaceField("name"); e2e.input.focus(); e2e.input.value = "Reading";
      e2e.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`,
-    `e2e.last().getAttribute("aria-label") === "Reading" && e2e.last().textContent === "R"`,
+    `e2e.last().getAttribute("aria-label") === "Reading" && e2e.last().textContent === "📖"`,
   );
   await check(
     "the emoji field keeps one emoji, which the switcher shows instead of the initial",
@@ -642,16 +672,30 @@ try {
     `e2e.send("space/number/${last + 1}")`,
     `e2e.settled(${last})`,
   );
+  const after = -(last + 1) * 100;
   await check(
-    "the last Space resists a swipe towards the one after",
-    `e2e.swipe(-100, 20, 50, true)`,
-    `e2e.offset() < ${-last * 100 - 10} && e2e.offset() > ${-last * 100 - 25}`,
+    "a swipe past the last Space shows the page creating one, the app keeping the last Space",
+    `e2e.swipe(-20, 15, 50)`,
+    `e2e.newPage() && e2e.offset() === ${after} && document.activeElement === e2e.newField("name")
+      && e2e.state.space === e2e.spaces[${last}] && !e2e.page()`,
+  );
+  await type("Unsaved");
+  await check(
+    "swiping back leaves the Spaces as they were and forgets the name typed",
+    `e2e.swipe(20, 15, 50)`,
+    `e2e.settled(${last}) && e2e.state.spaces.length === ${last + 1} && e2e.newField("name").value === ""`,
   );
   await check(
-    "lifting it settles back on the last Space",
+    "the page creating a Space resists a swipe towards the one after",
+    `e2e.swipe(-20, 15, 50); e2e.swipe(-100, 20, 50, true)`,
+    `e2e.offset() < ${after - 10} && e2e.offset() > ${after - 25}`,
+  );
+  await check(
+    "lifting it settles back on the page creating a Space",
     `e2e.gesture("end", 0, 1000)`,
-    `e2e.settled(${last})`,
+    `e2e.newPage() && e2e.offset() === ${after}`,
   );
+  await check("a swipe back settles on the last Space", `e2e.swipe(20, 15, 50)`, `e2e.settled(${last})`);
   // Only the app's scroll events, which have phases, page between Spaces.
   const switcherBox = await sidebar.eval(`(() => {
     const rect = document.querySelector(".switcher").getBoundingClientRect();

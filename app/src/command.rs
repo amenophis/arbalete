@@ -55,9 +55,14 @@ pub enum Command {
     /// Shows the Space after the displayed one, `space/next`, or before it, `space/previous`.
     NextSpace,
     PreviousSpace,
-    /// Creates a Space in the displayed Space's profile and displays it, for the UI to rename:
-    /// `space/new`.
-    NewSpace,
+    /// Creates a Space in the displayed Space's profile and displays it:
+    /// `space/create/<color>/<percent-encoded emoji>/<percent-encoded title>`, an empty emoji for
+    /// none.
+    CreateSpace {
+        title: String,
+        emoji: String,
+        color: Color,
+    },
     /// Renames a Space: `space/rename/<space id>/<percent-encoded title>`.
     RenameSpace(SpaceId, String),
     /// Sets a Space's emoji, or removes it when empty: `space/emoji/<space id>/<percent-encoded
@@ -97,7 +102,6 @@ impl Command {
             "next" => Some(Self::NextTab),
             "previous" => Some(Self::PreviousTab),
             "profile/new" => Some(Self::NewProfile),
-            "space/new" => Some(Self::NewSpace),
             "space/next" => Some(Self::NextSpace),
             "space/previous" => Some(Self::PreviousSpace),
             "import/show" => Some(Self::ShowImport),
@@ -122,6 +126,15 @@ impl Command {
                 {
                     let id = serde_json::from_str(id).ok()?;
                     return parse_color(color).map(|color| Self::ColorProfile(id, color));
+                }
+                if let Some(args) = path.strip_prefix("space/create/") {
+                    let mut args = args.splitn(3, '/');
+                    let (color, emoji, title) = (args.next()?, args.next()?, args.next()?);
+                    return Some(Self::CreateSpace {
+                        title: percent_decode(title)?,
+                        emoji: percent_decode(emoji)?,
+                        color: parse_color(color)?,
+                    });
                 }
                 if let Some((id, title)) = path
                     .strip_prefix("space/rename/")
@@ -221,6 +234,7 @@ fn percent_decode(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::Command;
+    use arbalette_core::sidebar::Color;
 
     #[test]
     fn parses_known_commands() {
@@ -375,7 +389,24 @@ mod tests {
 
     #[test]
     fn parses_space_commands() {
-        assert_eq!(Command::parse("space/new"), Some(Command::NewSpace));
+        assert_eq!(
+            Command::parse("space/create/green/%F0%9F%8F%A1/Caf%C3%A9%2F2"),
+            Some(Command::CreateSpace {
+                title: "Café/2".into(),
+                emoji: "🏡".into(),
+                color: Color::Green,
+            })
+        );
+        assert_eq!(
+            Command::parse("space/create/blue//Home"),
+            Some(Command::CreateSpace {
+                title: "Home".into(),
+                emoji: "".into(),
+                color: Color::Blue,
+            })
+        );
+        assert_eq!(Command::parse("space/create/teal//Home"), None);
+        assert_eq!(Command::parse("space/create/blue/Home"), None);
         let Some(Command::RenameSpace(id, title)) = Command::parse("space/rename/4/Caf%C3%A9%2F2")
         else {
             panic!("not a rename")

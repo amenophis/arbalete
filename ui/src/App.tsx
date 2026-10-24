@@ -3,7 +3,7 @@ import { type Item, type SpacePage, send, type Tab, useAppState, useRenaming } f
 import { type Dragging, useDrag } from "./drag";
 import { Profiles } from "./Profiles";
 import { usePager } from "./pager";
-import { Spaces } from "./Spaces";
+import { NewSpace, Spaces } from "./Spaces";
 
 export function App() {
   const state = useAppState();
@@ -12,6 +12,9 @@ export function App() {
   const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
   // The displayed Space's color tints the sidebar, and blends into the next one's on the way.
   const pager = usePager(state?.spaces ?? [], displayed);
+  const count = state?.spaces.length ?? 0;
+  // The pages may rest on one that is not a Space's, while the app still displays a Space.
+  const onSpace = pager.settled >= 0 && pager.settled < count;
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =
@@ -59,17 +62,22 @@ export function App() {
                 key={spacePage.space}
                 page={spacePage}
                 index={index}
-                displayed={index === displayed}
+                displayed={onSpace && index === displayed}
                 dragging={dragging}
                 renaming={renaming}
                 onRename={setRenaming}
               />
             );
           })}
+          {state && <NewSpace index={count} shown={pager.settled === count} />}
         </div>
       </div>
       <div className="switcher">
-        <Spaces spaces={state?.spaces ?? []} displayed={state?.space} />
+        <Spaces
+          spaces={state?.spaces ?? []}
+          displayed={onSpace ? state?.space : undefined}
+          onPage={pager.go}
+        />
         <Profiles profiles={state?.profiles ?? []} />
       </div>
       <div className="drop-indicator" ref={indicator} />

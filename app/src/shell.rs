@@ -7,7 +7,7 @@ use crate::command::Command;
 use arbalette_core::history::{self, History};
 use arbalette_core::import::browsers::{self, Family};
 use arbalette_core::import::{self, Choice, safari};
-use arbalette_core::sidebar::{NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab};
+use arbalette_core::sidebar::{Color, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab};
 use arbalette_core::store;
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
@@ -653,23 +653,18 @@ fn new_profile() {
     dispatch(&REVEAL_VIEW, &event);
 }
 
-/// Creates a Space in the displayed Space's profile, shows it and asks the sidebar to rename it,
-/// like a new profile.
-fn new_space() {
-    let space = update_sidebar(|sidebar| {
+/// Creates a Space in the displayed Space's profile and shows it. Like a rename, a blank title
+/// from the UI is ignored.
+fn create_space(title: &str, emoji: &str, color: Color) {
+    let created = update_sidebar(|sidebar| {
         let profile = sidebar.displayed().profile;
-        sidebar
-            .create_space("New Space", profile)
-            .expect("the displayed Space's profile")
+        let space = sidebar.create_space(title, profile)?;
+        sidebar.set_space_emoji(space, emoji)?;
+        sidebar.set_space_color(space, color)
     });
-    show_selected();
-    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
-        sidebar.request_focus();
+    if created.is_ok() {
+        show_selected();
     }
-    let space = serde_json::to_string(&space).expect("an id");
-    let event = format!(r#"new CustomEvent("arbalette:rename-space", {{ detail: {space} }})"#);
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
 }
 
 fn reopen_tab() {
@@ -889,7 +884,14 @@ pub fn run(command: Command) {
         (Command::ColorProfile(id, color), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_profile_color(id, color));
         }
-        (Command::NewSpace, _) => new_space(),
+        (
+            Command::CreateSpace {
+                title,
+                emoji,
+                color,
+            },
+            _,
+        ) => create_space(&title, &emoji, color),
         // Like a profile, an unknown Space or a blank title from the UI is ignored.
         (Command::RenameSpace(id, title), _) => {
             let _ = update_sidebar(|sidebar| sidebar.rename_space(id, &title));

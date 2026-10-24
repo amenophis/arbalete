@@ -2,14 +2,16 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { COLORS, type Space, send } from "./bridge";
 
 // The Spaces' pages sit side by side and the sidebar shows one at a time. A position counts in
-// pages: 0 shows the first Space, 0.5 half of it and half of the second.
+// pages: 0 shows the first Space, 0.5 half of it and half of the second. One more page after the
+// last Space, at the Spaces' count, creates a Space. These pages are the sidebar's alone: while one
+// shows, the app still displays the last Space shown, and the content view its tab.
 
 // How far the pages move for each point the fingers move.
 export const GAIN = 0.7;
 // A release this fast, in pages per millisecond over the last FLICK_WINDOW_MS, is a flick.
 export const FLICK_SPEED = 0.0015;
 export const FLICK_WINDOW_MS = 100;
-// The farthest the pages go past the first or last Space, in pages, however far the fingers go.
+// The farthest the pages go past the first or last page, in pages, however far the fingers go.
 export const OVERSHOOT = 0.25;
 // How hard the pages resist going past an end, from 0 to 1, as they start to.
 const RESISTANCE = 0.5;
@@ -26,9 +28,10 @@ export function follow(from: number, distance: number, width: number): number {
   return from - (distance * GAIN) / width;
 }
 
-// A swipe goes at most one page from where it began, and not past the first or last Space.
+// A swipe goes at most one page from where it began, and not past the first Space or the page
+// after the last of the `count` Spaces.
 export function bounds(start: number, count: number): [number, number] {
-  return [Math.max(0, start - 1), Math.min(count - 1, start + 1)];
+  return [Math.max(0, start - 1), Math.min(count, start + 1)];
 }
 
 // Past its bounds, a position resists more and more and never goes past OVERSHOOT.
@@ -70,14 +73,17 @@ export function spring(from: number, to: number, speed: number, elapsed: number)
   return { position: settled ? to : position, settled };
 }
 
-// The color between the two Spaces a position shows, to tint the sidebar with.
+// The sidebar's own color, which pages that are not a Space's leave untinted.
+export const NEUTRAL = "var(--background)";
+
+// The color between the two pages a position shows, to tint the sidebar with.
 export function tint(spaces: Space[], position: number): string | undefined {
   if (spaces.length === 0) return undefined;
-  const clamped = Math.min(spaces.length - 1, Math.max(0, position));
+  const color = (page: number) => (spaces[page] ? COLORS[spaces[page].color] : NEUTRAL);
+  const clamped = Math.min(spaces.length, Math.max(0, position));
   const left = Math.floor(clamped);
-  const right = Math.min(spaces.length - 1, left + 1);
   const share = Math.round((clamped - left) * 100);
-  const [from, to] = [COLORS[spaces[left].color], COLORS[spaces[right].color]];
+  const [from, to] = [color(left), color(left + 1)];
   return share === 0 || from === to ? from : `color-mix(in srgb, ${from}, ${to} ${share}%)`;
 }
 
@@ -86,13 +92,17 @@ export function tint(spaces: Space[], position: number): string | undefined {
 export type Gesture = { phase: "begin" | "move" | "end"; dx: number; time: number };
 
 // Moves the pages with the fingers, then lets a spring take them to a page, which the app then
-// displays. Pages move with a transform, frame by frame, without rendering. The displayed Space
-// changing otherwise, with a shortcut or the switcher, slides its page in.
+// displays if it is a Space's. Pages move with a transform, frame by frame, without rendering. The
+// displayed Space changing otherwise, with a shortcut or the switcher, slides its page in.
 class Pager {
   spaces: Space[] = [];
   displayed = 0;
   sidebar: HTMLElement | null = null;
   track: HTMLElement | null = null;
+  // Told the page the pages come to rest on.
+  onSettle: (page: number) => void = () => {};
+  // The page the pages are on, or going to.
+  private page = 0;
   private position = 0;
   private started = false;
   private swipe: { start: number; from: number; distance: number; width: number } | null = null;
@@ -107,22 +117,35 @@ class Pager {
     this.displayed = displayed;
     if (!this.started) {
       this.started = true;
+      this.page = displayed;
       this.position = displayed;
+      this.onSettle(displayed);
     } else if (moved && !this.swipe && this.motion?.to !== displayed) {
-      // Only the pages next to the displayed one exist: a farther one starts from its neighbor.
-      const gap = displayed - this.position;
-      if (Math.abs(gap) > 1) this.position = displayed - Math.sign(gap);
-      this.settle(displayed, 0);
+      this.slide(displayed);
     }
     this.render();
+  }
+
+  // Slides to a page: the app displays a Space first, and its page then slides in.
+  go(page: number) {
+    const space = this.spaces[page];
+    if (space && page !== this.displayed) return send(`space/${space.id}`);
+    this.slide(page);
+  }
+
+  // Only the pages next to the displayed one exist: a farther one starts from its neighbor.
+  private slide(page: number) {
+    const gap = page - this.position;
+    if (Math.abs(gap) > 1) this.position = page - Math.sign(gap);
+    this.settle(page, 0);
   }
 
   gesture({ phase, dx, time }: Gesture) {
     if (phase === "begin") {
       this.motion = null;
       const width = this.track?.clientWidth || 1;
-      // The displayed page and its neighbors are the ones that exist.
-      this.swipe = { start: this.displayed, from: this.position, distance: 0, width };
+      // The page shown and its neighbors are the ones that exist.
+      this.swipe = { start: this.page, from: this.position, distance: 0, width };
       this.samples = [];
     }
     const swipe = this.swipe;
@@ -149,9 +172,11 @@ class Pager {
   }
 
   private settle(to: number, speed: number) {
+    this.page = to;
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       this.motion = null;
       this.position = to;
+      this.onSettle(to);
     } else {
       this.motion = { from: this.position, to, speed };
     }
@@ -174,8 +199,10 @@ class Pager {
         now - motion.start,
       );
       this.position = position;
-      if (settled) this.motion = null;
-      else this.schedule();
+      if (settled) {
+        this.motion = null;
+        this.onSettle(motion.to);
+      } else this.schedule();
     }
     this.render();
   }
@@ -192,10 +219,12 @@ class Pager {
   }
 }
 
-// The sidebar and the track holding the pages, to give to their elements, for the Spaces in
-// sidebar order and the displayed one's index.
+// The sidebar and the track holding the pages, to give to their elements, the page the pages rest
+// on, and `go` to slide to a page, for the Spaces in sidebar order and the displayed one's index.
 export function usePager(spaces: Space[], displayed: number) {
   const [pager] = useState(() => new Pager());
+  const [settled, setSettled] = useState(displayed);
+  pager.onSettle = setSettled;
   const sidebar = useRef<HTMLElement>(null);
   const track = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -212,5 +241,5 @@ export function usePager(spaces: Space[], displayed: number) {
       pager.stop();
     };
   }, [pager]);
-  return { sidebar, track };
+  return { sidebar, track, settled, go: (page: number) => pager.go(page) };
 }
