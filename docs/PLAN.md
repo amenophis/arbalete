@@ -301,9 +301,24 @@ Commit sequence:
 | 37 | | `feat(ui): show the favorites of the displayed Space's profile` |
 
 ### Phase 3 — Imports
-- Import assistant on first launch and in Settings.
+- Import assistant on first launch and from the menu (there are no Settings yet).
 - Chromium browsers, Firefox, Safari: profiles, bookmarks, history.
-- Arc: profiles, Spaces, Favorites, pinned tabs, folders, archive, link routing rules.
+- Arc: profiles, Spaces, Favorites, pinned tabs, folders. Its archive and link routing rules are imported in
+  phases 6 and 8, once Arbalette has an archive and rules to put them in.
+
+Commit sequence (Arc first, the browser Arbalette users are most likely to come from):
+
+| # | Branch | Commit |
+|---|---|---|
+| 38 | `feat/import-arc` | `feat(import): read the Arc sidebar into profiles, Spaces and tabs` |
+| 39 | | `feat(app): import Arc on first launch` |
+| 40 | `feat/import-bookmarks` | `feat(import): detect installed browsers and their profiles` |
+| 41 | | `feat(import): import Chromium bookmarks` |
+| 42 | | `feat(import): import Firefox bookmarks` |
+| 43 | | `feat(import): import Safari bookmarks` |
+| 44 | `feat/history` | `feat(core): record history per profile` |
+| 45 | | `feat(import): import Chromium, Firefox and Safari history` |
+| 46 | `feat/import-assistant` | `feat(ui): import assistant on first launch and from the menu` |
 
 ### Phase 4 — Chrome extensions
 - First, answer the open questions of [decision 0001](decisions/0001-web-engine.md).
@@ -324,6 +339,7 @@ Commit sequence:
 ### Phase 6 — Auto-archive
 - Thresholds: 1 h, 6 h, 12 h (default), 24 h, 7 d, 30 d, never; per-profile setting.
 - Browsable, restorable archive (full node kept).
+- Import Arc's archive.
 
 ### Phase 7 — Resource saving
 - Freeze, then unload hidden tabs on timers; reload on selection from the saved URL, with the snapshot shown
@@ -337,6 +353,7 @@ Commit sequence:
 - Receiving external URLs (URL open event on macOS; single instance + command-line arguments elsewhere).
 - Rules: "matches" / "contains", several conditions, per-rule toggle, default destination
   (most recent Space, optionally of a given profile).
+- Import Arc's link routing rules.
 
 ### Phase 9 — Polish
 - Split View, Peek.
