@@ -236,17 +236,19 @@ function Sections({
                 onRename={onRename}
               />
             </ul>
+            {/* Hovered, the divider offers to close today's tabs, which may be reopened. */}
             <div className="divider-row" data-parent={roots.pinned}>
               <hr className="divider" />
-              <button
-                type="button"
-                className="new-folder"
-                aria-label="New folder"
-                title="New folder"
-                onClick={() => send("folder/new")}
-              >
-                +
-              </button>
+              {page.today.length > 0 && (
+                <button
+                  type="button"
+                  className="clear-today"
+                  title="Close today's tabs"
+                  onClick={() => send("today/clear")}
+                >
+                  ↓ Clear
+                </button>
+              )}
             </div>
           </>
         )}

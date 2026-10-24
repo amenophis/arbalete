@@ -220,7 +220,7 @@ test("shows only the header and New tab of a collapsed Space", () => {
   const page = shown();
   expect(page.getByRole("button", { name: "Home" }).getAttribute("aria-expanded")).toBe("false");
   expect(page.getByText("New tab")).toBeDefined();
-  for (const name of ["Pinned", "Docs", "Example", "New folder"]) {
+  for (const name of ["Pinned", "Docs", "Example", "↓ Clear"]) {
     expect(page.queryByRole("button", { name })).toBeNull();
   }
   expect(page.getByRole("button", { name: "Mail" })).toBeDefined();
@@ -364,11 +364,13 @@ test("renames a folder with a double click without collapsing it", () => {
   vi.useRealTimers();
 });
 
-test("creates a folder from the divider", () => {
+test("the divider's Clear closes today's tabs, and shows only while there are some", () => {
   render(<App />);
   receive({});
-  fireEvent.click(shown().getByRole("button", { name: "New folder" }));
-  expect(fetch).toHaveBeenLastCalledWith("/command/folder/new", { method: "POST" });
+  fireEvent.click(shown().getByRole("button", { name: "↓ Clear" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/today/clear", { method: "POST" });
+  receive({}, 3, favorites, 14);
+  expect(shown().queryByRole("button", { name: "↓ Clear" })).toBeNull();
 });
 
 function rename(name: string) {

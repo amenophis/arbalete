@@ -235,9 +235,11 @@ try {
     `e2e.pinnedRows().length === 0 && e2e.current() === e2e.rows()[0] && e2e.rows().length === e2e.count`,
   );
   await check(
-    "the new folder button adds a folder at the end of the pinned tabs and edits its title",
+    "the footer menu's New Folder adds a folder at the end of the pinned tabs and edits its title",
     `e2e.folders = () => [...e2e.page().querySelectorAll(".pinned > li > .folder")];
-     e2e.page().querySelector(".new-folder").click()`,
+     document.querySelector(".new-toggle").click();
+     new Promise(requestAnimationFrame).then(() =>
+       document.querySelector('[role="menuitem"][aria-label="New Folder"]').click())`,
     `(() => {
       const input = e2e.folders()[5]?.querySelector("input");
       return e2e.folders().length === 6 && input?.value === "New Folder" && document.activeElement === input;
@@ -1437,6 +1439,21 @@ try {
     "the url bar's copy button copies the link and says so",
     `document.querySelector(".copy-link").click()`,
     `e2e.sent.at(-1).endsWith("/command/link/copy") && document.querySelector(".copy-link").textContent === "Copied"`,
+  );
+  await check(
+    "the × of a pinned tab its Space does not show removes it, to the closed tabs",
+    `e2e.unshown = [...e2e.page().querySelectorAll(".pinned .tab-row")].find((row) => !row.querySelector("[aria-current]"));
+     e2e.unshownUrl = e2e.state.pages.find((page) => page.space === e2e.state.space).pinned
+       .flatMap((item) => item.children ?? [item]).find((tab) => String(tab.id) === e2e.unshown.dataset.id)?.url;
+     e2e.unshown.querySelector(".close").click()`,
+    `!e2e.unshown.isConnected && e2e.state.closed[0].url === e2e.unshownUrl`,
+  );
+  await check(
+    "the divider's Clear closes every tab of today, which the closed tabs list",
+    `e2e.todayCount = e2e.rows().length; e2e.page().querySelector(".clear-today").click()`,
+    `e2e.rows().length === 0 && !e2e.page().querySelector(".clear-today")
+      && e2e.state.closed.length === Math.min(10, e2e.state.closed.length) && e2e.state.closed.length > 0
+      && !e2e.page().querySelector(".today .tab[aria-current]")`,
   );
   await quit(app);
   console.log("ok - quitting once closes every browser and exits the app");

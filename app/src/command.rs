@@ -51,6 +51,8 @@ pub enum Command {
     /// Hides the box inviting to drag tabs into the empty favorites of a Space's profile:
     /// `favorites/hide-hint/<space id>`.
     HideFavoritesHint(SpaceId),
+    /// Closes every "Today" tab of the displayed Space: `today/clear`.
+    ClearToday,
     /// Puts the url of the displayed Space's selected tab on the clipboard: `link/copy`.
     CopyLink,
     /// Moves a tab to another Space's "Today" tabs, from its menu.
@@ -188,6 +190,7 @@ impl Command {
             "pin" => Some(Self::Pin(None)),
             "folder/new" => Some(Self::NewFolder(None)),
             "link/copy" => Some(Self::CopyLink),
+            "today/clear" => Some(Self::ClearToday),
             "next" => Some(Self::NextTab),
             "previous" => Some(Self::PreviousTab),
             "profile/new" => Some(Self::NewProfile),
@@ -415,6 +418,7 @@ mod tests {
         ));
         assert_eq!(Command::parse("pin"), Some(Command::Pin(None)));
         assert_eq!(Command::parse("link/copy"), Some(Command::CopyLink));
+        assert_eq!(Command::parse("today/clear"), Some(Command::ClearToday));
         assert!(matches!(
             Command::parse("favorites/hide-hint/4"),
             Some(Command::HideFavoritesHint(_))
