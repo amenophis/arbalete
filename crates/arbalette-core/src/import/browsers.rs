@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
     Chromium,
+    /// A Chromium browser whose sidebar holds what other browsers keep in bookmarks.
+    Arc,
     Firefox,
     Safari,
 }
@@ -27,8 +29,14 @@ pub struct Profile {
     pub path: PathBuf,
 }
 
-/// Where each browser keeps its data, relative to the home directory.
+/// Where each browser keeps its data, relative to the home directory. Arc comes first: Arbalette
+/// users most likely come from it.
 const BROWSERS: [(&str, Family, &str); 11] = [
+    (
+        "Arc",
+        Family::Arc,
+        "Library/Application Support/Arc/User Data",
+    ),
     (
         "Chrome",
         Family::Chromium,
@@ -60,11 +68,6 @@ const BROWSERS: [(&str, Family, &str); 11] = [
         "Library/Application Support/Dia/User Data",
     ),
     (
-        "Arc",
-        Family::Chromium,
-        "Library/Application Support/Arc/User Data",
-    ),
-    (
         "Firefox",
         Family::Firefox,
         "Library/Application Support/Firefox",
@@ -86,7 +89,7 @@ pub fn detect(home: &Path) -> Vec<Browser> {
         .filter_map(|&(name, family, dir)| {
             let dir = home.join(dir);
             let profiles = match family {
-                Family::Chromium => chromium_profiles(&dir),
+                Family::Chromium | Family::Arc => chromium_profiles(&dir),
                 Family::Firefox => firefox_profiles(&dir),
                 // Safari's data is behind Full Disk Access: its presence is all that can be seen.
                 Family::Safari => vec![Profile {
@@ -199,16 +202,16 @@ mod tests {
         assert_eq!(
             summary(&browsers),
             [
+                ("Arc", Family::Arc, vec!["Default"]),
                 (
                     "Chrome",
                     Family::Chromium,
                     vec!["Personal", "Work", "Profile 3"]
                 ),
-                ("Arc", Family::Chromium, vec!["Default"]),
             ]
         );
         let chrome = home.0.join(SUPPORT).join("Google/Chrome");
-        assert_eq!(browsers[0].profiles[1].path, chrome.join("Profile 1"));
+        assert_eq!(browsers[1].profiles[1].path, chrome.join("Profile 1"));
     }
 
     #[test]

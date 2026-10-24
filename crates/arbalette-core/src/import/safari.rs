@@ -55,6 +55,12 @@ pub fn read_bookmarks(dir: &Path) -> Result<Bookmarks, Error> {
     }
 }
 
+/// Whether macOS keeps Arbalette from reading Safari's data until the user grants it Full Disk
+/// Access.
+pub fn needs_full_disk_access(dir: &Path) -> bool {
+    matches!(read_bookmarks(dir), Err(Error::NeedsFullDiskAccess))
+}
+
 const BAR: &str = "BookmarksBar";
 
 /// Parses a `Bookmarks.plist`, binary or XML. Its root lists the bar, the bookmarks menu and the
@@ -272,5 +278,8 @@ mod tests {
             read_history(&dir.0),
             Err(Error::NeedsFullDiskAccess)
         ));
+        assert!(needs_full_disk_access(&dir.0));
+        let readable = TestDir::new("safari-readable");
+        assert!(!needs_full_disk_access(&readable.0));
     }
 }

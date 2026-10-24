@@ -1,5 +1,6 @@
 //! Commands the UI sends to the app, as `https://arbalette.ui/command/<name>` requests.
 
+use arbalette_core::import::Choice;
 use arbalette_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +65,17 @@ pub enum Command {
     SetSpaceEmoji(SpaceId, String),
     /// Changes a Space's color: `space/color/<space id>/<color>`, like `blue`.
     ColorSpace(SpaceId, Color),
+    /// Opens the import assistant: `import/show`.
+    ShowImport,
+    /// The import assistant is listening: send it the browsers found, `import/ready`.
+    ImportReady,
+    /// Closes the import assistant without importing: `import/close`.
+    CloseImport,
+    /// Imports browser profiles: `import/run/<percent-encoded JSON array of choices>`.
+    Import(Vec<Choice>),
+    /// Opens the System Settings pane where the user gives Arbalette Full Disk Access:
+    /// `import/full-disk-access`.
+    OpenFullDiskAccess,
 }
 
 impl Command {
@@ -88,7 +100,15 @@ impl Command {
             "space/new" => Some(Self::NewSpace),
             "space/next" => Some(Self::NextSpace),
             "space/previous" => Some(Self::PreviousSpace),
+            "import/show" => Some(Self::ShowImport),
+            "import/ready" => Some(Self::ImportReady),
+            "import/close" => Some(Self::CloseImport),
+            "import/full-disk-access" => Some(Self::OpenFullDiskAccess),
             _ => {
+                if let Some(choices) = path.strip_prefix("import/run/") {
+                    let choices = serde_json::from_str(&percent_decode(choices)?).ok();
+                    return choices.map(Self::Import);
+                }
                 if let Some((id, name)) = path
                     .strip_prefix("profile/rename/")
                     .and_then(|r| r.split_once('/'))
@@ -385,6 +405,34 @@ mod tests {
         assert_eq!(Command::parse("space/color/x/blue"), None);
         assert_eq!(Command::parse("space/rename/4"), None);
         assert_eq!(Command::parse("space/emoji/x/a"), None);
+    }
+
+    #[test]
+    fn parses_import_commands() {
+        assert_eq!(Command::parse("import/show"), Some(Command::ShowImport));
+        assert_eq!(Command::parse("import/ready"), Some(Command::ImportReady));
+        assert_eq!(Command::parse("import/close"), Some(Command::CloseImport));
+        assert_eq!(
+            Command::parse("import/full-disk-access"),
+            Some(Command::OpenFullDiskAccess)
+        );
+        // encodeURIComponent('[{"browser":1,"profile":0,"into":4,"bar":"pinnedFolder"}]')
+        let encoded = "%5B%7B%22browser%22%3A1%2C%22profile%22%3A0%2C%22into%22%3A4%2C\
+                       %22bar%22%3A%22pinnedFolder%22%7D%5D";
+        let Some(Command::Import(choices)) = Command::parse(&format!("import/run/{encoded}"))
+        else {
+            panic!("not an import")
+        };
+        let expected = r#"[{"browser":1,"profile":0,"into":4,"bar":"pinnedFolder"}]"#;
+        assert_eq!(choices, serde_json::from_str::<Vec<_>>(expected).unwrap());
+        assert_eq!(choices[0].browser, 1);
+        assert_eq!(
+            Command::parse("import/run/%5B%5D"),
+            Some(Command::Import(vec![]))
+        );
+        assert_eq!(Command::parse("import/run/%5B"), None);
+        assert_eq!(Command::parse("import/run/%zz"), None);
+        assert_eq!(Command::parse("import"), None);
     }
 
     #[test]
