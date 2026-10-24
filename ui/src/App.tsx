@@ -1,8 +1,9 @@
-import { memo } from "react";
-import { type Item, send, type Tab, useAppState } from "./bridge";
+import { type KeyboardEvent, memo } from "react";
+import { type Item, send, type Tab, useAppState, useRenaming } from "./bridge";
 
 export function App() {
   const state = useAppState();
+  const [renaming, setRenaming] = useRenaming();
   const page = state?.page;
   const active =
     state &&
@@ -51,15 +52,36 @@ export function App() {
       )}
       <div className="scroll">
         <ul className="tabs pinned">
-          <Items items={state?.pinned ?? []} active={state?.active} />
+          <Items
+            items={state?.pinned ?? []}
+            active={state?.active}
+            renaming={renaming}
+            onRename={setRenaming}
+          />
         </ul>
-        <hr className="divider" />
+        <div className="divider-row">
+          <hr className="divider" />
+          <button
+            type="button"
+            className="new-folder"
+            aria-label="New folder"
+            title="New folder"
+            onClick={() => send("folder/new")}
+          >
+            +
+          </button>
+        </div>
         <button type="button" className="tab" onClick={() => send("overlay/show")}>
           <span className="favicon">+</span>
           <span className="title">New tab</span>
         </button>
         <ul className="tabs today">
-          <Items items={state?.today ?? []} active={state?.active} />
+          <Items
+            items={state?.today ?? []}
+            active={state?.active}
+            renaming={renaming}
+            onRename={setRenaming}
+          />
         </ul>
       </div>
     </nav>
@@ -70,17 +92,32 @@ function tabs(items: Item[]): Tab[] {
   return items.flatMap((item) => ("children" in item ? tabs(item.children) : [item]));
 }
 
-function Items({ items, active }: { items: Item[]; active?: number | null }) {
+type Rename = (folder: number | null) => void;
+
+function Items({
+  items,
+  active,
+  renaming,
+  onRename,
+}: {
+  items: Item[];
+  active?: number | null;
+  renaming: number | null;
+  onRename: Rename;
+}) {
   return items.map((item) =>
     "children" in item ? (
       <li key={item.id}>
-        <div className="folder">
-          <span className="favicon">{item.expanded ? "▾" : "▸"}</span>
-          <span className="title">{item.title}</span>
-        </div>
+        <FolderRow
+          id={item.id}
+          title={item.title}
+          expanded={item.expanded}
+          renaming={item.id === renaming}
+          onRename={onRename}
+        />
         {item.expanded && (
           <ul className="folder-tabs">
-            <Items items={item.children} active={active} />
+            <Items items={item.children} active={active} renaming={renaming} onRename={onRename} />
           </ul>
         )}
       </li>
@@ -95,6 +132,65 @@ function Items({ items, active }: { items: Item[]; active?: number | null }) {
     ),
   );
 }
+
+// A click collapses or expands the folder, a double click edits its title. Enter and leaving the
+// field save the title, unless it is blank; Escape keeps the old one.
+const FolderRow = memo(function FolderRow({
+  id,
+  title,
+  expanded,
+  renaming,
+  onRename,
+}: {
+  id: number;
+  title: string;
+  expanded: boolean;
+  renaming: boolean;
+  onRename: Rename;
+}) {
+  const arrow = (
+    <span className="favicon" aria-hidden="true">
+      {expanded ? "▾" : "▸"}
+    </span>
+  );
+  if (!renaming) {
+    return (
+      <button
+        type="button"
+        className="folder"
+        aria-expanded={expanded}
+        onClick={() => send(`toggle/${id}`)}
+        onDoubleClick={() => onRename(id)}
+      >
+        {arrow}
+        <span className="title">{title}</span>
+      </button>
+    );
+  }
+  const keyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") event.currentTarget.value = title;
+    if (event.key === "Escape" || event.key === "Enter") event.currentTarget.blur();
+  };
+  return (
+    <div className="folder">
+      {arrow}
+      <input
+        className="title"
+        aria-label="Folder name"
+        defaultValue={title}
+        // biome-ignore lint/a11y/noAutofocus: the field appears because the user asked to rename.
+        autoFocus
+        onFocus={(event) => event.currentTarget.select()}
+        onKeyDown={keyDown}
+        onBlur={(event) => {
+          const value = event.currentTarget.value.trim();
+          if (value && value !== title) send(`rename/${id}/${encodeURIComponent(value)}`);
+          onRename(null);
+        }}
+      />
+    </div>
+  );
+});
 
 // Every state update brings new tab objects: primitive props let unchanged rows skip rendering.
 const TabItem = memo(function TabItem({

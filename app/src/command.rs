@@ -21,6 +21,12 @@ pub enum Command {
     Reopen,
     /// Pins or unpins a tab, `pin/<tab id>`, or the selected one, `pin`.
     Pin(Option<NodeId>),
+    /// Creates a folder at the end of the pinned tabs, for the UI to rename: `folder/new`.
+    NewFolder,
+    /// Collapses or expands a folder: `toggle/<folder id>`.
+    ToggleFolder(NodeId),
+    /// Renames a folder: `rename/<folder id>/<percent-encoded title>`.
+    RenameFolder(NodeId, String),
 }
 
 impl Command {
@@ -35,6 +41,7 @@ impl Command {
             "close" => Some(Self::Close(None)),
             "reopen" => Some(Self::Reopen),
             "pin" => Some(Self::Pin(None)),
+            "folder/new" => Some(Self::NewFolder),
             _ => {
                 if let Some(id) = path.strip_prefix("select/") {
                     return serde_json::from_str(id).ok().map(Self::Select);
@@ -46,6 +53,15 @@ impl Command {
                 }
                 if let Some(id) = path.strip_prefix("pin/") {
                     return serde_json::from_str(id).ok().map(|id| Self::Pin(Some(id)));
+                }
+                if let Some(id) = path.strip_prefix("toggle/") {
+                    return serde_json::from_str(id).ok().map(Self::ToggleFolder);
+                }
+                if let Some((id, title)) =
+                    path.strip_prefix("rename/").and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    return percent_decode(title).map(|title| Self::RenameFolder(id, title));
                 }
                 percent_decode(path.strip_prefix("open/")?).map(Self::Open)
             }
@@ -103,6 +119,24 @@ mod tests {
         );
         assert_eq!(Command::parse("open/%zz"), None);
         assert_eq!(Command::parse("open/%C3"), None);
+    }
+
+    #[test]
+    fn parses_folder_commands() {
+        assert_eq!(Command::parse("folder/new"), Some(Command::NewFolder));
+        assert!(matches!(
+            Command::parse("toggle/6"),
+            Some(Command::ToggleFolder(_))
+        ));
+        let Some(Command::RenameFolder(id, title)) = Command::parse("rename/6/Caf%C3%A9%2F2")
+        else {
+            panic!("not a rename")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "6");
+        assert_eq!(title, "Café/2");
+        assert_eq!(Command::parse("rename/6"), None);
+        assert_eq!(Command::parse("rename/x/a"), None);
+        assert_eq!(Command::parse("toggle/x"), None);
     }
 
     #[test]

@@ -270,6 +270,25 @@ fn toggle_pin(tab: Option<NodeId>) {
     });
 }
 
+/// Creates a folder at the end of the pinned tabs and asks the sidebar to rename it, giving it the
+/// keyboard focus even when the menu was used from the page.
+fn new_folder() {
+    let folder = update_sidebar(|sidebar| {
+        let pinned = sidebar.spaces()[0].pinned;
+        sidebar
+            .add_folder(pinned, "New Folder")
+            .expect("the pinned tabs")
+    });
+    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+        sidebar.request_focus();
+    }
+    let folder = serde_json::to_string(&folder).expect("an id");
+    dispatch(
+        &SIDEBAR,
+        &format!(r#"new CustomEvent("arbalette:rename", {{ detail: {folder} }})"#),
+    );
+}
+
 fn reopen_tab() {
     let Some(closed) = STATE.with_borrow_mut(|state| state.closed.pop()) else {
         return;
@@ -304,6 +323,14 @@ pub fn run(command: Command) {
         (Command::Close(tab), _) => close_tab(tab),
         (Command::Reopen, _) => reopen_tab(),
         (Command::Pin(tab), _) => toggle_pin(tab),
+        (Command::NewFolder, _) => new_folder(),
+        // Like a selection, an unknown folder or a blank title from the UI is ignored.
+        (Command::ToggleFolder(id), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.toggle_folder(id));
+        }
+        (Command::RenameFolder(id, title), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.rename_folder(id, &title));
+        }
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
