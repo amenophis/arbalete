@@ -24,6 +24,8 @@ export type State = {
 export type Space = {
   id: number;
   title: string;
+  emoji: string | null;
+  color: Color;
 };
 
 export type Profile = {
@@ -32,7 +34,7 @@ export type Profile = {
   color: Color;
 };
 
-// The palette of profiles (Color in crates/arbalette-core/src/sidebar.rs).
+// The palette of profiles and Spaces (Color in crates/arbalette-core/src/sidebar.rs).
 export const COLORS = {
   purple: "#6e56cf",
   blue: "#3e7bfa",
@@ -80,9 +82,11 @@ export function useAppState(): State | undefined {
   return state;
 }
 
-// The folder or the profile whose name is edited: one the app asks to rename, with `event`, once
+// The folder, profile or Space whose name is edited: one the app asks to rename, with `event`, once
 // it creates it, or any the user picks.
-export function useRenaming(event: "arbalette:rename" | "arbalette:rename-profile") {
+export function useRenaming(
+  event: "arbalette:rename" | "arbalette:rename-profile" | "arbalette:rename-space",
+) {
   const [renaming, setRenaming] = useState<number | null>(null);
   useEffect(() => {
     const listener = (event: Event) => setRenaming((event as CustomEvent<number>).detail);
@@ -90,6 +94,13 @@ export function useRenaming(event: "arbalette:rename" | "arbalette:rename-profil
     return () => removeEventListener(event, listener);
   }, [event]);
   return [renaming, setRenaming] as const;
+}
+
+const graphemes = new Intl.Segmenter();
+
+// The first character as the user sees it: a whole emoji, not half of a surrogate pair.
+export function firstGrapheme(text: string): string {
+  return graphemes.segment(text)[Symbol.iterator]().next().value?.segment ?? "";
 }
 
 // The sidebar shown above the page while the sidebar is hidden opens when the pointer reaches it,

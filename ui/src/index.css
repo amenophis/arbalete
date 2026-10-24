@@ -40,6 +40,8 @@ body {
   height: 100vh;
   padding: 0 8px 8px;
   user-select: none;
+  --tint: color-mix(in srgb, var(--space, var(--background)) 12%, var(--background));
+  background: var(--tint);
 }
 
 /* Today's tabs fill the rest of it: dropping below them moves a tab to their end. */
@@ -321,7 +323,7 @@ button.folder:hover {
   background: none;
 }
 
-/* One icon per Space, then the profiles button at the end of the row. */
+/* One icon per Space and a button to create one, then the profiles button at the end of the row. */
 .switcher {
   position: relative;
   display: flex;
@@ -341,7 +343,8 @@ button.folder:hover {
   list-style: none;
 }
 
-.space {
+.space,
+.new-space {
   width: 24px;
   height: 24px;
   padding: 0;
@@ -355,7 +358,8 @@ button.folder:hover {
   opacity: 0.5;
 }
 
-.space:hover {
+.space:hover,
+.new-space:hover {
   background: var(--hover);
   opacity: 1;
 }
@@ -369,8 +373,9 @@ button.folder:hover {
   flex: none;
 }
 
-/* Opens above the switcher, over the tabs. */
-.profiles ul {
+/* Open above the switcher, over the tabs. */
+.profiles ul,
+.space-editor {
   position: absolute;
   right: 0;
   bottom: 100%;
@@ -378,13 +383,29 @@ button.folder:hover {
   margin: 0;
   padding: 8px 0;
   list-style: none;
-  background: var(--background);
+  background: var(--tint);
+}
+
+.space-fields {
+  display: flex;
+  gap: 4px;
+}
+
+.space-fields input {
+  min-width: 0;
+}
+
+.space-fields .emoji {
+  flex: none;
+  width: 32px;
+  text-align: center;
 }
 
 .profile {
   padding: 4px 0;
 }
 
+.space-fields input,
 .profile input {
   box-sizing: border-box;
   width: 100%;
@@ -396,6 +417,7 @@ button.folder:hover {
   font: inherit;
 }
 
+.space-fields input:focus,
 .profile input:focus {
   outline: 2px solid var(--accent);
 }

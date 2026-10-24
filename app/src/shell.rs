@@ -104,6 +104,8 @@ impl UiState {
             "spaces": self.sidebar.spaces().iter().map(|s| json!({
                 "id": s.id,
                 "title": s.title,
+                "emoji": s.emoji,
+                "color": s.color,
             })).collect::<Vec<_>>(),
             "profiles": self.sidebar.profiles().iter().map(|p| json!({
                 "id": p.id,
@@ -400,6 +402,25 @@ fn new_profile() {
     dispatch(&REVEAL_VIEW, &event);
 }
 
+/// Creates a Space in the displayed Space's profile, shows it and asks the sidebar to rename it,
+/// like a new profile.
+fn new_space() {
+    let space = update_sidebar(|sidebar| {
+        let profile = sidebar.displayed().profile;
+        sidebar
+            .create_space("New Space", profile)
+            .expect("the displayed Space's profile")
+    });
+    show_selected();
+    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+        sidebar.request_focus();
+    }
+    let space = serde_json::to_string(&space).expect("an id");
+    let event = format!(r#"new CustomEvent("arbalette:rename-space", {{ detail: {space} }})"#);
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
+}
+
 fn reopen_tab() {
     let Some(closed) = STATE.with_borrow_mut(|state| state.closed.pop()) else {
         return;
@@ -578,6 +599,17 @@ pub fn run(command: Command) {
         }
         (Command::ColorProfile(id, color), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_profile_color(id, color));
+        }
+        (Command::NewSpace, _) => new_space(),
+        // Like a profile, an unknown Space or a blank title from the UI is ignored.
+        (Command::RenameSpace(id, title), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.rename_space(id, &title));
+        }
+        (Command::SetSpaceEmoji(id, emoji), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.set_space_emoji(id, &emoji));
+        }
+        (Command::ColorSpace(id, color), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.set_space_color(id, color));
         }
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
@@ -1108,11 +1140,16 @@ mod tests {
             .unwrap();
         state.sidebar.select(work, tab).unwrap();
         state.sidebar.display(work).unwrap();
+        state.sidebar.set_space_emoji(work, "💼").unwrap();
+        state
+            .sidebar
+            .set_space_color(work, arbalette_core::sidebar::Color::Blue)
+            .unwrap();
         let json = state.to_json();
         assert_eq!(json["space"], serde_json::json!(work));
         let spaces = serde_json::json!([
-            { "id": home, "title": "Home" },
-            { "id": work, "title": "Work" },
+            { "id": home, "title": "Home", "emoji": null, "color": "purple" },
+            { "id": work, "title": "Work", "emoji": "💼", "color": "blue" },
         ]);
         assert_eq!(json["spaces"], spaces);
         assert_eq!(json["today"][0]["url"], "https://example.org/");

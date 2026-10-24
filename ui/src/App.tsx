@@ -1,7 +1,8 @@
-import { type KeyboardEvent, memo, useRef } from "react";
-import { type Item, type Space, send, type Tab, useAppState, useRenaming } from "./bridge";
+import { type CSSProperties, type KeyboardEvent, memo, useRef } from "react";
+import { COLORS, type Item, send, type Tab, useAppState, useRenaming } from "./bridge";
 import { useDrag } from "./drag";
 import { Profiles } from "./Profiles";
+import { Spaces } from "./Spaces";
 
 export function App() {
   const state = useAppState();
@@ -13,8 +14,11 @@ export function App() {
     [...state.favorites, ...tabs([...state.pinned, ...state.today])].find(
       (tab) => tab.id === state.active,
     );
+  const space = state?.spaces.find((s) => s.id === state.space);
+  // The displayed Space's color tints the sidebar.
+  const tint = space && ({ "--space": COLORS[space.color] } as CSSProperties);
   return (
-    <nav className="sidebar" onPointerDown={onPointerDown}>
+    <nav className="sidebar" style={tint} onPointerDown={onPointerDown}>
       <div className="toolbar">
         <button
           type="button"
@@ -98,28 +102,6 @@ export function App() {
       </div>
       <div className="drop-indicator" ref={indicator} />
     </nav>
-  );
-}
-
-// One icon per Space, its initial for now; the displayed one is marked aria-current.
-function Spaces({ spaces, displayed }: { spaces: Space[]; displayed?: number }) {
-  return (
-    <ul className="spaces" aria-label="Spaces">
-      {spaces.map((space) => (
-        <li key={space.id}>
-          <button
-            type="button"
-            className="space"
-            aria-label={space.title}
-            title={space.title}
-            aria-current={space.id === displayed ? "true" : undefined}
-            onClick={() => send(`space/${space.id}`)}
-          >
-            {space.title.charAt(0).toUpperCase()}
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }
 

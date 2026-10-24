@@ -1,7 +1,8 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
 // between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
-// Spaces, and creating, renaming and coloring profiles, in the real app.
+// Spaces, creating, renaming and coloring profiles, and creating and editing Spaces, in the real
+// app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -414,6 +415,52 @@ try {
     const travel = saved.profiles.find((profile) => profile.name === "Travel");
     return travel?.color === "green" && saved.spaces.some((space) => space.profile === travel.id);
   });
+
+  const spaceCount = session.spaces.length + 1;
+  await check(
+    "the new Space button creates a Space, displays it empty and edits its name",
+    `e2e.spaceField = (name) => document.querySelector('[aria-label="Space ' + name + '"]');
+     e2e.last = () => e2e.spaceIcons().at(-1);
+     e2e.tint = () => getComputedStyle(document.querySelector(".sidebar"));
+     e2e.background = e2e.tint().backgroundColor;
+     document.querySelector(".new-space").click()`,
+    `e2e.spaceIcons().length === ${spaceCount + 1} && e2e.last().getAttribute("aria-current") === "true"
+      && e2e.rows().length === 0 && document.activeElement === e2e.spaceField("name")
+      && e2e.spaceField("name").value === "New Space"`,
+  );
+  await check(
+    "Enter saves the Space's name, whose initial the switcher shows",
+    `e2e.input = document.activeElement; e2e.input.value = "Reading";
+     e2e.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`,
+    `e2e.last().getAttribute("aria-label") === "Reading" && e2e.last().textContent === "R"`,
+  );
+  await check(
+    "the emoji field keeps one emoji, which the switcher shows instead of the initial",
+    `e2e.input = e2e.spaceField("emoji"); e2e.input.focus(); e2e.input.value = "📚x";
+     e2e.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`,
+    `e2e.last().textContent === "📚" && e2e.spaceField("emoji").value === "📚"`,
+  );
+  await check(
+    "picking a color tints the sidebar",
+    `document.querySelector('[aria-label="Color of Reading"] [aria-label="orange"]').click()`,
+    `e2e.tint().getPropertyValue("--space") === "#f76b15" && e2e.tint().backgroundColor !== e2e.background`,
+  );
+  await checkSession("the session saves the new Space, its name, emoji and color", (saved) => {
+    const space = saved.spaces.at(-1);
+    return (
+      saved.spaces.length === spaceCount + 1 &&
+      saved.displayed === space.id &&
+      space.profile === otherProfileSpace.profile &&
+      space.title === "Reading" &&
+      space.emoji === "📚" &&
+      space.color === "orange"
+    );
+  });
+  await check(
+    "switching Space tints the sidebar with that Space's color",
+    `e2e.spaceIcons()[0].click()`,
+    `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.tint().getPropertyValue("--space") === "#6e56cf"`,
+  );
 } finally {
   app.kill();
 }

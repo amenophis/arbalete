@@ -49,6 +49,16 @@ pub enum Command {
     ColorProfile(ProfileId, Color),
     /// Shows a Space in the sidebar, and its selected tab in the content view: `space/<space id>`.
     ShowSpace(SpaceId),
+    /// Creates a Space in the displayed Space's profile and displays it, for the UI to rename:
+    /// `space/new`.
+    NewSpace,
+    /// Renames a Space: `space/rename/<space id>/<percent-encoded title>`.
+    RenameSpace(SpaceId, String),
+    /// Sets a Space's emoji, or removes it when empty: `space/emoji/<space id>/<percent-encoded
+    /// emoji>`.
+    SetSpaceEmoji(SpaceId, String),
+    /// Changes a Space's color: `space/color/<space id>/<color>`, like `blue`.
+    ColorSpace(SpaceId, Color),
 }
 
 impl Command {
@@ -70,6 +80,7 @@ impl Command {
             "next" => Some(Self::NextTab),
             "previous" => Some(Self::PreviousTab),
             "profile/new" => Some(Self::NewProfile),
+            "space/new" => Some(Self::NewSpace),
             _ => {
                 if let Some((id, name)) = path
                     .strip_prefix("profile/rename/")
@@ -83,10 +94,28 @@ impl Command {
                     .and_then(|r| r.split_once('/'))
                 {
                     let id = serde_json::from_str(id).ok()?;
-                    let color = serde_json::Value::String(color.to_string());
-                    return serde_json::from_value(color)
-                        .ok()
-                        .map(|color| Self::ColorProfile(id, color));
+                    return parse_color(color).map(|color| Self::ColorProfile(id, color));
+                }
+                if let Some((id, title)) = path
+                    .strip_prefix("space/rename/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    return percent_decode(title).map(|title| Self::RenameSpace(id, title));
+                }
+                if let Some((id, emoji)) = path
+                    .strip_prefix("space/emoji/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    return percent_decode(emoji).map(|emoji| Self::SetSpaceEmoji(id, emoji));
+                }
+                if let Some((id, color)) = path
+                    .strip_prefix("space/color/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    return parse_color(color).map(|color| Self::ColorSpace(id, color));
                 }
                 if let Some(number) = path.strip_prefix("favorite/") {
                     let number = number.parse().ok().filter(|n| (1..=9).contains(n));
@@ -134,6 +163,11 @@ impl Command {
             }
         }
     }
+}
+
+/// A color by its name, like `blue`.
+fn parse_color(name: &str) -> Option<Color> {
+    serde_json::from_value(serde_json::Value::String(name.to_string())).ok()
 }
 
 /// Decodes what `encodeURIComponent` encodes.
@@ -286,6 +320,40 @@ mod tests {
         assert_eq!(serde_json::to_string(&id).unwrap(), "4");
         assert_eq!(Command::parse("space/x"), None);
         assert_eq!(Command::parse("space"), None);
+    }
+
+    #[test]
+    fn parses_space_commands() {
+        assert_eq!(Command::parse("space/new"), Some(Command::NewSpace));
+        let Some(Command::RenameSpace(id, title)) = Command::parse("space/rename/4/Caf%C3%A9%2F2")
+        else {
+            panic!("not a rename")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        assert_eq!(title, "Café/2");
+        let Some(Command::SetSpaceEmoji(id, emoji)) = Command::parse("space/emoji/4/%F0%9F%8F%A1")
+        else {
+            panic!("not an emoji")
+        };
+        assert_eq!(
+            (serde_json::to_string(&id).unwrap(), emoji.as_str()),
+            ("4".into(), "🏡")
+        );
+        let Some(Command::SetSpaceEmoji(_, emoji)) = Command::parse("space/emoji/4/") else {
+            panic!("not an emoji")
+        };
+        assert_eq!(emoji, "");
+        let Some(Command::ColorSpace(id, color)) = Command::parse("space/color/4/blue") else {
+            panic!("not a color")
+        };
+        assert_eq!(
+            serde_json::to_string(&(id, color)).unwrap(),
+            r#"[4,"blue"]"#
+        );
+        assert_eq!(Command::parse("space/color/4/teal"), None);
+        assert_eq!(Command::parse("space/color/x/blue"), None);
+        assert_eq!(Command::parse("space/rename/4"), None);
+        assert_eq!(Command::parse("space/emoji/x/a"), None);
     }
 
     #[test]

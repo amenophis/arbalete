@@ -26,7 +26,7 @@ pub struct Profile {
     pub favorites: NodeId,
 }
 
-/// The colors a profile can take: a small palette, which the UI draws (ui/src/App.tsx).
+/// The colors a profile or a Space can take: a small palette, which the UI draws (ui/src/bridge.ts).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Color {
@@ -45,6 +45,11 @@ pub enum Color {
 pub struct Space {
     pub id: SpaceId,
     pub title: String,
+    /// Shown in the Space switcher instead of the title's initial.
+    #[serde(default)]
+    pub emoji: Option<String>,
+    #[serde(default)]
+    pub color: Color,
     pub profile: ProfileId,
     pub pinned: NodeId,
     pub today: NodeId,
@@ -92,7 +97,7 @@ pub enum Error {
     NotAContainer,
     NotATab,
     NotAFolder,
-    /// Folders and profiles keep a title to be told apart.
+    /// Folders, profiles and Spaces keep a title to be told apart.
     EmptyTitle,
     /// A folder cannot move inside itself or one of its descendants.
     MoveIntoItself,
@@ -219,12 +224,44 @@ impl Sidebar {
         self.spaces.push(Space {
             id,
             title: title.to_string(),
+            emoji: None,
+            color: Color::default(),
             profile,
             pinned,
             today,
             selected: None,
         });
         Ok(id)
+    }
+
+    /// Creates a Space at the end of the switcher and displays it.
+    pub fn create_space(&mut self, title: &str, profile: ProfileId) -> Result<SpaceId, Error> {
+        if title.trim().is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        let space = self.add_space(title, profile)?;
+        self.display(space)?;
+        Ok(space)
+    }
+
+    pub fn rename_space(&mut self, id: SpaceId, title: &str) -> Result<(), Error> {
+        if title.trim().is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        self.space_mut(id)?.title = title.to_string();
+        Ok(())
+    }
+
+    /// Sets the Space's emoji; a blank one removes it, so the switcher shows the initial again.
+    pub fn set_space_emoji(&mut self, id: SpaceId, emoji: &str) -> Result<(), Error> {
+        let emoji = emoji.trim();
+        self.space_mut(id)?.emoji = (!emoji.is_empty()).then(|| emoji.to_string());
+        Ok(())
+    }
+
+    pub fn set_space_color(&mut self, id: SpaceId, color: Color) -> Result<(), Error> {
+        self.space_mut(id)?.color = color;
+        Ok(())
     }
 
     /// Opens a tab at the end of the Space's "Today" tabs, from the Space's selected tab.
@@ -500,6 +537,13 @@ impl Sidebar {
             .iter_mut()
             .find(|p| p.id == id)
             .ok_or(Error::UnknownProfile)
+    }
+
+    fn space_mut(&mut self, id: SpaceId) -> Result<&mut Space, Error> {
+        self.spaces
+            .iter_mut()
+            .find(|s| s.id == id)
+            .ok_or(Error::UnknownSpace)
     }
 
     fn space(&self, id: SpaceId) -> Result<&Space, Error> {
@@ -830,6 +874,63 @@ mod tests {
         let work = sidebar.add_space("Work", profile).unwrap();
         assert_eq!(sidebar.spaces()[1].id, work);
         assert_eq!(sidebar.spaces()[1].profile, profile);
+    }
+
+    #[test]
+    fn creates_a_space_and_displays_it() {
+        let mut sidebar = Sidebar::default();
+        let work = sidebar.create_profile("Work").unwrap();
+        let space = sidebar.create_space("Mail", work).unwrap();
+        let created = sidebar.displayed();
+        assert_eq!(created.id, space);
+        assert_eq!((created.title.as_str(), created.profile), ("Mail", work));
+        assert_eq!(
+            (created.emoji.as_deref(), created.color),
+            (None, Color::Purple)
+        );
+        assert_eq!(sidebar.spaces().last().unwrap().id, space);
+        assert_eq!(sidebar.create_space(" ", work), Err(Error::EmptyTitle));
+        assert_eq!(
+            sidebar.create_space("a", ProfileId(999)),
+            Err(Error::UnknownProfile)
+        );
+        assert_eq!(sidebar.spaces().len(), 3);
+        assert_eq!(sidebar.displayed().id, space);
+    }
+
+    #[test]
+    fn renames_a_space_and_sets_its_emoji_and_color() {
+        let mut sidebar = Sidebar::default();
+        let id = home(&sidebar).id;
+        sidebar.rename_space(id, "Personal").unwrap();
+        sidebar.set_space_emoji(id, " 🏡 ").unwrap();
+        sidebar.set_space_color(id, Color::Blue).unwrap();
+        assert_eq!(sidebar.rename_space(id, " "), Err(Error::EmptyTitle));
+        let space = home(&sidebar);
+        assert_eq!(
+            (space.title.as_str(), space.emoji.as_deref(), space.color),
+            ("Personal", Some("🏡"), Color::Blue)
+        );
+        sidebar.set_space_emoji(id, " ").unwrap();
+        assert_eq!(home(&sidebar).emoji, None);
+        let unknown = SpaceId(999);
+        assert_eq!(sidebar.rename_space(unknown, "a"), Err(Error::UnknownSpace));
+        assert_eq!(
+            sidebar.set_space_emoji(unknown, "a"),
+            Err(Error::UnknownSpace)
+        );
+        assert_eq!(
+            sidebar.set_space_color(unknown, Color::Red),
+            Err(Error::UnknownSpace)
+        );
+    }
+
+    #[test]
+    fn a_space_saved_without_an_emoji_or_a_color_has_none_and_is_purple() {
+        let json = r#"{ "id": 3, "title": "Home", "profile": 1, "pinned": 4, "today": 5,
+            "selected": null }"#;
+        let space: Space = serde_json::from_str(json).unwrap();
+        assert_eq!((space.emoji, space.color), (None, Color::Purple));
     }
 
     #[test]
