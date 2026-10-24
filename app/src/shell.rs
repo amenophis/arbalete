@@ -1954,7 +1954,8 @@ wrap_display_handler! {
             if !is_shown(browser) {
                 return;
             }
-            let favicon = icon_urls.and_then(|urls| urls.clone().into_iter().next());
+            // Not cloned: a clone of the list CEF lends lists no string.
+            let favicon = icon_urls.and_then(|urls| std::mem::take(urls).into_iter().next());
             update_sidebar(|sidebar| {
                 if let Some(tab) = active_tab(sidebar) {
                     tab.favicon = favicon;
