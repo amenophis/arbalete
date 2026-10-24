@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="112 112 800 800" role="img" aria-label="Arbalette - Soft Arch monochrome">
+  <title>Arbalette - Soft Arch monochrome</title>
+  <g>
+    <path d="M300 792 C318 520 398 262 512 262 C626 262 706 520 724 792" fill="none" stroke="#000" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M222 612 L806 612" fill="none" stroke="#000" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M800 550 L870 612 L800 674 Z" fill="#000" stroke="#000" stroke-width="44" stroke-linejoin="round"/>
+    <path d="M166 560 L216 612 L166 664" fill="none" stroke="#000" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

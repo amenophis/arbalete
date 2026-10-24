@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Arbalette">
+  <title>Arbalette - tail proposal c: Three vanes</title>
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="100" y1="924" x2="924" y2="100"><stop offset="0" stop-color="#2A2342"/><stop offset="1" stop-color="#14111F"/></linearGradient>
+    <linearGradient id="m" gradientUnits="userSpaceOnUse" x1="182" y1="720" x2="866" y2="420"><stop offset="0.00" stop-color="#FF4F4F"/><stop offset="0.33" stop-color="#FF5FA2"/><stop offset="0.67" stop-color="#A35BFF"/><stop offset="1.00" stop-color="#3D7BFF"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <!-- Mark outlined in white like a sticker, centered on its visible bounds (72..890, 228..854). -->
+  <g transform="translate(512 512) scale(0.68) translate(-481 -541)">
+    <path d="M316 792 L478 334 Q512 246 546 334 L708 792" fill="none" stroke="#FFFFFF" stroke-width="204" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M120 622 L800 622" fill="none" stroke="#FFFFFF" stroke-width="164" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M792 548 L866 622 L792 696 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="128" stroke-linejoin="round"/>
+    <path d="M88 556 L150 604" fill="none" stroke="#FFFFFF" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M88 688 L150 640" fill="none" stroke="#FFFFFF" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M138 556 L200 604" fill="none" stroke="#FFFFFF" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M138 688 L200 640" fill="none" stroke="#FFFFFF" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M188 556 L250 604" fill="none" stroke="#FFFFFF" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M188 688 L250 640" fill="none" stroke="#FFFFFF" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M316 792 L478 334 Q512 246 546 334 L708 792" fill="none" stroke="url(#m)" stroke-width="124" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M120 622 L800 622" fill="none" stroke="url(#m)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M792 548 L866 622 L792 696 Z" fill="url(#m)" stroke="url(#m)" stroke-width="48" stroke-linejoin="round"/>
+    <path d="M88 556 L150 604" fill="none" stroke="url(#m)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M88 688 L150 640" fill="none" stroke="url(#m)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M138 556 L200 604" fill="none" stroke="url(#m)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M138 688 L200 640" fill="none" stroke="url(#m)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M188 556 L250 604" fill="none" stroke="url(#m)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M188 688 L250 640" fill="none" stroke="url(#m)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

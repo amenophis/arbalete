@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Arbalette - Front Crossbow app icon">
+  <title>Arbalette - Front Crossbow app icon</title>
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="200" y1="824" x2="824" y2="200"><stop offset="0" stop-color="#FF4D5E"/><stop offset="1" stop-color="#B44DFF"/></linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <g>
+    <path d="M300 792 L478 360 Q512 280 546 360 L724 792" fill="none" stroke="#fff" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M379 600 L512 690 L645 600" fill="none" stroke="#fff" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M512 690 L512 816" fill="none" stroke="#fff" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M512 690 L512 236" fill="none" stroke="#fff" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M444 250 L512 172 L580 250 Z" fill="#fff" stroke="#fff" stroke-width="44" stroke-linejoin="round"/>
+  </g>
+</svg>

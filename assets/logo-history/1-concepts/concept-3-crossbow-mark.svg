@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 140 744 744" role="img" aria-label="Arbalette - Crossbow mark">
+  <title>Arbalette - Crossbow mark</title>
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="200" y1="824" x2="824" y2="200"><stop offset="0" stop-color="#FF4D5E"/><stop offset="1" stop-color="#B44DFF"/></linearGradient>
+  </defs>
+  <g transform="rotate(45 512 512)">
+    <path d="M512 820 L512 256" fill="none" stroke="url(#g)" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M426 346 L512 252 L598 346" fill="none" stroke="url(#g)" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M246 560 Q512 300 778 560" fill="none" stroke="url(#g)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M246 560 L512 690 L778 560" fill="none" stroke="url(#g)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="112 112 800 800" role="img" aria-label="Arbalette - Solid Pebble mark">
+  <title>Arbalette - Solid Pebble mark</title>
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="200" y1="200" x2="824" y2="824"><stop offset="0" stop-color="#3D5BFF"/><stop offset="1" stop-color="#9B3DFF"/></linearGradient>
+  </defs>
+  <g>
+    <path d="M512 236 L740 700 L512 596 L284 700 Z M512 300 L626 542 L398 542 Z" fill="url(#g)" fill-rule="evenodd" stroke="url(#g)" stroke-width="84" stroke-linejoin="round"/>
+    <path d="M512 596 L512 840" fill="none" stroke="url(#g)" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

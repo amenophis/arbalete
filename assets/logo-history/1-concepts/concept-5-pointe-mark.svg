@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 140 744 744" role="img" aria-label="Arbalette - Pointe mark">
+  <title>Arbalette - Pointe mark</title>
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="200" y1="200" x2="824" y2="824"><stop offset="0" stop-color="#3D5BFF"/><stop offset="1" stop-color="#9B3DFF"/></linearGradient>
+  </defs>
+  <g transform="translate(0 -20)">
+    <path d="M512 236 L728 680 L512 560 L296 680 Z" fill="none" stroke="url(#g)" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M512 560 L512 830" fill="none" stroke="url(#g)" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

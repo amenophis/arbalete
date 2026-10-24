@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Arbalette - Bullseye app icon">
+  <title>Arbalette - Bullseye app icon</title>
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="200" y1="200" x2="824" y2="824"><stop offset="0" stop-color="#FF6A3D"/><stop offset="1" stop-color="#FF2E7A"/></linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <g>
+    <circle cx="448" cy="576" r="196" fill="none" stroke="#fff" stroke-width="76"/>
+    <circle cx="448" cy="576" r="62" fill="#fff"/>
+    <path d="M448 576 L790 234" fill="none" stroke="#fff" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M779 156 L760 264 L868 245" fill="none" stroke="#fff" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
