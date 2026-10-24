@@ -20,7 +20,9 @@ pub struct Entry {
 pub struct History(Connection);
 
 impl History {
-    /// Opens the history at `path`, created empty the first time.
+    /// Opens the history at `path`, created empty the first time. Several connections can write
+    /// to it, such as a merge on a thread of its own and the visits of the browsing: rusqlite's
+    /// connections wait up to 5 seconds for another's write to end.
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         let db = Connection::open(path)?;
         db.execute_batch(
@@ -183,6 +185,27 @@ mod tests {
                 entry("https://docs.example.org/", "Docs", 1, 3_000),
             ]
         );
+    }
+
+    #[test]
+    fn records_visits_while_another_connection_merges() {
+        let dir = TestDir::new("history-concurrent");
+        let path = dir.0.join(FILE_NAME);
+        let browsing = History::open(&path).unwrap();
+        let entries: Vec<_> = (0..20_000)
+            .map(|i| entry(&format!("https://{i}.example.com/"), "", 1, i))
+            .collect();
+        let merge = std::thread::spawn({
+            let path = path.clone();
+            move || History::open(&path).unwrap().merge(&entries)
+        });
+        for i in 0..100 {
+            browsing.visit("https://mail.example.com/", i).unwrap();
+        }
+        merge.join().unwrap().unwrap();
+        let entries = browsing.entries().unwrap();
+        assert_eq!(entries.len(), 20_001);
+        assert!(entries.contains(&entry("https://mail.example.com/", "", 100, 99)));
     }
 
     #[test]

@@ -22,15 +22,18 @@ type Choice = { checked: boolean; into: number | null; bar: Bar };
 
 // Shown above the page by the app on the first launch and from the menu (show_import in
 // app/src/shell.rs), to import other browsers' data. Arc is picked by default: Arbalette users
-// most likely come from it.
+// most likely come from it. While the app reads the browsers' data, which takes a while for a
+// large history, it shows the import running; the app hides it once done.
 export function Import() {
   const [sources, setSources] = useState<Sources>();
   const [choices, setChoices] = useState<Record<string, Choice>>({});
+  const [importing, setImporting] = useState(false);
   useEffect(() => {
     const listener = (event: Event) => {
       const detail = (event as CustomEvent<Sources>).detail;
       setSources(detail);
       setChoices(initialChoices(detail));
+      setImporting(false);
     };
     // Wherever the focus is, even on none of the fields.
     const keyDown = (event: KeyboardEvent) => event.key === "Escape" && send("import/close");
@@ -55,6 +58,7 @@ export function Import() {
           const [browser, profile] = key.split("/").map(Number);
           return { browser, profile, into, bar };
         });
+        setImporting(true);
         send(`import/run/${encodeURIComponent(JSON.stringify(run))}`);
       }}
     >
@@ -65,7 +69,7 @@ export function Import() {
       </p>
       <div className="import-sources">
         {sources.browsers.map((browser, b) => (
-          <fieldset key={browser.name}>
+          <fieldset key={browser.name} disabled={importing}>
             <legend>{browser.name}</legend>
             {browser.profiles.map((profile, p) => {
               const key = `${b}/${p}`;
@@ -120,11 +124,11 @@ export function Import() {
         ))}
       </div>
       <div className="import-actions">
-        <button type="button" onClick={() => send("import/close")}>
+        <button type="button" disabled={importing} onClick={() => send("import/close")}>
           Not now
         </button>
-        <button type="submit" disabled={picked.length === 0}>
-          Import
+        <button type="submit" disabled={importing || picked.length === 0}>
+          {importing ? "Importing…" : "Import"}
         </button>
       </div>
     </form>

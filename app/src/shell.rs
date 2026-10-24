@@ -16,8 +16,9 @@ use serde_json::json;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::path::PathBuf;
-use std::thread::LocalKey;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, LocalKey};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The UI is served by the app itself under this origin.
@@ -71,6 +72,8 @@ thread_local! {
     static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The browsers the import assistant lists, which its choices refer to by index.
     static SOURCES: RefCell<Vec<browsers::Browser>> = const { RefCell::new(Vec::new()) };
+    /// An import is reading the browsers' data, on a thread of its own.
+    static IMPORTING: Cell<bool> = const { Cell::new(false) };
     /// The first launch shows the import assistant with the window, instead of the start page.
     static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
@@ -310,6 +313,10 @@ fn show_import() {
     let Some(window) = WINDOW.with_borrow(Clone::clone) else {
         return;
     };
+    // It shows the import running.
+    if IMPORTING.get() {
+        return;
+    }
     SOURCES.set(browsers::detect(&crate::import_home()));
     if IMPORT.with_borrow(Option::is_none) {
         let url = format!("{UI_ORIGIN}index.html#import");
@@ -381,18 +388,50 @@ fn hide_import() {
 }
 
 /// Closes the import assistant. Closed on the first launch, it leaves the session as it would
-/// have been without it: with the start page.
+/// have been without it: with the start page. It stays while an import runs.
 fn close_import() {
+    if IMPORTING.get() {
+        return;
+    }
     hide_import();
     if STATE.with_borrow(|state| is_untouched(&state.sidebar)) {
         open_tab(START_URL);
     }
 }
 
-/// Imports browser profiles, then shows the first Space imported with its first tab, or a blank
-/// page when it has none.
-fn run_import(choices: &[Choice]) {
+/// Imports browser profiles. Their data is read on a thread of its own, as a large history takes
+/// long to read: the window keeps answering meanwhile, and the assistant shows the import
+/// running. A second import while one runs is ignored.
+fn run_import(choices: Vec<Choice>) {
+    if IMPORTING.replace(true) {
+        return;
+    }
     let browsers = SOURCES.take();
+    thread::spawn(move || {
+        let sources = import::read(&browsers, &choices);
+        let sources = Arc::new(Mutex::new(Some(sources)));
+        post_task(ThreadId::UI, Some(&mut ApplyImport::new(sources)));
+    });
+}
+
+wrap_task! {
+    struct ApplyImport {
+        sources: Arc<Mutex<Option<Vec<import::Source>>>>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let sources = self.sources.lock().ok().and_then(|mut sources| sources.take());
+            apply_import(sources.unwrap_or_default());
+        }
+    }
+}
+
+/// Adds the browser profiles read to the sidebar as it is now, then shows the first Space
+/// imported with its first tab, or a blank page when it has none. Their histories are merged on
+/// a thread of their own.
+fn apply_import(sources: Vec<import::Source>) {
+    IMPORTING.set(false);
     let (imported, shown) = update_sidebar(|sidebar| {
         let mut new = if is_untouched(sidebar) {
             Sidebar::empty()
@@ -400,7 +439,7 @@ fn run_import(choices: &[Choice]) {
             sidebar.clone()
         };
         let before = new.spaces().len();
-        let imported = import::import(&mut new, &browsers, choices);
+        let imported = import::apply(&mut new, sources);
         let shown = new.spaces().get(before).map(|space| space.id);
         if let Some(space) = shown {
             new.display(space).expect("an imported Space");
@@ -417,13 +456,31 @@ fn run_import(choices: &[Choice]) {
     for error in &imported.errors {
         eprintln!("cannot import {error}");
     }
-    for (profile, entries) in &imported.histories {
-        update_history(*profile, |history| history.merge(entries));
-    }
+    let histories = imported.histories.into_iter();
+    let histories: Vec<_> = histories
+        .map(|(profile, entries)| (profile_dir(profile), entries))
+        .collect();
+    thread::spawn(move || {
+        for (dir, entries) in histories {
+            if let Err(error) = merge_history(&dir, &entries) {
+                eprintln!("cannot merge the history: {error}");
+            }
+        }
+    });
     close_import();
     if shown.is_some() {
         show_selected();
     }
+}
+
+/// Merges entries into the history of the profile in `dir`, with a connection of its own: the
+/// browsing's may write to it meanwhile.
+fn merge_history(dir: &Path, entries: &[history::Entry]) -> Result<(), String> {
+    // An imported profile has no directory before its pages first load.
+    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    let history = History::open(&dir.join(history::FILE_NAME));
+    let mut history = history.map_err(|error| error.to_string())?;
+    history.merge(entries).map_err(|error| error.to_string())
 }
 
 fn open_full_disk_access() {
@@ -824,7 +881,7 @@ pub fn run(command: Command) {
         (Command::ShowImport, _) => show_import(),
         (Command::ImportReady, _) => send_sources(),
         (Command::CloseImport, _) => close_import(),
-        (Command::Import(choices), _) => run_import(&choices),
+        (Command::Import(choices), _) => run_import(choices),
         (Command::OpenFullDiskAccess, _) => open_full_disk_access(),
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
