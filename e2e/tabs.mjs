@@ -4,7 +4,8 @@
 // profiles' web data apart, switching Spaces, creating, renaming and coloring profiles, creating
 // Spaces from the page after the last one and editing them, switching Spaces by number and by
 // swiping between their pages, reopening closed tabs from the library before the first Space,
-// showing the displayed profile's favorites, and recording each profile's history, in the real app.
+// showing the displayed profile's favorites, recording each profile's history, and running the
+// items of the rows' native menus, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -67,7 +68,14 @@ try {
   }`);
   await sidebar.eval(`{
     const fetchCommand = fetch;
-    window.fetch = (url, init) => { e2e.sent.push(String(url)); return fetchCommand(url, init); };
+    // A native menu would wait for a real pick: the checks run its items by id instead.
+    window.fetch = (url, init) => {
+      e2e.sent.push(String(url));
+      if (["node", "space"].some((kind) => String(url).includes("/command/menu/" + kind + "/"))) {
+        return Promise.resolve(new Response("{}"));
+      }
+      return fetchCommand(url, init);
+    };
   }`);
 
   async function check(description, action, condition, page = sidebar) {
@@ -927,6 +935,123 @@ try {
   }
   await sleep(300);
   await check("a horizontal wheel within the page alone keeps the Space", ``, `e2e.settled(${last})`);
+  await check(
+    "a right-click on a row asks for its menu, the page's menu left out",
+    `e2e.send("space/number/1");
+     e2e.rightClick = (element) => !element.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+     e2e.row = (id) => e2e.page()?.querySelector('li[data-id="' + id + '"]');
+     e2e.choose = (id, item) => e2e.send("menu/choose/node/" + id + "/" + item);
+     // The url of a tab or a favorite of the displayed Space.
+     e2e.urlOf = (id) => e2e.state.pages.find((page) => page.space === e2e.state.space)
+       .today.concat(e2e.state.pages.find((page) => page.space === e2e.state.space).favorites)
+       .find((tab) => String(tab.id) === id)?.url`,
+    `e2e.settled(0) && (e2e.menuTab = e2e.rows()[0].dataset.id)
+      && e2e.rightClick(e2e.rows()[0].querySelector(".title"))
+      && e2e.sent.at(-1).endsWith("/command/menu/node/" + e2e.menuTab)`,
+  );
+  await check(
+    "a right-click elsewhere in the sidebar shows no menu at all",
+    `e2e.sentCount = e2e.sent.length;
+     e2e.prevented = e2e.rightClick(document.querySelector(".toolbar")) && e2e.rightClick(document.querySelector(".switcher"))`,
+    `e2e.prevented && e2e.sent.length === e2e.sentCount`,
+  );
+  await check(
+    "the tab menu's Pin Tab pins it",
+    `e2e.choose(e2e.menuTab, "pin")`,
+    `e2e.row(e2e.menuTab)?.closest(".pinned") && e2e.above(e2e.row(e2e.menuTab))`,
+  );
+  await check(
+    "Unpin Tab puts it back in today's tabs",
+    `e2e.choose(e2e.menuTab, "pin")`,
+    `!!e2e.row(e2e.menuTab)?.closest(".today")`,
+  );
+  await check(
+    "Move To another Space takes the tab away, the displayed Space kept",
+    `e2e.choose(e2e.menuTab, "move/" + e2e.spaces[1])`,
+    `!e2e.row(e2e.menuTab) && e2e.settled(0)`,
+  );
+  const moved = Number(await sidebar.eval(`e2e.menuTab`));
+  await checkSession("the session saves the moved tab last in that Space's tabs", (saved) =>
+    saved.nodes[saved.spaces[1].today].children.at(-1) === moved,
+  );
+  await check(
+    "moving the selected tab takes the sidebar along to its new Space",
+    `e2e.menuTab = e2e.rows()[0].dataset.id;
+     e2e.send("select/" + e2e.menuTab).then(() => e2e.choose(e2e.menuTab, "move/" + e2e.spaces[1]))`,
+    `e2e.settled(1) && e2e.currentId() === e2e.menuTab && e2e.rows().at(-1) === e2e.current()`,
+  );
+  await check(
+    "Close Tab closes it",
+    `e2e.menuUrl = e2e.urlOf(e2e.menuTab); e2e.choose(e2e.menuTab, "close")`,
+    `!e2e.row(e2e.menuTab) && e2e.state.closed[0].url === e2e.menuUrl`,
+  );
+  await check("the first Space shows again", `e2e.send("space/number/1")`, `e2e.settled(0)`);
+  await check(
+    "the tab menu's New Space slides to the page creating one",
+    `e2e.menuTab = e2e.rows()[0].dataset.id; e2e.choose(e2e.menuTab, "new-space")`,
+    `e2e.newPage() && document.activeElement === e2e.newField("name")`,
+  );
+  await type("Moved");
+  await pressEnter();
+  await check(
+    "creating it moves the tab into the new Space, selected",
+    ``,
+    `e2e.last().getAttribute("aria-label") === "Moved" && e2e.last().getAttribute("aria-current") === "true"
+      && e2e.rows().length === 1 && e2e.currentId() === e2e.menuTab`,
+  );
+  await check(
+    "the first Space shows once more",
+    `e2e.send("space/number/1");
+     e2e.folderRow = (title) => [...e2e.page().querySelectorAll(".folder-item")]
+       .find((row) => row.querySelector(":scope > .folder").textContent === title)`,
+    `e2e.settled(0)`,
+  );
+  await check(
+    "the folder menu's Rename Folder edits its name",
+    `e2e.choose(e2e.folderRow("Folder 3").dataset.id, "rename")`,
+    `document.activeElement === e2e.page().querySelector('[aria-label="Folder name"]')`,
+  );
+  await type("Reading");
+  await pressEnter();
+  await check("the folder takes its new name", ``, `!!e2e.folderRow("Reading")`);
+  await check(
+    "New Folder creates one inside it, its name being edited",
+    `e2e.choose(e2e.folderRow("Reading").dataset.id, "new-folder")`,
+    `document.activeElement === e2e.folderRow("Reading").querySelector('.folder-tabs [aria-label="Folder name"]')`,
+  );
+  await pressEnter();
+  await check(
+    "the new folder sits inside, empty",
+    ``,
+    `e2e.folderRow("Reading").querySelector(".folder-tabs .folder-item .folder")?.textContent === "New Folder"
+      && e2e.folderRow("Reading").querySelectorAll(".folder-tabs .folder-item .tab-row").length === 0`,
+  );
+  await check(
+    "Close Tabs in Folder keeps a pinned folder's tabs, the selected one deselected",
+    `e2e.folder4 = e2e.folderRow("Folder 4").dataset.id;
+     e2e.send("select/" + e2e.folderRow("Folder 4").querySelector(".tab-row").dataset.id)
+       .then(() => e2e.choose(e2e.folder4, "close-tabs"))`,
+    `e2e.folderRow("Folder 4").querySelectorAll(".tab-row").length === 10
+      && e2e.current() && !e2e.folderRow("Folder 4").contains(e2e.current())`,
+  );
+  await check(
+    "Close Tabs in Folder closes the tabs of a folder among today's",
+    `e2e.folder5 = e2e.folderRow("Folder 5").dataset.id;
+     e2e.send("move/" + e2e.folder5 + "/" + e2e.page().querySelector(".today").dataset.parent + "/0")
+       .then(() => e2e.choose(e2e.folder5, "close-tabs"))`,
+    `e2e.folderRow("Folder 5")?.closest(".today") && e2e.folderRow("Folder 5").querySelectorAll(".tab-row").length === 0`,
+  );
+  await check(
+    "the favorite menu's Remove from Favorites removes it, which can be reopened",
+    `e2e.tileCount = e2e.tiles().length;
+     e2e.tile = e2e.tiles()[0].closest("li");
+     e2e.tileUrl = e2e.urlOf(e2e.tile.dataset.id);
+     e2e.prevented = e2e.rightClick(e2e.tile.querySelector(".favorite"));
+     e2e.choose(e2e.tile.dataset.id, "remove")`,
+    `e2e.prevented && e2e.sent.some((url) => url.endsWith("/menu/node/" + e2e.tile.dataset.id))
+      && e2e.tiles().length === e2e.tileCount - 1 && !e2e.tile.isConnected
+      && e2e.state.closed[0].url === e2e.tileUrl`,
+  );
 } finally {
   app.kill();
 }

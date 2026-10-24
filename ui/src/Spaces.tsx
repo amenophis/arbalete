@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { type Color, firstGrapheme, type Space, send } from "./bridge";
+import { type Color, firstGrapheme, type Space, send, useAppEvent } from "./bridge";
 import { keepOnEscape, NameField, Swatches } from "./Profiles";
 
 // One icon per Space, its emoji or a dot, which slides the sidebar to its page with `onPage`. The
@@ -89,12 +89,15 @@ function SpaceEditor({ space }: { space: Space }) {
 }
 
 // The page after the last Space creates one, in the displayed Space's profile, from a name, an
-// emoji and a color; the app then displays it. Its name takes the keyboard once the page `shown`
-// has settled, and leaving it without creating forgets what was typed.
+// emoji and a color; the app then displays it, with the tab whose menu opened the page moved into
+// it. Its name takes the keyboard once the page `shown` has settled, and leaving it without
+// creating forgets what was typed and the tab.
 export function NewSpace({ index, shown }: { index: number; shown: boolean }) {
   const [title, setTitle] = useState("");
   const [emoji, setEmoji] = useState("");
   const [color, setColor] = useState<Color>("purple");
+  const [tab, setTab] = useState<number | null>(null);
+  useAppEvent("arbalette:new-space", setTab);
   const name = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (shown) {
@@ -104,12 +107,14 @@ export function NewSpace({ index, shown }: { index: number; shown: boolean }) {
     setTitle("");
     setEmoji("");
     setColor("purple");
+    setTab(null);
   }, [shown]);
   const create = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
     const icon = encodeURIComponent(firstGrapheme(emoji.trim()));
-    send(`space/create/${color}/${icon}/${encodeURIComponent(title.trim())}`);
+    const moved = tab === null ? "" : `/${tab}`;
+    send(`space/create/${color}/${icon}/${encodeURIComponent(title.trim())}${moved}`);
   };
   return (
     <form

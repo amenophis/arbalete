@@ -306,11 +306,7 @@ impl Sidebar {
 
     /// Shows `tab` in `space`. A favorite is shown in whichever Space it is selected from.
     pub fn select(&mut self, space: SpaceId, tab: NodeId) -> Result<(), Error> {
-        match self.nodes.get(&tab).map(|n| &n.kind) {
-            None => return Err(Error::UnknownNode),
-            Some(NodeKind::Tab(_)) => {}
-            Some(_) => return Err(Error::NotATab),
-        }
+        self.check_tab(tab)?;
         let space = self.spaces.iter_mut().find(|s| s.id == space);
         space.ok_or(Error::UnknownSpace)?.selected = Some(tab);
         Ok(())
@@ -475,6 +471,42 @@ impl Sidebar {
         }
     }
 
+    /// Moves a tab to the end of another Space's "Today" tabs, unpinned, and deselects it in the
+    /// Space it leaves. Favorites belong to no Space: they stay where they are, like a tab moved to
+    /// its own Space.
+    pub fn move_to_space(&mut self, tab: NodeId, space: SpaceId) -> Result<(), Error> {
+        let today = self.space(space)?.today;
+        self.check_tab(tab)?;
+        let Some(from) = self.space_of(tab).filter(|&from| from != space) else {
+            return Ok(());
+        };
+        self.move_node(tab, today, usize::MAX)?;
+        let from = self.space_mut(from)?;
+        if from.selected == Some(tab) {
+            from.selected = None;
+        }
+        Ok(())
+    }
+
+    /// The tabs inside a folder, those of the folders it holds included, in the sidebar's order.
+    pub fn folder_tabs(&self, folder: NodeId) -> Result<Vec<NodeId>, Error> {
+        match self.nodes.get(&folder).map(|n| &n.kind) {
+            None => return Err(Error::UnknownNode),
+            Some(NodeKind::Folder { .. }) => {}
+            Some(_) => return Err(Error::NotAFolder),
+        }
+        let mut tabs = Vec::new();
+        let mut pending = vec![folder];
+        while let Some(id) = pending.pop() {
+            let node = &self.nodes[&id];
+            if self.is_tab(id) {
+                tabs.push(id);
+            }
+            pending.extend(node.children.iter().rev());
+        }
+        Ok(tabs)
+    }
+
     /// Favorites and pinned tabs stay when closed: closing one deselects it in `space` and takes
     /// it back to its saved url, if any. Returns the tab to show instead: the tab it was opened
     /// from if still open, else the Space's last "Today" tab, rather than a neighbor it stays with.
@@ -573,6 +605,14 @@ impl Sidebar {
         match &mut self.nodes.get_mut(&id).ok_or(Error::UnknownNode)?.kind {
             NodeKind::Folder { title, expanded } => Ok((title, expanded)),
             _ => Err(Error::NotAFolder),
+        }
+    }
+
+    fn check_tab(&self, id: NodeId) -> Result<(), Error> {
+        match self.nodes.get(&id).map(|n| &n.kind) {
+            None => Err(Error::UnknownNode),
+            Some(NodeKind::Tab(_)) => Ok(()),
+            Some(_) => Err(Error::NotATab),
         }
     }
 
@@ -1374,5 +1414,62 @@ mod tests {
         assert_eq!(sidebar.favorite(office, 1), Some(job));
         assert_eq!(sidebar.profile_of(job), Some(work));
         assert_eq!(sidebar.favorites_of(SpaceId(999)), None);
+    }
+    #[test]
+    fn moves_a_tab_to_the_end_of_another_spaces_today_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let other = sidebar.open_tab(work, "other").unwrap();
+        let tab = sidebar.open_tab(home.id, "tab").unwrap();
+        sidebar.toggle_pin(home.id, tab).unwrap();
+        sidebar.select(home.id, tab).unwrap();
+        sidebar.move_to_space(tab, work).unwrap();
+        let work = sidebar.spaces()[1].clone();
+        assert_eq!(children(&sidebar, work.today), [other, tab]);
+        assert!(children(&sidebar, home.pinned).is_empty());
+        assert!(!sidebar.is_pinned(tab));
+        assert_eq!(saved_url(&mut sidebar, tab), None);
+        assert_eq!(sidebar.spaces()[0].selected, None);
+        assert_eq!(sidebar.space_of(tab), Some(work.id));
+    }
+
+    #[test]
+    fn leaves_a_tab_in_its_own_space_and_favorites_where_they_are() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let favorites = sidebar.profiles()[0].favorites;
+        let pinned = sidebar.add_tab(home.pinned, "pinned", "pinned").unwrap();
+        let favorite = sidebar.add_tab(favorites, "favorite", "favorite").unwrap();
+        sidebar.move_to_space(pinned, home.id).unwrap();
+        sidebar.move_to_space(favorite, work).unwrap();
+        assert_eq!(children(&sidebar, home.pinned), [pinned]);
+        assert_eq!(children(&sidebar, favorites), [favorite]);
+        let folder = sidebar.add_folder(home.pinned, "Folder").unwrap();
+        assert_eq!(sidebar.move_to_space(folder, work), Err(Error::NotATab));
+        assert_eq!(
+            sidebar.move_to_space(NodeId(999), work),
+            Err(Error::UnknownNode)
+        );
+        assert_eq!(
+            sidebar.move_to_space(pinned, SpaceId(999)),
+            Err(Error::UnknownSpace)
+        );
+    }
+
+    #[test]
+    fn lists_the_tabs_of_a_folder_and_of_the_folders_inside_it() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let (folder, first) = folder_with_tab(&mut sidebar, &home, "a");
+        let inner = sidebar.add_folder(folder, "Inner").unwrap();
+        let nested = sidebar.add_tab(inner, "b", "b").unwrap();
+        let last = sidebar.add_tab(folder, "c", "c").unwrap();
+        sidebar.toggle_folder(inner).unwrap();
+        assert_eq!(sidebar.folder_tabs(folder), Ok(vec![first, nested, last]));
+        assert_eq!(sidebar.folder_tabs(inner), Ok(vec![nested]));
+        assert_eq!(sidebar.folder_tabs(first), Err(Error::NotAFolder));
+        assert_eq!(sidebar.folder_tabs(NodeId(999)), Err(Error::UnknownNode));
     }
 }

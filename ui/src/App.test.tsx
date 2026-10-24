@@ -647,6 +647,22 @@ test("creating a Space shows its page where the new Space's was", async () => {
   }
 });
 
+test("a tab's menu moving it into a new Space slides to the page creating one", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalette:new-space", { detail: 3 }));
+  });
+  await frame();
+  expect(position()).toBe("translateX(-400%)");
+  fireEvent.change(nameOfNew(), { target: { value: "Reading" } });
+  fireEvent.submit(nameOfNew());
+  expect(fetch).toHaveBeenLastCalledWith("/command/space/create/purple//Reading/3", {
+    method: "POST",
+  });
+});
+
 const library = () => document.querySelector<HTMLElement>(".library");
 
 test("a swipe before the first Space shows the library, without telling the app", async () => {
@@ -735,4 +751,36 @@ test("asks the app to paint the window with the displayed Space's color, blendin
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", fetch);
   }
+});
+
+// Whether the right-click leaves its default menu to show.
+const rightClick = (element: Element) => fireEvent.contextMenu(element);
+
+test("a right-click on a row asks the app for its menu, and shows no page menu", () => {
+  render(<App />);
+  receive({});
+  const page = shown();
+  for (const [row, id] of [
+    [page.getByRole("button", { name: "Other" }), 4],
+    [page.getByRole("button", { name: "Manual" }), 7],
+    [page.getByRole("button", { name: "Docs" }), 6],
+    [page.getByRole("button", { name: "Mail" }), 10],
+    [page.getByRole("button", { name: "Close Example" }), 3],
+  ] as const) {
+    fetch.mockClear();
+    expect(rightClick(row)).toBe(false);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(`/command/menu/node/${id}`, { method: "POST" });
+  }
+});
+
+test("a right-click elsewhere shows no menu, but in a text field", () => {
+  render(<App />);
+  receive({});
+  fetch.mockClear();
+  expect(rightClick(screen.getByRole("button", { name: "Reload" }))).toBe(false);
+  expect(rightClick(document.querySelector(".divider") as Element)).toBe(false);
+  expect(fetch).not.toHaveBeenCalled();
+  fireEvent.doubleClick(shown().getByRole("button", { name: "Docs" }));
+  expect(rightClick(screen.getByRole("textbox", { name: "Folder name" }))).toBe(true);
+  expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/menu/"), expect.anything());
 });

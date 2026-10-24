@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 
 // The app serves the UI and answers these requests itself (app/src/command.rs).
 export function send(command: string) {
@@ -174,6 +174,29 @@ export function useRenaming(event: "arbalette:rename" | "arbalette:rename-profil
     return () => removeEventListener(event, listener);
   }, [event]);
   return [renaming, setRenaming] as const;
+}
+
+// Runs `handler` with the detail of every `event` the app dispatches, like an item of a native menu
+// asking the sidebar to act (Action::Ask in app/src/menu.rs).
+export function useAppEvent<T>(event: string, handler: (detail: T) => void) {
+  const latest = useRef(handler);
+  latest.current = handler;
+  useEffect(() => {
+    const listener = (event: Event) => latest.current((event as CustomEvent<T>).detail);
+    addEventListener(event, listener);
+    return () => removeEventListener(event, listener);
+  }, [event]);
+}
+
+// A right-click on a row of the displayed Space's page asks the app for the row's native menu
+// (app/src/menu.rs). Elsewhere, but in text fields, it shows no menu: the page's menu, with Back,
+// Forward or View Page Source, has nothing to do with the sidebar.
+export function showMenu(event: MouseEvent) {
+  const target = event.target as Element;
+  if (target.closest("input, textarea")) return;
+  event.preventDefault();
+  const row = target.closest<HTMLElement>(".space-page li[data-id]");
+  if (row) send(`menu/node/${row.dataset.id}`);
 }
 
 const graphemes = new Intl.Segmenter();

@@ -4,7 +4,9 @@ import {
   type Space,
   type SpacePage,
   send,
+  showMenu,
   type Tab,
+  useAppEvent,
   useAppState,
   useRenaming,
 } from "./bridge";
@@ -28,6 +30,8 @@ export function App() {
   const count = state?.spaces.length ?? 0;
   // The pages may rest on one that is not a Space's, while the app still displays a Space.
   const onSpace = pager.settled >= 0 && pager.settled < count;
+  // A tab's menu moves it into a new Space from the page creating one.
+  useAppEvent("arbalette:new-space", () => pager.go(count));
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =
@@ -36,7 +40,12 @@ export function App() {
       (tab) => tab.id === current.selected,
     );
   return (
-    <nav className="sidebar" ref={pager.sidebar} onPointerDown={onPointerDown}>
+    <nav
+      className="sidebar"
+      ref={pager.sidebar}
+      onPointerDown={onPointerDown}
+      onContextMenu={showMenu}
+    >
       <div className="toolbar">
         <button
           type="button"
