@@ -1,5 +1,13 @@
 import { type KeyboardEvent, memo, useRef } from "react";
-import { type Item, type SpacePage, send, type Tab, useAppState, useRenaming } from "./bridge";
+import {
+  type Item,
+  type Space,
+  type SpacePage,
+  send,
+  type Tab,
+  useAppState,
+  useRenaming,
+} from "./bridge";
 import { type Dragging, useDrag } from "./drag";
 import { Library } from "./Library";
 import { Profiles } from "./Profiles";
@@ -62,6 +70,7 @@ export function App() {
               <Sections
                 key={spacePage.space}
                 page={spacePage}
+                space={state.spaces[index]}
                 index={index}
                 displayed={onSpace && index === displayed}
                 dragging={dragging}
@@ -99,6 +108,7 @@ export function App() {
 // besides the displayed one stay out of reach of the keyboard and assistive technologies.
 function Sections({
   page,
+  space,
   index,
   displayed,
   dragging,
@@ -106,6 +116,7 @@ function Sections({
   onRename,
 }: {
   page: SpacePage;
+  space: Space;
   index: number;
   displayed: boolean;
   dragging: Dragging;
@@ -135,6 +146,12 @@ function Sections({
         </ul>
       )}
       <div className="scroll">
+        <h2 className="space-header">
+          <span className="favicon" aria-hidden="true">
+            {space.emoji ?? <span className="space-dot" />}
+          </span>
+          <span className="title">{space.title}</span>
+        </h2>
         <ul className="tabs pinned" data-parent={roots.pinned}>
           <Items items={page.pinned} active={selected} renaming={renaming} onRename={onRename} />
         </ul>
