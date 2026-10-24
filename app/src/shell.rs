@@ -9,7 +9,7 @@ use arbalette_core::history::{self, History};
 use arbalette_core::import::browsers::{self, Family};
 use arbalette_core::import::{self, Choice, safari};
 use arbalette_core::sidebar::{Color, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab};
-use arbalette_core::store;
+use arbalette_core::{favicon, store};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
 use serde::Serialize;
@@ -18,12 +18,16 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, LocalKey};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The UI is served by the app itself under this origin.
 const UI_ORIGIN: &str = "https://arbalette.ui/";
+
+/// CEF's root cache path, which holds every profile's web data. Read from the IO thread too,
+/// which serves the favicons.
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 const SIDEBAR_WIDTH: i32 = 260;
 
@@ -120,8 +124,6 @@ thread_local! {
     static STATE: RefCell<UiState> = RefCell::default();
     /// Where the sidebar is saved, once the previous session is restored.
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    /// CEF's root cache path, which holds every profile's web data.
-    static DATA_DIR: RefCell<PathBuf> = RefCell::default();
     /// Each profile's history, opened on its first visit.
     static HISTORIES: RefCell<HashMap<ProfileId, History>> = RefCell::default();
     /// Browsers not closed yet: the app quits when the last one closes.
@@ -227,8 +229,9 @@ const RECENTLY_CLOSED: usize = 10;
 struct UiState {
     page: Page,
     sidebar: Sidebar,
-    /// Closed tabs, the last one at the end, with when they closed, until the app quits.
-    closed: Vec<(Tab, SystemTime)>,
+    /// Closed tabs, the last one at the end, with their profile and when they closed, until the
+    /// app quits.
+    closed: Vec<(Tab, ProfileId, SystemTime)>,
 }
 
 impl UiState {
@@ -262,10 +265,10 @@ impl UiState {
                 "name": p.name,
                 "color": p.color,
             })).collect::<Vec<_>>(),
-            "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, at)| json!({
+            "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, profile, at)| json!({
                 "url": tab.url,
                 "title": tab.title,
-                "favicon": tab.favicon,
+                "favicon": favicon_url(*profile, tab),
                 "closedAt": at.duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64),
             })).collect::<Vec<_>>(),
         })
@@ -288,52 +291,63 @@ impl UiState {
             "selected": space.selected,
             "collapsed": space.collapsed,
             "roots": { "favorites": favorites, "pinned": space.pinned, "today": space.today },
-            "favorites": self.tabs(favorites),
+            "favorites": self.tabs(favorites, space.profile),
             "favoritesHint": profile.is_some_and(|p| !p.favorites_hint_hidden),
-            "pinned": self.items(space.pinned),
-            "today": self.items(space.today),
+            "pinned": self.items(space.pinned, space.profile),
+            "today": self.items(space.today, space.profile),
         })
     }
 
     /// The tabs directly inside a container, like the favorites, which hold no folders.
-    fn tabs(&self, parent: NodeId) -> Vec<serde_json::Value> {
+    fn tabs(&self, parent: NodeId, profile: ProfileId) -> Vec<serde_json::Value> {
         let node = self.sidebar.node(parent).expect("a known container");
         node.children
             .iter()
             .filter_map(|&id| match &self.sidebar.node(id)?.kind {
-                NodeKind::Tab(tab) => Some(tab_json(id, tab)),
+                NodeKind::Tab(tab) => Some(tab_json(id, tab, profile)),
                 _ => None,
             })
             .collect()
     }
 
     /// The tabs and folders inside a container or a folder, folders with their own content.
-    fn items(&self, parent: NodeId) -> Vec<serde_json::Value> {
+    fn items(&self, parent: NodeId, profile: ProfileId) -> Vec<serde_json::Value> {
         let node = self.sidebar.node(parent).expect("a known container");
         node.children
             .iter()
             .filter_map(|&id| match &self.sidebar.node(id)?.kind {
-                NodeKind::Tab(tab) => Some(tab_json(id, tab)),
+                NodeKind::Tab(tab) => Some(tab_json(id, tab, profile)),
                 NodeKind::Folder { title, expanded } => Some(json!({
                     "id": id,
                     "title": title,
                     "expanded": expanded,
-                    "children": self.items(id),
+                    "children": self.items(id, profile),
                 })),
-                NodeKind::Split => Some(json!({ "id": id, "split": self.tabs(id) })),
+                NodeKind::Split => Some(json!({ "id": id, "split": self.tabs(id, profile) })),
                 NodeKind::Container => None,
             })
             .collect()
     }
 }
 
-fn tab_json(id: NodeId, tab: &Tab) -> serde_json::Value {
+fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
     json!({
         "id": id,
         "url": tab.url,
         "title": tab.title,
-        "favicon": tab.favicon,
+        "favicon": favicon_url(profile, tab),
     })
+}
+
+/// Where the UI loads a tab's icon from: the app serves the profile's cached icons (favicon_file),
+/// from the UI's own origin so that the UI may read their pixels.
+fn favicon_url(profile: ProfileId, tab: &Tab) -> Option<String> {
+    let source = tab.favicon.as_deref()?;
+    let profile = serde_json::to_string(&profile).expect("an id");
+    Some(format!(
+        "{UI_ORIGIN}favicon/{profile}/{}",
+        favicon::file_name(source)
+    ))
 }
 
 /// The loading state of the content view; its title and url belong to the active tab.
@@ -730,6 +744,7 @@ fn restore(path: PathBuf) {
         }
     };
     SESSION_FILE.set(Some(path));
+    STATE.with_borrow_mut(|state| favicon::sweep(&mut state.sidebar, profile_dir));
     if first_launch && !browsers::detect(&crate::import_home()).is_empty() {
         IMPORT_AT_LAUNCH.set(true);
     } else if STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_none()) {
@@ -1019,8 +1034,9 @@ fn close_keeping(tab: Option<NodeId>, keep_pinned: bool) {
 /// Removes an open tab, which may be reopened, and returns the tab to show instead.
 fn remove_tab(tab: NodeId) -> Option<NodeId> {
     let next = STATE.with_borrow_mut(|state| {
+        let profile = state.sidebar.profile_of(tab).expect("an open tab");
         let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
-        state.closed.push((closed, SystemTime::now()));
+        state.closed.push((closed, profile, SystemTime::now()));
         state.sidebar.next_after_close(tab)
     });
     update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
@@ -1062,14 +1078,16 @@ fn clear_today() {
         today.then(|| sidebar.next_after_close(selected))
     });
     let now = SystemTime::now();
-    let removed = update_sidebar(|sidebar| {
-        let space = sidebar.displayed().id;
-        sidebar.clear_today(space).expect("the displayed Space")
+    let (removed, profile) = update_sidebar(|sidebar| {
+        let space = sidebar.displayed();
+        let (id, profile) = (space.id, space.profile);
+        let removed = sidebar.clear_today(id).expect("the displayed Space");
+        (removed, profile)
     });
     STATE.with_borrow_mut(|state| {
         state
             .closed
-            .extend(removed.into_iter().map(|tab| (tab, now)))
+            .extend(removed.into_iter().map(|tab| (tab, profile, now)))
     });
     send_state();
     if let Some(next) = next {
@@ -1256,12 +1274,18 @@ fn reopen_tab(rank: usize) {
         let index = state.closed.len().checked_sub(rank + 1)?;
         Some(state.closed.remove(index))
     });
-    let Some((closed, _)) = closed else { return };
+    let Some((closed, profile, _)) = closed else {
+        return;
+    };
     open_tab(&closed.url);
     update_sidebar(|sidebar| {
+        // Another profile has not cached its icon: its page sends it as it loads.
+        let same_profile = sidebar.displayed().profile == profile;
         if let Some(tab) = active_tab(sidebar) {
             tab.title = closed.title;
-            tab.favicon = closed.favicon;
+            if same_profile {
+                tab.favicon = closed.favicon;
+            }
         }
     });
 }
@@ -1385,7 +1409,8 @@ fn create_profile_context(profile: ProfileId) {
 
 fn profile_dir(profile: ProfileId) -> PathBuf {
     let id = serde_json::to_string(&profile).expect("an id");
-    DATA_DIR.with_borrow(|dir| dir.join(format!("Profile {id}")))
+    let dir = DATA_DIR.get().expect("set when the context is initialized");
+    dir.join(format!("Profile {id}"))
 }
 
 /// Changes a profile's history, kept in its directory beside its web data. A history that cannot
@@ -1628,7 +1653,7 @@ wrap_browser_process_handler! {
 
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
-            DATA_DIR.set(self.data_dir.clone());
+            DATA_DIR.set(self.data_dir.clone()).expect("one context");
             restore(self.data_dir.join(store::FILE_NAME));
             window_create_top_level(Some(&mut MainWindowDelegate::new()));
         }
@@ -1951,22 +1976,93 @@ wrap_display_handler! {
         }
 
         fn on_favicon_urlchange(&self, browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
+            let host = browser.as_ref().and_then(|browser| browser.host());
             if !is_shown(browser) {
                 return;
             }
             // Not cloned: a clone of the list CEF lends lists no string.
-            let favicon = icon_urls.and_then(|urls| std::mem::take(urls).into_iter().next());
-            update_sidebar(|sidebar| {
-                if let Some(tab) = active_tab(sidebar) {
-                    tab.favicon = favicon;
-                }
-            });
+            let source = icon_urls.and_then(|urls| std::mem::take(urls).into_iter().next());
+            change_favicon(self.profile, source, host);
         }
 
         fn on_loading_progress_change(&self, browser: Option<&mut Browser>, progress: f64) {
             if is_shown(browser) {
                 update_page(|page| page.progress = progress);
             }
+        }
+    }
+}
+
+/// Shows the selected tab's new icon once it is cached, downloading it first through its page's
+/// browser: with the page's cookies and network settings, and no service of a third party.
+fn change_favicon(profile: ProfileId, source: Option<String>, host: Option<BrowserHost>) {
+    let Some((tab, url, shown)) = STATE.with_borrow(|state| {
+        let id = state.sidebar.displayed().selected?;
+        let NodeKind::Tab(tab) = &state.sidebar.node(id)?.kind else {
+            return None;
+        };
+        Some((id, tab.url.clone(), tab.favicon.clone()))
+    }) else {
+        return;
+    };
+    let missing = source
+        .as_ref()
+        .filter(|source| !favicon::path(&profile_dir(profile), source).exists());
+    let (Some(missing), Some(host)) = (missing, host) else {
+        return set_favicon(tab, &url, source);
+    };
+    // Its file is missing, as for a tab moved from another profile: the same icon set again once
+    // downloaded would not reload.
+    if shown.as_ref() == Some(missing) {
+        set_favicon(tab, &url, None);
+    }
+    let mut download = FaviconDownload::new(profile, tab, url, missing.clone());
+    host.download_image(
+        Some(&CefString::from(missing.as_str())),
+        1,
+        FAVICON_SIZE,
+        0,
+        Some(&mut download),
+    );
+}
+
+/// The largest side of a cached icon, in pixels: twice the sidebar's 16 pt.
+const FAVICON_SIZE: u32 = 64;
+
+/// Changes a tab's icon unless the tab has gone or moved to another page since.
+fn set_favicon(tab: NodeId, url: &str, source: Option<String>) {
+    update_sidebar(|sidebar| {
+        if let Some(tab) = sidebar.tab_mut(tab).filter(|tab| tab.url == url) {
+            tab.favicon = source;
+        }
+    });
+}
+
+wrap_download_image_callback! {
+    struct FaviconDownload {
+        profile: ProfileId,
+        tab: NodeId,
+        url: String,
+        source: String,
+    }
+
+    impl DownloadImageCallback {
+        fn on_download_image_finished(&self, _image_url: Option<&CefString>, _http_status_code: i32, image: Option<&mut Image>) {
+            let image = image.filter(|image| image.is_empty() == 0);
+            // Its one representation holds every pixel downloaded, up to FAVICON_SIZE. CEF
+            // refuses to encode without the size's out parameters.
+            let (mut width, mut height) = (0, 0);
+            let png = image.and_then(|image| image.as_png(1.0, 1, Some(&mut width), Some(&mut height)));
+            let Some(png) = png else {
+                return;
+            };
+            let mut bytes = vec![0; png.size()];
+            png.data(Some(&mut bytes), 0);
+            // A few kilobytes: quick enough for the UI thread, which then shows the icon.
+            if let Err(error) = favicon::write(&profile_dir(self.profile), &self.source, &bytes) {
+                return eprintln!("cannot cache the favicon: {error}");
+            }
+            set_favicon(self.tab, &self.url, Some(self.source.clone()));
         }
     }
 }
@@ -2089,6 +2185,11 @@ wrap_resource_request_handler! {
         ) -> Option<ResourceHandler> {
             let url = CefString::from(&request?.url()).to_string();
             let path = ui_path(&url);
+            if let Some(file) = favicon_file(path) {
+                let file = CefString::from(file.to_str()?);
+                let stream = stream_reader_create_for_file(Some(&file))?;
+                return Some(StreamResourceHandler::new(200, "OK".to_string(), "image/png".to_string(), None, Some(stream)));
+            }
             let (mime, body) = match path.strip_prefix("command/").and_then(Command::parse) {
                 Some(command) => {
                     post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
@@ -2120,6 +2221,13 @@ fn ui_path(url: &str) -> &str {
     path.split('#').next().unwrap_or(path)
 }
 
+/// The cached icon a UI path names (favicon_url), which may be missing.
+fn favicon_file(path: &str) -> Option<PathBuf> {
+    let (profile, name) = path.strip_prefix("favicon/")?.split_once('/')?;
+    let profile: ProfileId = serde_json::from_str(profile).ok()?;
+    favicon::is_file_name(name).then(|| profile_dir(profile).join(favicon::DIR).join(name))
+}
+
 /// The built UI (`mise run ui`), embedded in the app.
 fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
     match path {
@@ -2137,8 +2245,8 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 mod tests {
     use super::{
         CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH, Rect,
-        SIDEBAR_WIDTH, SidebarMode, Size, UiState, lerp_rect, margin_regions, slide_duration,
-        toggled, ui_file, ui_path,
+        SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lerp_rect, margin_regions,
+        slide_duration, toggled, ui_file, ui_path,
     };
 
     fn rect(rect: &Rect) -> (i32, i32, i32, i32) {
@@ -2387,20 +2495,39 @@ mod tests {
     }
 
     #[test]
-    fn sends_the_closed_tabs_with_when_they_closed() {
+    fn serves_only_the_files_of_cached_icons() {
+        for path in [
+            "favicon/1/../../session.json",
+            "favicon/x/d41d8cd98f00b204e9800998ecf8427e.png",
+            "favicon/1/session.json",
+            "favicon/1",
+            "index.html",
+        ] {
+            assert_eq!(favicon_file(path), None, "{path}");
+        }
+    }
+
+    #[test]
+    fn sends_the_closed_tabs_with_when_they_closed_and_their_cached_icon() {
         let mut state = UiState::default();
+        let profile = state.sidebar.profiles()[0].id;
         let tab = arbalette_core::sidebar::Tab {
             url: "https://example.com/".into(),
             title: "Example".into(),
-            favicon: None,
+            favicon: Some(String::new()),
             opener: None,
             saved_url: None,
         };
         let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(60);
-        state.closed.push((tab, at));
+        state.closed.push((tab, profile, at));
         let closed = &state.to_json()["closed"][0];
         assert_eq!(closed["url"], "https://example.com/");
         assert_eq!(closed["closedAt"], 60_000);
+        let favicon = format!(
+            "https://arbalette.ui/favicon/{}/d41d8cd98f00b204e9800998ecf8427e.png",
+            serde_json::json!(profile)
+        );
+        assert_eq!(closed["favicon"], favicon);
     }
 
     #[test]

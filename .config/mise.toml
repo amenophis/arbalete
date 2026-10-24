@@ -80,4 +80,6 @@ run = [
   "node e2e/tabs.mjs \"$TMPDIR/arbalette-e2e\"",
   "rm -rf \"$TMPDIR/arbalette-e2e-import\"",
   "node e2e/import.mjs \"$TMPDIR/arbalette-e2e-import\"",
+  "rm -rf \"$TMPDIR/arbalette-e2e-favicons\"",
+  "node e2e/favicons.mjs \"$TMPDIR/arbalette-e2e-favicons\"",
 ]
