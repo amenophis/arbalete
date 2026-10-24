@@ -55,6 +55,9 @@ pub struct Space {
     pub today: NodeId,
     /// The tab shown when the Space is displayed.
     pub selected: Option<NodeId>,
+    /// The sidebar hides the Space's pinned and "Today" tabs.
+    #[serde(default)]
+    pub collapsed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -103,6 +106,8 @@ pub enum Error {
     MoveIntoItself,
     /// Root containers cannot be moved or removed.
     RootNode,
+    /// The browser always keeps a Space to open tabs in.
+    LastSpace,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -256,6 +261,7 @@ impl Sidebar {
             pinned,
             today,
             selected: None,
+            collapsed: false,
         });
         Ok(id)
     }
@@ -287,6 +293,47 @@ impl Sidebar {
 
     pub fn set_space_color(&mut self, id: SpaceId, color: Color) -> Result<(), Error> {
         self.space_mut(id)?.color = color;
+        Ok(())
+    }
+
+    /// Hides the Space's tabs in the sidebar, or shows them again.
+    pub fn toggle_space(&mut self, id: SpaceId) -> Result<(), Error> {
+        let space = self.space_mut(id)?;
+        space.collapsed = !space.collapsed;
+        Ok(())
+    }
+
+    /// Attaches a Space to another profile, whose web data and favorites it then shows.
+    pub fn set_space_profile(&mut self, id: SpaceId, profile: ProfileId) -> Result<(), Error> {
+        self.profile_mut(profile)?;
+        self.space_mut(id)?.profile = profile;
+        Ok(())
+    }
+
+    /// Deletes a Space with its tabs and folders, but not the last one. Its neighbor, the next one
+    /// or else the previous one, is displayed instead.
+    pub fn delete_space(&mut self, id: SpaceId) -> Result<(), Error> {
+        let index = self
+            .spaces
+            .iter()
+            .position(|s| s.id == id)
+            .ok_or(Error::UnknownSpace)?;
+        if self.spaces.len() == 1 {
+            return Err(Error::LastSpace);
+        }
+        if self.displayed().id == id {
+            let neighbor = self
+                .spaces
+                .get(index + 1)
+                .unwrap_or(&self.spaces[index - 1]);
+            self.displayed = Some(neighbor.id);
+        }
+        let space = self.spaces.remove(index);
+        let mut pending = vec![space.pinned, space.today];
+        while let Some(id) = pending.pop() {
+            let node = self.nodes.remove(&id).expect("children are known nodes");
+            pending.extend(node.children);
+        }
         Ok(())
     }
 
@@ -1471,5 +1518,80 @@ mod tests {
         assert_eq!(sidebar.folder_tabs(inner), Ok(vec![nested]));
         assert_eq!(sidebar.folder_tabs(first), Err(Error::NotAFolder));
         assert_eq!(sidebar.folder_tabs(NodeId(999)), Err(Error::UnknownNode));
+    }
+    #[test]
+    fn collapses_a_space_and_expands_it_again() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar).id;
+        assert!(!sidebar.spaces()[0].collapsed);
+        sidebar.toggle_space(home).unwrap();
+        assert!(sidebar.spaces()[0].collapsed);
+        sidebar.toggle_space(home).unwrap();
+        assert!(!sidebar.spaces()[0].collapsed);
+        assert_eq!(sidebar.toggle_space(SpaceId(999)), Err(Error::UnknownSpace));
+    }
+
+    #[test]
+    fn a_space_saved_without_the_flag_is_expanded() {
+        let json = r#"{ "id": 1, "title": "Home", "profile": 2, "pinned": 3, "today": 4,
+            "selected": null }"#;
+        let space: Space = serde_json::from_str(json).unwrap();
+        assert!(!space.collapsed);
+    }
+
+    #[test]
+    fn attaches_a_space_to_another_profile_and_its_favorites() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar).id;
+        let work = sidebar.add_profile("Work");
+        sidebar.set_space_profile(home, work).unwrap();
+        assert_eq!(sidebar.spaces()[0].profile, work);
+        assert_eq!(
+            sidebar.favorites_of(home),
+            Some(sidebar.profiles()[1].favorites)
+        );
+        assert_eq!(
+            sidebar.set_space_profile(home, ProfileId(999)),
+            Err(Error::UnknownProfile)
+        );
+        assert_eq!(
+            sidebar.set_space_profile(SpaceId(999), work),
+            Err(Error::UnknownSpace)
+        );
+    }
+
+    #[test]
+    fn deletes_a_space_with_its_tabs_and_displays_its_neighbor() {
+        let mut sidebar = Sidebar::default();
+        let profile = sidebar.profiles()[0].id;
+        let home = home(&sidebar).id;
+        let work = sidebar.add_space("Work", profile).unwrap();
+        let books = sidebar.add_space("Books", profile).unwrap();
+        let tab = sidebar.open_tab(work, "a").unwrap();
+        let work_space = sidebar.spaces()[1].clone();
+        let (folder, pinned) = folder_with_tab(&mut sidebar, &work_space, "f");
+        let nodes = sidebar.nodes.len();
+        sidebar.display(work).unwrap();
+        sidebar.delete_space(work).unwrap();
+        assert_eq!(sidebar.displayed().id, books);
+        assert_eq!(sidebar.spaces().len(), 2);
+        assert_eq!(sidebar.nodes.len(), nodes - 5);
+        for id in [tab, folder, pinned] {
+            assert!(sidebar.node(id).is_none());
+        }
+        sidebar.delete_space(books).unwrap();
+        assert_eq!(sidebar.displayed().id, home);
+        assert_eq!(sidebar.delete_space(home), Err(Error::LastSpace));
+        assert_eq!(sidebar.delete_space(work), Err(Error::UnknownSpace));
+    }
+
+    #[test]
+    fn deleting_another_space_keeps_the_displayed_one() {
+        let mut sidebar = Sidebar::default();
+        let profile = sidebar.profiles()[0].id;
+        let work = sidebar.add_space("Work", profile).unwrap();
+        sidebar.display(work).unwrap();
+        sidebar.delete_space(home(&sidebar).id).unwrap();
+        assert_eq!(sidebar.displayed().id, work);
     }
 }

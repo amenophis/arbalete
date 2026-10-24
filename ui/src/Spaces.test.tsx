@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Space } from "./bridge";
 import { NewSpace, Spaces } from "./Spaces";
@@ -88,6 +88,24 @@ test("keeps the emoji on Escape", () => {
   fireEvent.keyDown(input, { key: "Escape" });
   expect(input.value).toBe("💼");
   expect(fetch).toHaveBeenCalledTimes(0);
+});
+
+test("the Space's menu opens its editor on the field it edits", () => {
+  render(<Spaces spaces={spaces} displayed={14} onPage={onPage} />);
+  const ask = (space: number, field: string) =>
+    act(() => {
+      dispatchEvent(new CustomEvent("arbalette:edit-space", { detail: { space, field } }));
+    });
+  ask(13, "emoji");
+  expect(screen.queryByRole("textbox", { name: "Space emoji" })).toBeNull();
+  ask(14, "emoji");
+  expect(document.activeElement).toBe(emojiField());
+  ask(14, "name");
+  expect(document.activeElement).toBe(nameField());
+  ask(14, "color");
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "blue" }));
+  ask(14, "name");
+  expect(document.activeElement).toBe(nameField());
 });
 
 test("picks the displayed Space's color", () => {

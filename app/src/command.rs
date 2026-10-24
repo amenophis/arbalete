@@ -49,10 +49,11 @@ pub enum Command {
     RemoveFavorite(NodeId),
     /// Moves a tab to another Space's "Today" tabs, from its menu.
     MoveToSpace(NodeId, SpaceId),
-    /// Opens the native menu of a sidebar row at the pointer: `menu/node/<tab or folder id>`.
+    /// Opens the native menu of a sidebar row at the pointer: `menu/node/<tab or folder id>`, or
+    /// of a Space's header, `menu/space/<space id>`.
     Menu(Target),
-    /// Runs an item of a row's menu without showing it, by the item's id (app/src/menu.rs), as the
-    /// end-to-end checks cannot pick in native menus: `menu/choose/node/<id>/<item id>`.
+    /// Runs an item of a menu without showing it, by the item's id (app/src/menu.rs), as the
+    /// end-to-end checks cannot pick in native menus: `menu/choose/<node or space>/<id>/<item id>`.
     ChooseMenu(Target, String),
     /// Collapses or expands a folder: `toggle/<folder id>`.
     ToggleFolder(NodeId),
@@ -90,6 +91,14 @@ pub enum Command {
     SetSpaceEmoji(SpaceId, String),
     /// Changes a Space's color: `space/color/<space id>/<color>`, like `blue`.
     ColorSpace(SpaceId, Color),
+    /// Hides a Space's tabs in the sidebar, or shows them again: `space/toggle/<space id>`.
+    ToggleSpace(SpaceId),
+    /// Deletes a Space with its tabs, once confirmed: `space/delete/<space id>`.
+    DeleteSpace(SpaceId),
+    /// Attaches a Space to another profile, from its menu.
+    SetSpaceProfile(SpaceId, ProfileId),
+    /// Attaches a Space to a new profile for the UI to rename, from its menu.
+    NewSpaceProfile(SpaceId),
     /// Opens the import assistant: `import/show`.
     ShowImport,
     /// The import assistant is listening: send it the browsers found, `import/ready`.
@@ -114,10 +123,15 @@ pub enum Command {
 pub enum Target {
     /// A tab, a folder or a favorite.
     Node(NodeId),
+    /// A Space, from its header.
+    Space(SpaceId),
 }
 
 impl Target {
     fn parse(path: &str) -> Option<Self> {
+        if let Some(id) = path.strip_prefix("space/") {
+            return serde_json::from_str(id).ok().map(Self::Space);
+        }
         let id = path.strip_prefix("node/")?;
         serde_json::from_str(id).ok().map(Self::Node)
     }
@@ -227,6 +241,12 @@ impl Command {
                 {
                     let id = serde_json::from_str(id).ok()?;
                     return parse_color(color).map(|color| Self::ColorSpace(id, color));
+                }
+                if let Some(id) = path.strip_prefix("space/toggle/") {
+                    return serde_json::from_str(id).ok().map(Self::ToggleSpace);
+                }
+                if let Some(id) = path.strip_prefix("space/delete/") {
+                    return serde_json::from_str(id).ok().map(Self::DeleteSpace);
                 }
                 if let Some(number) = path.strip_prefix("space/number/") {
                     let number = number.parse().ok().filter(|n| (1..=9).contains(n));
@@ -558,6 +578,16 @@ mod tests {
             serde_json::to_string(&(id, color)).unwrap(),
             r#"[4,"blue"]"#
         );
+        let Some(Command::ToggleSpace(id)) = Command::parse("space/toggle/4") else {
+            panic!("not a toggle")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        let Some(Command::DeleteSpace(id)) = Command::parse("space/delete/4") else {
+            panic!("not a deletion")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        assert_eq!(Command::parse("space/toggle/x"), None);
+        assert_eq!(Command::parse("space/delete/x"), None);
         assert_eq!(Command::parse("space/color/4/teal"), None);
         assert_eq!(Command::parse("space/color/x/blue"), None);
         assert_eq!(Command::parse("space/rename/4"), None);
@@ -579,6 +609,20 @@ mod tests {
             (serde_json::to_string(&id).unwrap(), item.as_str()),
             ("12".into(), "move/4")
         );
+        let Some(Command::Menu(Target::Space(id))) = Command::parse("menu/space/4") else {
+            panic!("not a Space's menu")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        let Some(Command::ChooseMenu(Target::Space(id), item)) =
+            Command::parse("menu/choose/space/4/profile/1")
+        else {
+            panic!("not a Space's menu choice")
+        };
+        assert_eq!(
+            (serde_json::to_string(&id).unwrap(), item.as_str()),
+            ("4".into(), "profile/1")
+        );
+        assert_eq!(Command::parse("menu/space/x"), None);
         assert_eq!(Command::parse("menu/node/x"), None);
         assert_eq!(Command::parse("menu/tab/12"), None);
         assert_eq!(Command::parse("menu/choose/node/12"), None);

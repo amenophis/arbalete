@@ -1,8 +1,8 @@
-//! The native menus of the sidebar's rows, built from the sidebar: the app shows them (app/src/mac.rs)
-//! and runs the item picked (shell::perform).
+//! The native menus of the sidebar's rows and Spaces, built from the sidebar: the app shows them
+//! (app/src/mac.rs) and runs the item picked (shell::perform).
 
 use crate::command::{Command, Target};
-use arbalette_core::sidebar::{NodeId, NodeKind, Sidebar};
+use arbalette_core::sidebar::{NodeId, NodeKind, Sidebar, Space};
 use serde_json::json;
 
 pub enum Entry {
@@ -16,6 +16,7 @@ pub struct Item {
     pub id: String,
     pub title: String,
     pub checked: bool,
+    pub enabled: bool,
     pub action: Action,
 }
 
@@ -25,6 +26,13 @@ pub enum Action {
     /// Asks the sidebar to do what only it does, like editing a name: a DOM event and its detail.
     Ask(&'static str, serde_json::Value),
     CopyLink(String),
+    /// Runs a command once the user confirms it, with a button named `button`.
+    Confirm {
+        question: String,
+        detail: &'static str,
+        button: &'static str,
+        command: Command,
+    },
 }
 
 /// The menu of what was right-clicked, if it has one.
@@ -36,6 +44,10 @@ pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
             NodeKind::Folder { .. } => Some(folder(id)),
             NodeKind::Container => None,
         },
+        Target::Space(id) => {
+            let space = sidebar.spaces().iter().find(|space| space.id == id)?;
+            Some(space_menu(sidebar, space))
+        }
     }
 }
 
@@ -67,6 +79,7 @@ fn tab_menu(sidebar: &Sidebar, tab: NodeId, url: &str) -> Vec<Entry> {
                     None => space.title.clone(),
                 },
                 checked: Some(space.id) == current,
+                enabled: true,
                 action: Action::Run(Command::MoveToSpace(tab, space.id)),
             })
         })
@@ -85,6 +98,71 @@ fn tab_menu(sidebar: &Sidebar, tab: NodeId, url: &str) -> Vec<Entry> {
         Entry::Submenu("Move to".to_string(), spaces),
         Entry::Separator,
         item("close", "Close Tab", Action::Run(Command::Close(Some(tab)))),
+    ]
+}
+
+fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
+    let id = space.id;
+    let edit = |field| {
+        Action::Ask(
+            "arbalette:edit-space",
+            json!({ "space": id, "field": field }),
+        )
+    };
+    let mut profiles: Vec<_> = sidebar
+        .profiles()
+        .iter()
+        .map(|profile| {
+            let profile_id = serde_json::to_string(&profile.id).expect("an id");
+            Entry::Item(Item {
+                id: format!("profile/{profile_id}"),
+                title: profile.name.clone(),
+                checked: profile.id == space.profile,
+                enabled: true,
+                action: Action::Run(Command::SetSpaceProfile(id, profile.id)),
+            })
+        })
+        .collect();
+    profiles.extend([
+        Entry::Separator,
+        item(
+            "new-profile",
+            "New Profile…",
+            Action::Run(Command::NewSpaceProfile(id)),
+        ),
+    ]);
+    let delete = Action::Confirm {
+        question: format!("Delete the Space “{}”?", space.title),
+        detail: "Its tabs and folders will be closed.",
+        button: "Delete",
+        command: Command::DeleteSpace(id),
+    };
+    vec![
+        item("icon", "Change Space Icon…", edit("emoji")),
+        item("rename", "Rename Space…", edit("name")),
+        item("color", "Edit Theme Color…", edit("color")),
+        Entry::Submenu("Set Profile".to_string(), profiles),
+        Entry::Separator,
+        item(
+            "new-folder",
+            "New Folder",
+            Action::Run(Command::NewFolder(Some(space.pinned))),
+        ),
+        Entry::Separator,
+        item(
+            "manage",
+            "Manage Spaces…",
+            Action::Ask("arbalette:library", json!(null)),
+        ),
+        Entry::Separator,
+        Entry::Item(Item {
+            id: "delete".to_string(),
+            title: "Delete Space".to_string(),
+            checked: false,
+            // The browser always keeps a Space.
+            enabled: sidebar.spaces().len() > 1,
+            action: delete,
+        }),
     ]
 }
 
@@ -130,6 +208,7 @@ fn item(id: &str, title: &str, action: Action) -> Entry {
         id: id.to_string(),
         title: title.to_string(),
         checked: false,
+        enabled: true,
         action,
     })
 }
@@ -145,6 +224,7 @@ mod tests {
             .iter()
             .flat_map(|entry| match entry {
                 Entry::Item(item) if item.checked => vec![format!("✓ {}", item.title)],
+                Entry::Item(item) if !item.enabled => vec![format!("({})", item.title)],
                 Entry::Item(item) => vec![item.title.clone()],
                 Entry::Submenu(title, entries) => {
                     let mut titles = vec![format!("{title} ▸")];
@@ -260,11 +340,84 @@ mod tests {
     }
 
     #[test]
-    fn roots_and_unknown_nodes_have_no_menu() {
+    fn a_space_edits_itself_changes_its_profile_and_deletes_itself_once_confirmed() {
+        let mut sidebar = Sidebar::default();
+        let work = sidebar.create_profile("Work").unwrap();
+        let home = sidebar.spaces()[0].clone();
+        let target = Target::Space(home.id);
+        let menu = build(&sidebar, target).unwrap();
+        assert_eq!(
+            titles(&menu),
+            [
+                "Change Space Icon…",
+                "Rename Space…",
+                "Edit Theme Color…",
+                "Set Profile ▸",
+                "  ✓ Default",
+                "  Work",
+                "  -",
+                "  New Profile…",
+                "-",
+                "New Folder",
+                "-",
+                "Manage Spaces…",
+                "-",
+                "Delete Space",
+            ]
+        );
+        let choose = |item: &str| find(build(&sidebar, target).unwrap(), item);
+        let edit = |field| {
+            Action::Ask(
+                "arbalette:edit-space",
+                json!({ "space": home.id, "field": field }),
+            )
+        };
+        assert_eq!(choose("icon"), Some(edit("emoji")));
+        assert_eq!(choose("rename"), Some(edit("name")));
+        assert_eq!(choose("color"), Some(edit("color")));
+        let work_id = serde_json::to_string(&work).unwrap();
+        assert_eq!(
+            choose(&format!("profile/{work_id}")),
+            Some(Action::Run(Command::SetSpaceProfile(home.id, work)))
+        );
+        assert_eq!(
+            choose("new-profile"),
+            Some(Action::Run(Command::NewSpaceProfile(home.id)))
+        );
+        assert_eq!(
+            choose("new-folder"),
+            Some(Action::Run(Command::NewFolder(Some(home.pinned))))
+        );
+        assert_eq!(
+            choose("manage"),
+            Some(Action::Ask("arbalette:library", json!(null)))
+        );
+        assert_eq!(
+            choose("delete"),
+            Some(Action::Confirm {
+                question: "Delete the Space “Home”?".into(),
+                detail: "Its tabs and folders will be closed.",
+                button: "Delete",
+                command: Command::DeleteSpace(home.id),
+            })
+        );
+    }
+
+    #[test]
+    fn the_last_space_cannot_be_deleted() {
+        let sidebar = Sidebar::default();
+        let menu = build(&sidebar, Target::Space(sidebar.spaces()[0].id)).unwrap();
+        assert_eq!(titles(&menu).last().unwrap(), "(Delete Space)");
+    }
+
+    #[test]
+    fn roots_and_unknown_nodes_and_spaces_have_no_menu() {
         let sidebar = Sidebar::default();
         let today = sidebar.spaces()[0].today;
         assert!(build(&sidebar, Target::Node(today)).is_none());
         let unknown = serde_json::from_str("999").unwrap();
         assert!(build(&sidebar, Target::Node(unknown)).is_none());
+        let unknown = serde_json::from_str("999").unwrap();
+        assert!(build(&sidebar, Target::Space(unknown)).is_none());
     }
 }

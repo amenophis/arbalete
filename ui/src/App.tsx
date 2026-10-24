@@ -32,6 +32,8 @@ export function App() {
   const onSpace = pager.settled >= 0 && pager.settled < count;
   // A tab's menu moves it into a new Space from the page creating one.
   useAppEvent("arbalette:new-space", () => pager.go(count));
+  // Spaces are managed from the library, for now.
+  useAppEvent("arbalette:library", () => pager.go(-1));
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =
@@ -183,34 +185,65 @@ function Sections({
         ))}
       </ul>
       <div className="scroll">
+        {/* A click collapses or expands the Space; hovered, its icon shows which. */}
         <h2 className="space-header">
-          <span className="favicon" aria-hidden="true">
-            {space.emoji ?? <span className="space-dot" />}
-          </span>
-          <span className="title">{space.title}</span>
-        </h2>
-        <ul className="tabs pinned" data-parent={roots.pinned}>
-          <Items items={page.pinned} active={selected} renaming={renaming} onRename={onRename} />
-        </ul>
-        <div className="divider-row" data-parent={roots.pinned}>
-          <hr className="divider" />
           <button
             type="button"
-            className="new-folder"
-            aria-label="New folder"
-            title="New folder"
-            onClick={() => send("folder/new")}
+            className="space-toggle"
+            aria-expanded={!page.collapsed}
+            onClick={() => send(`space/toggle/${page.space}`)}
           >
-            +
+            <span className="favicon" aria-hidden="true">
+              <span className="space-icon">{space.emoji ?? <span className="space-dot" />}</span>
+              <span className="chevron">
+                <Icon d="M6 3.5 10.5 8 6 12.5" />
+              </span>
+            </span>
+            <span className="title">{space.title}</span>
           </button>
-        </div>
+          <button
+            type="button"
+            className="space-more"
+            aria-label={`${space.title} options`}
+            title="Space options"
+            onClick={() => send(`menu/space/${page.space}`)}
+          >
+            <Icon d="M4 8h.01M8 8h.01M12 8h.01" />
+          </button>
+        </h2>
+        {!page.collapsed && (
+          <>
+            <ul className="tabs pinned" data-parent={roots.pinned}>
+              <Items
+                items={page.pinned}
+                active={selected}
+                renaming={renaming}
+                onRename={onRename}
+              />
+            </ul>
+            <div className="divider-row" data-parent={roots.pinned}>
+              <hr className="divider" />
+              <button
+                type="button"
+                className="new-folder"
+                aria-label="New folder"
+                title="New folder"
+                onClick={() => send("folder/new")}
+              >
+                +
+              </button>
+            </div>
+          </>
+        )}
         <button type="button" className="tab" onClick={() => send("overlay/show")}>
           <span className="favicon">+</span>
           <span className="title">New tab</span>
         </button>
-        <ul className="tabs today" data-parent={roots.today}>
-          <Items items={page.today} active={selected} renaming={renaming} onRename={onRename} />
-        </ul>
+        {!page.collapsed && (
+          <ul className="tabs today" data-parent={roots.today}>
+            <Items items={page.today} active={selected} renaming={renaming} onRename={onRename} />
+          </ul>
+        )}
       </div>
     </section>
   );

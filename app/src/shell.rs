@@ -276,6 +276,7 @@ impl UiState {
         json!({
             "space": space.id,
             "selected": space.selected,
+            "collapsed": space.collapsed,
             "roots": { "favorites": favorites, "pinned": space.pinned, "today": space.today },
             "favorites": self.tabs(favorites),
             "pinned": self.items(space.pinned),
@@ -1082,8 +1083,19 @@ pub fn perform(action: Action) {
         Action::Ask(event, detail) => ask(event, &detail),
         #[cfg(target_os = "macos")]
         Action::CopyLink(url) => crate::mac::copy(&url),
+        #[cfg(target_os = "macos")]
+        Action::Confirm {
+            question,
+            detail,
+            button,
+            command,
+        } => {
+            if crate::mac::confirm(&question, detail, button) {
+                run(command);
+            }
+        }
         #[cfg(not(target_os = "macos"))]
-        Action::CopyLink(_) => {}
+        Action::CopyLink(_) | Action::Confirm { .. } => {}
     }
 }
 
@@ -1157,6 +1169,35 @@ fn create_space(title: &str, emoji: &str, color: Color, tab: Option<NodeId>) {
     });
     if created.is_ok() {
         show_selected();
+    }
+}
+
+/// Changes the Spaces, then shows the displayed Space's selected tab if the change displays
+/// another Space or `space` itself, whose page may change. Like a selection, an unknown Space or
+/// profile from the UI or a menu is ignored.
+fn update_spaces(
+    space: SpaceId,
+    change: impl FnOnce(&mut Sidebar) -> Result<(), arbalette_core::sidebar::Error>,
+) {
+    let displayed = STATE.with_borrow(|state| state.sidebar.displayed().id);
+    let changed = update_sidebar(change).is_ok();
+    let now = STATE.with_borrow(|state| state.sidebar.displayed().id);
+    if changed && (now != displayed || now == space) {
+        show_selected();
+    }
+}
+
+/// Attaches a Space to a new profile and asks the sidebar to rename it.
+fn new_space_profile(space: SpaceId) {
+    let profile = update_sidebar(|sidebar| {
+        let profile = sidebar.add_profile("New Profile");
+        sidebar.set_space_profile(space, profile).map(|()| profile)
+    });
+    if let Ok(profile) = profile {
+        if STATE.with_borrow(|state| state.sidebar.displayed().id == space) {
+            show_selected();
+        }
+        ask("arbalette:rename-profile", &json!(profile));
     }
 }
 
@@ -1427,6 +1468,15 @@ pub fn run(command: Command) {
         (Command::ColorSpace(id, color), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_space_color(id, color));
         }
+        (Command::ToggleSpace(id), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.toggle_space(id));
+        }
+        // The selected tab shows in its new profile's web data.
+        (Command::SetSpaceProfile(id, profile), _) => {
+            update_spaces(id, |sidebar| sidebar.set_space_profile(id, profile));
+        }
+        (Command::NewSpaceProfile(id), _) => new_space_profile(id),
+        (Command::DeleteSpace(id), _) => update_spaces(id, |sidebar| sidebar.delete_space(id)),
         (Command::ShowImport, _) => show_import(),
         (Command::ImportReady, _) => send_sources(),
         (Command::CloseImport, _) => close_import(),

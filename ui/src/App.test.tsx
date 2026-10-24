@@ -52,8 +52,14 @@ const spaces: Space[] = [
 
 // The first Space shows the tabs above, the others none. The app sends the pages of the displayed
 // Space and its neighbors.
-function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites, displayed = 13) {
-  const empty = { favorites: [], pinned: [], today: [], selected: null };
+function receive(
+  page: Partial<Page>,
+  active = 3,
+  favoriteTabs = favorites,
+  displayed = 13,
+  collapsed = false,
+) {
+  const empty = { favorites: [], pinned: [], today: [], selected: null, collapsed: false };
   const shown = spaces.findIndex(({ id }) => id === displayed);
   const detail = {
     page: { progress: 1, loading: false, canGoBack: true, canGoForward: true, ...page },
@@ -64,7 +70,7 @@ function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites, disp
         space: id,
         roots: { favorites: 1, pinned: 2 + index * 100, today: 12 + index * 100 },
         ...(index === 0
-          ? { favorites: favoriteTabs, pinned, today, selected: active }
+          ? { favorites: favoriteTabs, pinned, today, selected: active, collapsed }
           : { ...empty }),
       }))
       .filter((_, index) => Math.abs(index - shown) <= 1),
@@ -75,6 +81,9 @@ function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites, disp
     dispatchEvent(new CustomEvent("arbalette:state", { detail }));
   });
 }
+
+// The Space icons at the bottom, whose names are the Spaces' like their pages' headers.
+const switcher = () => within(screen.getByRole("list", { name: "Spaces" }));
 
 // The displayed Space's page, apart from its neighbors.
 function shown() {
@@ -155,7 +164,7 @@ test("marks the selected tab's close button as a dash, the others as a cross", (
 test("shows the displayed Space's name above its pinned tabs", () => {
   render(<App />);
   receive({});
-  const header = shown().getByRole("heading", { name: "Home" });
+  const header = shown().getByRole("heading", { name: /^Home/ });
   const pinned = shown().getByRole("button", { name: "Pinned" });
   expect(header.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
@@ -165,10 +174,41 @@ test("shows a Space's emoji in its header", () => {
   spaces[0] = { ...spaces[0], emoji: "🏠" };
   try {
     receive({});
-    expect(shown().getByRole("heading", { name: "Home" }).textContent).toBe("🏠Home");
+    expect(shown().getByRole("button", { name: "Home" }).textContent).toBe("🏠Home");
   } finally {
     spaces[0] = { ...spaces[0], emoji: null };
   }
+});
+
+test("collapses the Space with a click on its header", () => {
+  render(<App />);
+  receive({});
+  const header = shown().getByRole("button", { name: "Home" });
+  expect(header.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(header);
+  expect(fetch).toHaveBeenLastCalledWith("/command/space/toggle/13", { method: "POST" });
+});
+
+test("shows only the header and New tab of a collapsed Space", () => {
+  render(<App />);
+  receive({}, 3, favorites, 13, true);
+  const page = shown();
+  expect(page.getByRole("button", { name: "Home" }).getAttribute("aria-expanded")).toBe("false");
+  expect(page.getByText("New tab")).toBeDefined();
+  for (const name of ["Pinned", "Docs", "Example", "New folder"]) {
+    expect(page.queryByRole("button", { name })).toBeNull();
+  }
+  expect(page.getByRole("button", { name: "Mail" })).toBeDefined();
+});
+
+test("the header's options button and a right-click on it ask for the Space's menu", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(shown().getByRole("button", { name: "Home options" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/menu/space/13", { method: "POST" });
+  fetch.mockClear();
+  expect(fireEvent.contextMenu(shown().getByRole("button", { name: "Home" }))).toBe(false);
+  expect(fetch).toHaveBeenCalledExactlyOnceWith("/command/menu/space/13", { method: "POST" });
 });
 
 test("shows pinned tabs and folders above the divider and today's tabs", () => {
@@ -367,7 +407,7 @@ test("shows one icon per Space at the bottom, the displayed one marked", () => {
 test("switches to a Space when its icon is clicked", () => {
   render(<App />);
   receive({});
-  fireEvent.click(screen.getByRole("button", { name: "work" }));
+  fireEvent.click(switcher().getByRole("button", { name: "work" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/space/14", { method: "POST" });
 });
 
@@ -614,11 +654,13 @@ test("the footer menu's New Space slides to that page, and its Space icon back",
   fireEvent.click(screen.getByRole("menuitem", { name: "New Space" }));
   await frame();
   expect(position()).toBe("translateX(-400%)");
-  expect(screen.getByRole("button", { name: "Home" }).hasAttribute("aria-current")).toBe(false);
-  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  expect(switcher().getByRole("button", { name: "Home" }).hasAttribute("aria-current")).toBe(false);
+  fireEvent.click(switcher().getByRole("button", { name: "Home" }));
   await frame();
   expect(position()).toBe("translateX(0%)");
-  expect(screen.getByRole("button", { name: "Home" }).getAttribute("aria-current")).toBe("true");
+  expect(switcher().getByRole("button", { name: "Home" }).getAttribute("aria-current")).toBe(
+    "true",
+  );
   expect(fetch).not.toHaveBeenCalledWith("/command/space/13", { method: "POST" });
 });
 
@@ -693,6 +735,18 @@ test("the Library button slides to the library, like a swipe", async () => {
   expect(position()).toBe("translateX(100%)");
   expect(library()?.hasAttribute("inert")).toBe(false);
   expect(spaceCommands()).toEqual([]);
+});
+
+test("the Space menu's Manage Spaces slides to the library", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalette:library", { detail: null }));
+  });
+  await frame();
+  expect(position()).toBe("translateX(100%)");
+  expect(library()?.hasAttribute("inert")).toBe(false);
 });
 
 test("the library reopens a closed tab in the displayed Space and slides back to it", async () => {

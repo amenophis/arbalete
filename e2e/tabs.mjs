@@ -4,8 +4,8 @@
 // profiles' web data apart, switching Spaces, creating, renaming and coloring profiles, creating
 // Spaces from the page after the last one and editing them, switching Spaces by number and by
 // swiping between their pages, reopening closed tabs from the library before the first Space,
-// showing the displayed profile's favorites, recording each profile's history, and running the
-// items of the rows' native menus, in the real app.
+// showing the displayed profile's favorites, recording each profile's history, running the items
+// of the rows' and the Spaces' native menus, and collapsing and deleting Spaces, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -1051,6 +1051,89 @@ try {
     `e2e.prevented && e2e.sent.some((url) => url.endsWith("/menu/node/" + e2e.tile.dataset.id))
       && e2e.tiles().length === e2e.tileCount - 1 && !e2e.tile.isConnected
       && e2e.state.closed[0].url === e2e.tileUrl`,
+  );
+  await check(
+    "a right-click on the Space's header asks for the Space's menu",
+    `e2e.header = () => e2e.page().querySelector(".space-toggle");
+     e2e.chooseSpace = (item) => e2e.send("menu/choose/space/" + e2e.spaces[0] + "/" + item);
+     e2e.prevented = e2e.rightClick(e2e.header())`,
+    `e2e.prevented && e2e.sent.at(-1).endsWith("/command/menu/space/" + e2e.spaces[0])`,
+  );
+  await check(
+    "the header's options button asks for it too",
+    `e2e.page().querySelector(".space-more").click()`,
+    `e2e.sent.filter((url) => url.endsWith("/command/menu/space/" + e2e.spaces[0])).length === 2`,
+  );
+  await check(
+    "a click on the header collapses the Space, leaving only New tab",
+    `e2e.header().click()`,
+    `e2e.header().getAttribute("aria-expanded") === "false" && !e2e.page().querySelector(".pinned, .today, .divider")
+      && [...e2e.page().querySelectorAll(".tab")].map((tab) => tab.textContent).join() === "+New tab"`,
+  );
+  await checkSession("the session keeps the Space collapsed", (saved) => saved.spaces[0].collapsed === true);
+  await check(
+    "another click expands it again",
+    `e2e.header().click()`,
+    `e2e.header().getAttribute("aria-expanded") === "true" && e2e.rows().length > 0`,
+  );
+  await check(
+    "the Space menu's Change Space Icon opens the editor on the emoji",
+    `e2e.chooseSpace("icon")`,
+    `document.activeElement === e2e.spaceField("emoji")`,
+  );
+  await check(
+    "Rename Space moves to the name",
+    `e2e.chooseSpace("rename")`,
+    `document.activeElement === e2e.spaceField("name")`,
+  );
+  await check(
+    "Edit Theme Color moves to the colors",
+    `e2e.chooseSpace("color")`,
+    `document.activeElement?.matches(".space-editor .swatch[aria-pressed=true]")`,
+  );
+  await check(
+    "New Folder adds a folder to the Space's pinned tabs, its name being edited",
+    `e2e.spaceIcons()[0].click(); e2e.folders = e2e.page().querySelectorAll(".pinned > .folder-item").length;
+     e2e.chooseSpace("new-folder")`,
+    `e2e.page().querySelectorAll(".pinned > .folder-item").length === e2e.folders + 1
+      && document.activeElement === e2e.page().querySelector('.pinned > .folder-item:last-child [aria-label="Folder name"]')`,
+  );
+  await pressEnter();
+  await check(
+    "Manage Spaces slides to the library",
+    `e2e.chooseSpace("manage")`,
+    `e2e.library() && e2e.offset() === 100`,
+  );
+  await check("the first Space's dot slides back from the library", `e2e.spaceIcons()[0].click()`, `e2e.settled(0)`);
+  const lastSpace = await sidebar.eval(`e2e.spaces.length - 1`);
+  await check(
+    "deleting the displayed last Space displays the one before it",
+    `e2e.deleted = e2e.spaces.at(-1);
+     e2e.send("space/number/${lastSpace + 1}").then(() => e2e.send("space/delete/" + e2e.deleted))`,
+    `e2e.spaces.length === ${lastSpace} && !e2e.spaces.includes(e2e.deleted) && e2e.settled(${lastSpace - 1})`,
+  );
+  const deleted = Number(await sidebar.eval(`e2e.deleted`));
+  await checkSession("the session forgets the deleted Space", (saved) =>
+    saved.spaces.every((space) => space.id !== deleted),
+  );
+  await check("the first Space shows for its profile", `e2e.spaceIcons()[0].click()`, `e2e.settled(0)`);
+  const workFavorites = readSession().nodes[favoritesOf(otherProfileSpace)].children.length;
+  await check(
+    "Set Profile attaches the Space to another profile, whose favorites it shows",
+    `e2e.chooseSpace("profile/${otherProfileSpace.profile}")`,
+    `e2e.tiles().length === ${workFavorites}`,
+  );
+  await checkSession("the session saves the Space's new profile", (saved) =>
+    saved.spaces[0].profile === otherProfileSpace.profile,
+  );
+  await check(
+    "New Profile attaches it to a new profile, whose name is being edited",
+    `e2e.chooseSpace("new-profile")`,
+    `e2e.tiles().length === 0 && document.activeElement?.getAttribute("aria-label") === "Profile name"
+      && document.activeElement.value === "New Profile"`,
+  );
+  await checkSession("the session saves the Space with its new profile", (saved) =>
+    saved.profiles.find((profile) => profile.id === saved.spaces[0].profile)?.name === "New Profile",
   );
 } finally {
   app.kill();
