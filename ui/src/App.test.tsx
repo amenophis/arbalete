@@ -239,7 +239,7 @@ test("renames a folder after a double click", () => {
   fireEvent.change(input, { target: { value: " Café/2 " } });
   fireEvent.keyDown(input, { key: "Enter" });
   expect(fetch).toHaveBeenLastCalledWith("/command/rename/6/Caf%C3%A9%2F2", { method: "POST" });
-  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(shown().queryByRole("textbox")).toBeNull();
 });
 
 test("keeps the title on Escape or when it is blank", () => {
@@ -249,11 +249,11 @@ test("keeps the title on Escape or when it is blank", () => {
   let input = rename("Docs");
   fireEvent.change(input, { target: { value: "Other" } });
   fireEvent.keyDown(input, { key: "Escape" });
-  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(shown().queryByRole("textbox")).toBeNull();
   input = rename("Docs");
   fireEvent.change(input, { target: { value: "  " } });
   fireEvent.blur(input);
-  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(shown().queryByRole("textbox")).toBeNull();
   expect(fetch).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Docs" })).toBeDefined();
 });
@@ -413,4 +413,82 @@ test("the first state shows the displayed Space's page at once", () => {
   render(<App />);
   receive({}, 3, favorites, 16);
   expect(position()).toBe("translateX(-300%)");
+});
+
+const newSpace = () => document.querySelector<HTMLElement>(".new-space-page");
+const nameOfNew = () => screen.getByRole("textbox", { name: "New Space name" });
+
+test("a swipe past the last Space shows the page creating one, without telling the app", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({}, 3, favorites, 16);
+  fetch.mockClear();
+  expect(newSpace()?.style.left).toBe("400%");
+  expect(newSpace()?.hasAttribute("inert")).toBe(true);
+  swipe(-10, 20, 50);
+  await frame();
+  expect(position()).toBe("translateX(-400%)");
+  expect(newSpace()?.hasAttribute("inert")).toBe(false);
+  expect(document.querySelectorAll(".space-page:not([inert])")).toHaveLength(0);
+  expect(document.activeElement).toBe(nameOfNew());
+  expect(screen.getByRole("navigation").style.getPropertyValue("--space")).toBe(
+    "var(--background)",
+  );
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("swiping back from the new Space's page leaves the Spaces as they were", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({}, 3, favorites, 16);
+  swipe(-10, 20, 50);
+  fireEvent.change(nameOfNew(), { target: { value: "Reading" } });
+  fetch.mockClear();
+  swipe(10, 20, 50);
+  await frame();
+  expect(position()).toBe("translateX(-300%)");
+  expect(newSpace()?.hasAttribute("inert")).toBe(true);
+  expect(shown()).toBeDefined();
+  expect(fetch).not.toHaveBeenCalled();
+  expect((nameOfNew() as HTMLInputElement).value).toBe("");
+});
+
+test("the switcher's new Space button slides to that page, and its Space icon back", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "New Space" }));
+  await frame();
+  expect(position()).toBe("translateX(-400%)");
+  expect(screen.getByRole("button", { name: "Home" }).hasAttribute("aria-current")).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  await frame();
+  expect(position()).toBe("translateX(0%)");
+  expect(screen.getByRole("button", { name: "Home" }).getAttribute("aria-current")).toBe("true");
+  expect(fetch).not.toHaveBeenCalledWith("/command/space/13", { method: "POST" });
+});
+
+test("creating a Space shows its page where the new Space's was", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({}, 3, favorites, 16);
+  swipe(-10, 20, 50);
+  fireEvent.change(nameOfNew(), { target: { value: "Reading" } });
+  fireEvent.submit(nameOfNew());
+  expect(fetch).toHaveBeenLastCalledWith("/command/space/create/purple//Reading", {
+    method: "POST",
+  });
+  spaces.push({ id: 17, title: "Reading", emoji: null, color: "purple" });
+  try {
+    receive({}, 3, favorites, 17);
+    await frame();
+    expect(position()).toBe("translateX(-400%)");
+    expect(document.querySelector<HTMLElement>(".space-page:not([inert])")?.dataset.space).toBe(
+      "17",
+    );
+    expect(newSpace()?.style.left).toBe("500%");
+    expect(newSpace()?.hasAttribute("inert")).toBe(true);
+  } finally {
+    spaces.pop();
+  }
 });

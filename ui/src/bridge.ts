@@ -89,11 +89,9 @@ export function useAppState(): State | undefined {
   return state;
 }
 
-// The folder, profile or Space whose name is edited: one the app asks to rename, with `event`, once
-// it creates it, or any the user picks.
-export function useRenaming(
-  event: "arbalette:rename" | "arbalette:rename-profile" | "arbalette:rename-space",
-) {
+// The folder or profile whose name is edited: one the app asks to rename, with `event`, once it
+// creates it, or any the user picks.
+export function useRenaming(event: "arbalette:rename" | "arbalette:rename-profile") {
   const [renaming, setRenaming] = useState<number | null>(null);
   useEffect(() => {
     const listener = (event: Event) => setRenaming((event as CustomEvent<number>).detail);

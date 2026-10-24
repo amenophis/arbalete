@@ -1,19 +1,26 @@
-import { useState } from "react";
-import { firstGrapheme, type Space, send, useRenaming } from "./bridge";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type Color, firstGrapheme, type Space, send } from "./bridge";
 import { keepOnEscape, NameField, Swatches } from "./Profiles";
 
-// One icon per Space, its emoji or its initial, then a button to create one. The displayed Space
-// is marked aria-current; clicking its icon again opens its editor, which also opens by itself
-// when the app asks to rename the Space it has just created.
-export function Spaces({ spaces, displayed }: { spaces: Space[]; displayed?: number }) {
+// One icon per Space, its emoji or its initial, then a button to create one, which slide the
+// sidebar to their page with `onPage`. The Space whose page shows, if any, is marked aria-current;
+// clicking its icon again opens its editor.
+export function Spaces({
+  spaces,
+  displayed,
+  onPage,
+}: {
+  spaces: Space[];
+  displayed?: number;
+  onPage: (page: number) => void;
+}) {
   const [open, setOpen] = useState(false);
-  const [renaming, setRenaming] = useRenaming("arbalette:rename-space");
   const current = spaces.find((space) => space.id === displayed);
-  const editing = current !== undefined && (open || renaming === current.id);
+  const editing = current !== undefined && open;
   return (
     <>
       <ul className="spaces" aria-label="Spaces">
-        {spaces.map((space) => {
+        {spaces.map((space, index) => {
           const isCurrent = space.id === displayed;
           return (
             <li key={space.id}>
@@ -25,10 +32,9 @@ export function Spaces({ spaces, displayed }: { spaces: Space[]; displayed?: num
                 aria-current={isCurrent ? "true" : undefined}
                 aria-expanded={isCurrent ? editing : undefined}
                 onClick={() => {
-                  setRenaming(null);
                   if (isCurrent) return setOpen(!editing);
                   setOpen(false);
-                  send(`space/${space.id}`);
+                  onPage(index);
                 }}
               >
                 {space.emoji ?? firstGrapheme(space.title).toUpperCase()}
@@ -42,7 +48,10 @@ export function Spaces({ spaces, displayed }: { spaces: Space[]; displayed?: num
             className="new-space"
             aria-label="New Space"
             title="New Space"
-            onClick={() => send("space/new")}
+            onClick={() => {
+              setOpen(false);
+              onPage(spaces.length);
+            }}
           >
             +
           </button>
@@ -53,11 +62,6 @@ export function Spaces({ spaces, displayed }: { spaces: Space[]; displayed?: num
           // A new name or emoji from the app resets the fields.
           key={`${current.id}:${current.title}:${current.emoji}`}
           space={current}
-          renaming={renaming === current.id}
-          onRenamed={() => {
-            setRenaming(null);
-            setOpen(true);
-          }}
         />
       )}
     </>
@@ -65,15 +69,7 @@ export function Spaces({ spaces, displayed }: { spaces: Space[]; displayed?: num
 }
 
 // The emoji field keeps only its first character; emptying it brings the initial back.
-function SpaceEditor({
-  space,
-  renaming,
-  onRenamed,
-}: {
-  space: Space;
-  renaming: boolean;
-  onRenamed: () => void;
-}) {
+function SpaceEditor({ space }: { space: Space }) {
   const { id, title, color } = space;
   const emoji = space.emoji ?? "";
   return (
@@ -95,9 +91,7 @@ function SpaceEditor({
         <NameField
           label="Space name"
           name={title}
-          focused={renaming}
           onRename={(value) => send(`space/rename/${id}/${encodeURIComponent(value)}`)}
-          onBlur={() => renaming && onRenamed()}
         />
       </div>
       <Swatches
@@ -106,5 +100,62 @@ function SpaceEditor({
         onPick={(option) => send(`space/color/${id}/${option}`)}
       />
     </div>
+  );
+}
+
+// The page after the last Space creates one, in the displayed Space's profile, from a name, an
+// emoji and a color; the app then displays it. Its name takes the keyboard once the page `shown`
+// has settled, and leaving it without creating forgets what was typed.
+export function NewSpace({ index, shown }: { index: number; shown: boolean }) {
+  const [title, setTitle] = useState("");
+  const [emoji, setEmoji] = useState("");
+  const [color, setColor] = useState<Color>("purple");
+  const name = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (shown) {
+      name.current?.focus({ preventScroll: true });
+      return;
+    }
+    setTitle("");
+    setEmoji("");
+    setColor("purple");
+  }, [shown]);
+  const create = (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim()) return;
+    const icon = encodeURIComponent(firstGrapheme(emoji.trim()));
+    send(`space/create/${color}/${icon}/${encodeURIComponent(title.trim())}`);
+  };
+  return (
+    <form
+      className="end-page new-space-page"
+      aria-label="New Space"
+      inert={!shown}
+      style={{ left: `${index * 100}%` }}
+      onSubmit={create}
+    >
+      <h2>New Space</h2>
+      <div className="space-fields">
+        <input
+          className="emoji"
+          aria-label="New Space emoji"
+          value={emoji}
+          placeholder={firstGrapheme(title).toUpperCase()}
+          onChange={(event) => setEmoji(event.currentTarget.value)}
+          onBlur={() => setEmoji(firstGrapheme(emoji.trim()))}
+        />
+        <input
+          aria-label="New Space name"
+          ref={name}
+          value={title}
+          placeholder="Name"
+          onChange={(event) => setTitle(event.currentTarget.value)}
+        />
+      </div>
+      <Swatches label="Color of the new Space" color={color} onPick={setColor} />
+      <button type="submit" className="create-space" disabled={!title.trim()}>
+        Create
+      </button>
+    </form>
   );
 }

@@ -77,15 +77,15 @@ function ProfileRow({
 export function NameField({
   label,
   name,
-  focused,
+  focused = false,
   onRename,
   onBlur,
 }: {
   label: string;
   name: string;
-  focused: boolean;
+  focused?: boolean;
   onRename: (name: string) => void;
-  onBlur: () => void;
+  onBlur?: () => void;
 }) {
   // The field may show before the app asks to rename it: autoFocus would come too late.
   const input = useRef<HTMLInputElement>(null);
@@ -103,7 +103,7 @@ export function NameField({
         const value = event.currentTarget.value.trim();
         if (value && value !== name) onRename(value);
         else event.currentTarget.value = name;
-        onBlur();
+        onBlur?.();
       }}
     />
   );

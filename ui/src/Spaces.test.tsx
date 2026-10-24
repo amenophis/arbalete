@@ -1,11 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Space } from "./bridge";
-import { Spaces } from "./Spaces";
+import { NewSpace, Spaces } from "./Spaces";
 
 const fetch = vi.fn();
+const onPage = vi.fn();
 
 beforeEach(() => {
+  onPage.mockReset();
   fetch.mockReset().mockResolvedValue(new Response("{}"));
   vi.stubGlobal("fetch", fetch);
 });
@@ -23,33 +25,34 @@ const emojiField = () => screen.getByRole("textbox", { name: "Space emoji" }) as
 const nameField = () => screen.getByRole("textbox", { name: "Space name" }) as HTMLInputElement;
 
 function edit(displayed = 14) {
-  render(<Spaces spaces={spaces} displayed={displayed} />);
+  render(<Spaces spaces={spaces} displayed={displayed} onPage={onPage} />);
   fireEvent.click(icon(spaces.find((space) => space.id === displayed)?.title ?? ""));
 }
 
 test("shows each Space's emoji, or the whole first character of its title", () => {
-  render(<Spaces spaces={spaces} displayed={13} />);
+  render(<Spaces spaces={spaces} displayed={13} onPage={onPage} />);
   const icons = within(screen.getByRole("list", { name: "Spaces" })).getAllByRole("button");
   expect(icons.map((button) => button.textContent)).toEqual(["H", "💼", "😀", "+"]);
 });
 
-test("creates a Space", () => {
-  render(<Spaces spaces={spaces} displayed={13} />);
+test("goes to the page after the last Space to create one", () => {
+  render(<Spaces spaces={spaces} displayed={13} onPage={onPage} />);
   fireEvent.click(icon("New Space"));
-  expect(fetch).toHaveBeenLastCalledWith("/command/space/new", { method: "POST" });
+  expect(onPage).toHaveBeenLastCalledWith(3);
+  expect(fetch).not.toHaveBeenCalled();
 });
 
-test("switches to another Space, and opens the displayed one's editor", () => {
-  render(<Spaces spaces={spaces} displayed={13} />);
+test("goes to another Space's page, and opens the displayed one's editor", () => {
+  render(<Spaces spaces={spaces} displayed={13} onPage={onPage} />);
   fireEvent.click(icon("Work"));
-  expect(fetch).toHaveBeenLastCalledWith("/command/space/14", { method: "POST" });
+  expect(onPage).toHaveBeenLastCalledWith(1);
   expect(screen.queryByRole("textbox")).toBeNull();
   const home = icon("Home");
   expect(home.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(home);
   expect(home.getAttribute("aria-expanded")).toBe("true");
   expect(nameField().value).toBe("Home");
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(onPage).toHaveBeenCalledTimes(1);
   fireEvent.click(home);
   expect(screen.queryByRole("textbox")).toBeNull();
 });
@@ -103,12 +106,53 @@ test("picks the displayed Space's color", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/space/color/14/red", { method: "POST" });
 });
 
-test("opens the editor on the name of the Space the app has just created", () => {
-  render(<Spaces spaces={spaces} displayed={15} />);
-  act(() => {
-    dispatchEvent(new CustomEvent("arbalette:rename-space", { detail: 15 }));
-  });
-  expect(document.activeElement).toBe(nameField());
-  fireEvent.blur(nameField());
-  expect(nameField().value).toBe("😀 fun");
+test("goes back to the displayed Space's page while another page shows", () => {
+  render(<Spaces spaces={spaces} onPage={onPage} />);
+  const home = icon("Home");
+  expect(home.hasAttribute("aria-current")).toBe(false);
+  fireEvent.click(home);
+  expect(onPage).toHaveBeenLastCalledWith(0);
+  expect(screen.queryByRole("textbox")).toBeNull();
+});
+
+const field = (name: string) =>
+  screen.getByRole("textbox", { name: `New Space ${name}` }) as HTMLInputElement;
+const create = () => screen.getByRole("button", { name: "Create" }) as HTMLButtonElement;
+
+test("creates a Space from its name, emoji and color with Enter", () => {
+  render(<NewSpace index={3} shown />);
+  expect(document.activeElement).toBe(field("name"));
+  expect(create().disabled).toBe(true);
+  fireEvent.change(field("name"), { target: { value: " Café/2 " } });
+  fireEvent.change(field("emoji"), { target: { value: "📚x" } });
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "Color of the new Space" })).getByRole("button", {
+      name: "orange",
+    }),
+  );
+  fireEvent.submit(field("name"));
+  expect(fetch).toHaveBeenLastCalledWith(
+    `/command/space/create/orange/${encodeURIComponent("📚")}/Caf%C3%A9%2F2`,
+    { method: "POST" },
+  );
+});
+
+test("creates nothing without a name", () => {
+  render(<NewSpace index={3} shown />);
+  fireEvent.change(field("name"), { target: { value: "  " } });
+  expect(create().disabled).toBe(true);
+  fireEvent.submit(field("name"));
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("forgets what was typed once left, and stays out of reach meanwhile", () => {
+  const { rerender } = render(<NewSpace index={3} shown />);
+  fireEvent.change(field("name"), { target: { value: "Reading" } });
+  fireEvent.change(field("emoji"), { target: { value: "📚" } });
+  rerender(<NewSpace index={3} shown={false} />);
+  expect(screen.getByRole("form", { hidden: true }).hasAttribute("inert")).toBe(true);
+  rerender(<NewSpace index={3} shown />);
+  expect(field("name").value).toBe("");
+  expect(field("emoji").value).toBe("");
+  expect(fetch).not.toHaveBeenCalled();
 });
