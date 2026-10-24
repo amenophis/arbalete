@@ -37,5 +37,16 @@ centering. Its V-shaped fletching then read as two round lobes, so [4-tails](4-t
 ([sheet](4-tails/sheet.png)) explored six tails: ribbed feathers, a longer tail, three vanes, leaf feathers, a
 rising bolt and a swallow tail.
 
-Kept: the **swallow tail** on the **rising bolt**, raised slightly so the bolt crosses the A higher. That is the
-final [icon.svg](../icon.svg), with [icon-mono.svg](../icon-mono.svg) for single-color use.
+Kept: the **swallow tail** on the **rising bolt**, raised slightly so the bolt crosses the A higher
+([1-previous](5-open-a/1-previous.svg)).
+
+## 5. An open A
+
+[5-open-a](5-open-a) ([sheet](5-open-a/sheet.png)): the mark needed more weight and a visible hole in the middle of
+the A. Thicker strokes ([2-bolder](5-open-a/2-bolder.svg)) closed the narrow A's counter, and cutting a hole into
+it ([3-cut-counter](5-open-a/3-cut-counter.svg)) thinned the letter around it. So the A was redrawn wider and
+taller, with a real counter outlined like the rest of the mark, and a longer bolt that crosses the whole letter;
+two tops were tried, pointed and [round](5-open-a/4-open-round-top.svg).
+
+Kept: the **pointed top**. That is the final [icon.svg](../icon.svg), with [icon-mono.svg](../icon-mono.svg) for
+single-color use.
