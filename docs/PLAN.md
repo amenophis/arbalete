@@ -365,6 +365,10 @@ Commit sequence (Arc first, the browser Arbalette users are most likely to come 
 - CI on Linux and Windows: system libraries CEF needs, loading `libcef` in tests, Windows sandbox bootstrap.
 - Full acceptance testing on each OS, signed installers, automatic updates.
 
+### Phase 11 — Developer mode
+- A view for working on a site under development, like Arc's developer mode: to be studied (behavior and
+  layout) when the phase starts.
+
 ### Later
 Sync, password import.
 
