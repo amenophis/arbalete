@@ -49,7 +49,10 @@ run = [
   "bundle-cef-app arbalette -o target/bundle -i net.leherpeur.arbalette -d Arbalette",
   # Ad hoc signatures change on every build, so macOS asks again for each permission. A stable
   # identity, set in .config/mise.local.toml (not committed), keeps permissions across builds.
-  "codesign --force --deep -s \"${ARBALETTE_SIGN_IDENTITY:--}\" target/bundle/arbalette.app",
+  # The framework and the helpers, which read and write the data, are signed one by one: --deep
+  # keeps the helpers' ad hoc signature.
+  "for code in target/bundle/arbalette.app/Contents/Frameworks/*; do codesign --force -s \"${ARBALETTE_SIGN_IDENTITY:--}\" \"$code\"; done",
+  "codesign --force -s \"${ARBALETTE_SIGN_IDENTITY:--}\" target/bundle/arbalette.app",
 ]
 
 [tasks.run]
@@ -61,16 +64,18 @@ run = "target/bundle/arbalette.app/Contents/MacOS/arbalette"
 description = "Measure the performance prototype (docs/PLAN.md, phase 0)"
 depends = ["app"]
 run = [
-  "rm -rf target/bench",
-  "cargo run -q -p arbalette-core --example bench-session -- target/bench",
-  "node perf/measure.mjs target/bench",
+  # Outside the repository: macOS asks before an app reads the Documents folder.
+  "rm -rf \"$TMPDIR/arbalette-bench\"",
+  "cargo run -q -p arbalette-core --example bench-session -- \"$TMPDIR/arbalette-bench\"",
+  "node perf/measure.mjs \"$TMPDIR/arbalette-bench\"",
 ]
 
 [tasks.e2e]
 description = "Check the app end to end through DevTools (opens a window)"
 depends = ["app"]
 run = [
-  "rm -rf target/e2e",
-  "cargo run -q -p arbalette-core --example bench-session -- target/e2e",
-  "node e2e/tabs.mjs target/e2e",
+  # Outside the repository: macOS asks before an app reads the Documents folder.
+  "rm -rf \"$TMPDIR/arbalette-e2e\"",
+  "cargo run -q -p arbalette-core --example bench-session -- \"$TMPDIR/arbalette-e2e\"",
+  "node e2e/tabs.mjs \"$TMPDIR/arbalette-e2e\"",
 ]
