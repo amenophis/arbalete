@@ -1,12 +1,16 @@
 import { expect, test } from "vitest";
-import type { Space } from "./bridge";
+import { mix, type Space } from "./bridge";
 import {
+  ARM_PULL,
+  armed,
   bounds,
   FLICK_SPEED,
   FLICK_WINDOW_MS,
   follow,
   GAIN,
-  NEUTRAL,
+  LIBRARY_SHIFT,
+  libraryFade,
+  libraryProgress,
   OVERSHOOT,
   resist,
   spring,
@@ -21,13 +25,36 @@ test("the pages follow the fingers, slower than they move", () => {
   expect(follow(1, 0, 200)).toBe(1);
 });
 
-test("a swipe reaches at most the pages next to where it began, from the library to the new Space's", () => {
+test("a swipe reaches at most the pages next to where it began, from the library to the last Space", () => {
   expect(bounds(2, 5)).toEqual([1, 3]);
   expect(bounds(0, 5)).toEqual([-1, 1]);
   expect(bounds(-1, 5)).toEqual([-1, 0]);
-  expect(bounds(4, 5)).toEqual([3, 5]);
+  expect(bounds(4, 5)).toEqual([3, 4]);
+  expect(bounds(0, 1)).toEqual([-1, 0]);
+  // From the page creating a Space, back to the last one.
   expect(bounds(5, 5)).toEqual([4, 5]);
-  expect(bounds(0, 1)).toEqual([-1, 1]);
+});
+
+test("pulling far enough past the last Space arms the page creating one", () => {
+  expect(armed(0)).toBe(false);
+  expect(armed(ARM_PULL * 0.9)).toBe(false);
+  expect(armed(ARM_PULL)).toBe(true);
+  expect(armed(1)).toBe(true);
+  // The rubber band shows a short pull once armed.
+  expect(resist(4 + ARM_PULL, [3, 4]) - 4).toBeLessThan(0.08);
+});
+
+test("the way to the library moves the card and fades the first Space's page", () => {
+  expect(libraryProgress(0)).toBe(0);
+  expect(libraryProgress(0.5)).toBe(0);
+  expect(libraryProgress(-0.25)).toBe(0.25);
+  expect(libraryProgress(-1)).toBe(1);
+  expect(libraryProgress(-1.2)).toBe(1);
+  expect(LIBRARY_SHIFT).toBe(180);
+  expect(libraryFade(0)).toBe(1);
+  expect(libraryFade(-0.25)).toBeCloseTo(0.5);
+  expect(libraryFade(-0.5)).toBe(0);
+  expect(libraryFade(-1)).toBe(0);
 });
 
 test("past its bounds, a position resists more and more, never past the overshoot", () => {
@@ -81,7 +108,7 @@ test("a release lands at most one page from where the swipe began, within the pa
   expect(target(-0.2, -fast, 0, 5)).toBe(-1);
   expect(target(-1.2, -fast, -1, 5)).toBe(-1);
   expect(target(-0.8, fast, -1, 5)).toBe(0);
-  expect(target(4.2, fast, 4, 5)).toBe(5);
+  expect(target(4.2, fast, 4, 5)).toBe(4);
   expect(target(5.2, fast, 5, 5)).toBe(5);
   expect(target(4.8, -fast, 5, 5)).toBe(4);
 });
@@ -110,17 +137,17 @@ const spaces: Space[] = [
 ];
 
 test("the tint blends the colors of the two Spaces in view", () => {
-  expect(tint(spaces, 0)).toBe("#3e7bfa");
-  expect(tint(spaces, 1)).toBe("#e5484d");
-  expect(tint(spaces, 0.25)).toBe("color-mix(in srgb, #3e7bfa, #e5484d 25%)");
+  expect(tint(spaces, 0)).toEqual({ color: "#3e7bfa", strength: 1 });
+  expect(tint(spaces, 1)).toEqual({ color: "#e5484d", strength: 1 });
+  expect(tint(spaces, 0.25)).toEqual({ color: mix("#e5484d", "#3e7bfa", 25), strength: 1 });
   expect(tint([], 0)).toBeUndefined();
 });
 
-test("the library and the page after the last Space leave the sidebar untinted", () => {
-  expect(tint(spaces, -1)).toBe(NEUTRAL);
-  expect(tint(spaces, -1.2)).toBe(NEUTRAL);
-  expect(tint(spaces, -0.5)).toBe(`color-mix(in srgb, ${NEUTRAL}, #3e7bfa 50%)`);
-  expect(tint(spaces, 2)).toBe(NEUTRAL);
-  expect(tint(spaces, 2.2)).toBe(NEUTRAL);
-  expect(tint(spaces, 1.5)).toBe(`color-mix(in srgb, #e5484d, ${NEUTRAL} 50%)`);
+test("the library and the page after the last Space are untinted, the Spaces' tint fading", () => {
+  expect(tint(spaces, -1)?.strength).toBe(0);
+  expect(tint(spaces, -1.2)?.strength).toBe(0);
+  expect(tint(spaces, -0.5)).toEqual({ color: "#3e7bfa", strength: 0.5 });
+  expect(tint(spaces, 2)?.strength).toBe(0);
+  expect(tint(spaces, 2.2)?.strength).toBe(0);
+  expect(tint(spaces, 1.75)).toEqual({ color: "#e5484d", strength: 0.25 });
 });

@@ -401,6 +401,11 @@ function reduceMotion() {
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce") }));
 }
 
+// The commands displaying a Space, which pages that are no Space's never send.
+const spaceCommands = () =>
+  fetch.mock.calls.filter(([url]) => /^\/command\/space\/\d+$/.test(String(url)));
+const commands = () => fetch.mock.calls.map(([url]) => String(url));
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -452,7 +457,7 @@ test("the library resists a swipe towards a page before it", async () => {
   });
   await frame();
   expect(position()).toBe("translateX(100%)");
-  expect(fetch).not.toHaveBeenCalled();
+  expect(spaceCommands()).toEqual([]);
 });
 
 test("without motion, a swipe lands on its page at once", async () => {
@@ -498,10 +503,86 @@ test("a swipe past the last Space shows the page creating one, without telling t
   expect(newSpace()?.hasAttribute("inert")).toBe(false);
   expect(document.querySelectorAll(".space-page:not([inert])")).toHaveLength(0);
   expect(document.activeElement).toBe(nameOfNew());
-  expect(screen.getByRole("navigation").style.getPropertyValue("--space")).toBe(
-    "var(--background)",
-  );
+  expect(screen.getByRole("navigation").style.getPropertyValue("--tinted")).toBe("0");
   expect(fetch).not.toHaveBeenCalled();
+});
+
+// Touches and moves without lifting, the pointer `y` points from the top.
+function pull(dx: number, events: number, y = 0) {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(200);
+  const send = (phase: string, time: number) =>
+    dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, y, time } }));
+  act(() => {
+    send("begin", 0);
+    for (let i = 1; i < events; i++) send("move", i * 50);
+  });
+}
+
+function lift() {
+  act(() => {
+    dispatchEvent(
+      new CustomEvent("arbalette:swipe", { detail: { phase: "end", dx: 0, y: 0, time: 5000 } }),
+    );
+  });
+}
+
+const bubble = () => document.querySelector<HTMLElement>(".new-bubble");
+
+test("a pull past the last Space brings out a + at the pointer, which arms further on", async () => {
+  render(<App />);
+  receive({}, 3, favorites, 16);
+  pull(-10, 2, 120);
+  await frame();
+  expect(Number(bubble()?.style.opacity)).toBeGreaterThan(0);
+  expect(Number(bubble()?.style.opacity)).toBeLessThan(1);
+  expect(bubble()?.style.transform).toContain("120px");
+  expect(bubble()?.hasAttribute("data-armed")).toBe(false);
+  // The pages resist instead of showing the page creating a Space.
+  const offset = Number.parseFloat(position().replace("translateX(", ""));
+  expect(offset).toBeLessThan(-300);
+  expect(offset).toBeGreaterThan(-320);
+  pull(-10, 8, 120);
+  await frame();
+  expect(bubble()?.style.opacity).toBe("1");
+  expect(bubble()?.hasAttribute("data-armed")).toBe(true);
+});
+
+test("releasing the + before it arms goes back to the last Space", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({}, 3, favorites, 16);
+  pull(-10, 2);
+  lift();
+  await frame();
+  expect(position()).toBe("translateX(-300%)");
+  expect(newSpace()?.hasAttribute("inert")).toBe(true);
+  expect(bubble()?.style.opacity).toBe("0");
+});
+
+test("releasing the + armed opens the page creating a Space", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({}, 3, favorites, 16);
+  pull(-10, 8);
+  lift();
+  await frame();
+  expect(position()).toBe("translateX(-400%)");
+  expect(newSpace()?.hasAttribute("inert")).toBe(false);
+});
+
+test("on the way to the library, the card moves right and the first Space fades", async () => {
+  render(<App />);
+  receive({});
+  pull(10, 6);
+  await frame();
+  const offsets = commands()
+    .filter((url) => url.startsWith("/command/card/offset/"))
+    .map((url) => Number(url.split("/").at(-1)));
+  expect(offsets.at(-1)).toBeGreaterThan(0);
+  expect(offsets.at(-1)).toBeLessThan(180);
+  const first = document.querySelector<HTMLElement>('.space-page[data-space="13"]');
+  expect(Number(first?.style.opacity)).toBeLessThan(1);
+  expect(commands()).not.toContain("/command/library/show");
 });
 
 test("swiping back from the new Space's page leaves the Spaces as they were", async () => {
@@ -575,10 +656,10 @@ test("a swipe before the first Space shows the library, without telling the app"
   expect(position()).toBe("translateX(100%)");
   expect(library()?.hasAttribute("inert")).toBe(false);
   expect(document.querySelectorAll(".space-page:not([inert])")).toHaveLength(0);
-  expect(screen.getByRole("navigation").style.getPropertyValue("--space")).toBe(
-    "var(--background)",
-  );
-  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole("navigation").style.getPropertyValue("--tinted")).toBe("0");
+  expect(spaceCommands()).toEqual([]);
+  // The app widens the sidebar for the library, the card resting beside it.
+  expect(commands().at(-1)).toBe("/command/library/show");
 });
 
 test("the Library button slides to the library, like a swipe", async () => {
@@ -590,7 +671,7 @@ test("the Library button slides to the library, like a swipe", async () => {
   await frame();
   expect(position()).toBe("translateX(100%)");
   expect(library()?.hasAttribute("inert")).toBe(false);
-  expect(fetch).not.toHaveBeenCalled();
+  expect(spaceCommands()).toEqual([]);
 });
 
 test("the library reopens a closed tab in the displayed Space and slides back to it", async () => {
@@ -600,13 +681,14 @@ test("the library reopens a closed tab in the displayed Space and slides back to
   swipe(10, 20, 50);
   await frame();
   fireEvent.click(within(library() as HTMLElement).getByRole("button", { name: "Gone" }));
-  expect(fetch).toHaveBeenLastCalledWith("/command/reopen/0", { method: "POST" });
+  expect(fetch).toHaveBeenCalledWith("/command/reopen/0", { method: "POST" });
   await frame();
   expect(position()).toBe("translateX(0%)");
   expect(library()?.hasAttribute("inert")).toBe(true);
+  expect(commands().at(-1)).toBe("/command/card/offset/0");
 });
 
-test("asks the app to paint the window with the displayed Space's color", () => {
+test("asks the app to paint the window with the displayed Space's color, blending on the way", async () => {
   const root = document.documentElement.style;
   root.setProperty("--window-end", "#1b0e1f");
   root.setProperty("--panel", "#1e1a28");
@@ -615,20 +697,31 @@ test("asks the app to paint the window with the displayed Space's color", () => 
   try {
     render(<App />);
     receive({});
+    const blue = { color: COLORS.blue, strength: 1 };
+    const green = { color: COLORS.green, strength: 1 };
     expect(fetch).toHaveBeenLastCalledWith(
-      `/command/${windowColors(COLORS.blue, "#1b0e1f", "#1e1a28")}`,
+      `/command/${windowColors(blue, COLORS.blue, "#1b0e1f", "#1e1a28")}`,
       { method: "POST" },
     );
     receive({}, 3, favorites, 14);
+    // The window's color blends on the way, an empty Space's card keeps the displayed Space's.
+    expect(commands()).toContain(
+      `/command/${windowColors(blue, COLORS.green, "#1b0e1f", "#1e1a28")}`,
+    );
+    await act(async () => {
+      for (let i = 0; i < 60; i++) await new Promise(requestAnimationFrame);
+    });
+    const blends = commands().filter((url) => url.includes("/window/colors/"));
+    expect(blends.length).toBeGreaterThan(3);
     expect(fetch).toHaveBeenLastCalledWith(
-      `/command/${windowColors(COLORS.green, "#1b0e1f", "#1e1a28")}`,
+      `/command/${windowColors(green, COLORS.green, "#1b0e1f", "#1e1a28")}`,
       { method: "POST" },
     );
     // A change of appearance changes the colors they derive from.
     root.setProperty("--window-end", "#e7e2f1");
     act(() => scheme.addEventListener.mock.lastCall?.[1]());
     expect(fetch).toHaveBeenLastCalledWith(
-      `/command/${windowColors(COLORS.green, "#e7e2f1", "#1e1a28")}`,
+      `/command/${windowColors(green, COLORS.green, "#e7e2f1", "#1e1a28")}`,
       { method: "POST" },
     );
   } finally {

@@ -46,23 +46,28 @@ body {
   background: var(--background);
 }
 
-/* Only the tabs scroll: the toolbar, url and favorites stay under the window buttons. Its view is
-   as wide (SIDEBAR_WIDTH in shell.rs). */
+/* Only the tabs scroll: the toolbar, url and favorites stay under the window buttons. It is as wide
+   as its view, which the app widens for the library (SIDEBAR_WIDTH and LIBRARY_WIDTH in shell.rs). */
 .sidebar {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  width: 260px;
+  width: 100vw;
   height: 100vh;
   /* The rows end 12 px from the page's card, which sits 9 px from the sidebar. */
   padding: 0 3px 8px 7px;
   color: var(--text);
   user-select: none;
-  --tint: color-mix(in srgb, var(--space, var(--background)) 12%, var(--background));
+  /* The Space's color, at a strength from 0 to 1 (tint in pager.ts). */
+  --tint: color-mix(
+    in srgb,
+    var(--space, var(--background)) calc(var(--tinted, 1) * 12%),
+    var(--background)
+  );
 }
 
 /* Behind the sidebar, tinted by the displayed Space. It ends on the color the app paints the rest of
-   the window with (windowColors in bridge.ts), without a seam. */
+   the window with (windowColors in bridge.ts), without a seam, blending as they do on a swipe. */
 .sidebar::before {
   content: "";
   position: fixed;
@@ -70,8 +75,16 @@ body {
   z-index: -1;
   background: linear-gradient(
     to right,
-    color-mix(in srgb, var(--space, var(--window-start)) 14%, var(--window-start)),
-    color-mix(in srgb, var(--space, var(--window-end)) 14%, var(--window-end))
+    color-mix(
+      in srgb,
+      var(--space, var(--window-start)) calc(var(--tinted, 1) * 14%),
+      var(--window-start)
+    ),
+    color-mix(
+      in srgb,
+      var(--space, var(--window-end)) calc(var(--tinted, 1) * 14%),
+      var(--window-end)
+    )
   );
 }
 
@@ -799,7 +812,7 @@ button.folder:hover {
 }
 
 :root[data-undocked] .sidebar > * {
-  transform: translateX(-260px);
+  transform: translateX(-100vw);
 }
 
 :root[data-instant] .sidebar > * {
@@ -808,6 +821,46 @@ button.folder:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar > * {
+    transition: none;
+  }
+}
+
+/* Pulled out at the sidebar's right edge, at the pointer's height, past the last Space; armed, it
+   grows and turns white (Pager in pager.ts moves it). */
+.new-bubble {
+  position: fixed;
+  top: -15px;
+  right: 6px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.new-bubble span {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 30px;
+  height: 30px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-size: 18px;
+  line-height: 1;
+  transition:
+    transform 100ms ease-out,
+    background-color 100ms ease-out,
+    color 100ms ease-out;
+}
+
+.new-bubble[data-armed] span {
+  transform: scale(1.15);
+  background: white;
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-bubble span {
     transition: none;
   }
 }

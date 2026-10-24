@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { COLORS, type Space, send } from "./bridge";
+import { COLORS, mix, type Space, send, type Tint, WindowPainter } from "./bridge";
 
 // The Spaces' pages sit side by side and the sidebar shows one at a time. A position counts in
 // pages: 0 shows the first Space, 0.5 half of it and half of the second. One more page after the
@@ -20,6 +20,14 @@ const RESISTANCE = 0.5;
 export const SPRING_RATE = 0.02;
 // Closer and slower than this, the spring has settled.
 const SETTLED = 0.001;
+// How far the fingers pull past the last Space, in pages before resisting, to arm the "+" that
+// opens the page creating a Space.
+export const ARM_PULL = 0.15;
+// How much wider than the sidebar the library is, in points (LIBRARY_WIDTH in app/src/shell.rs):
+// the page's card moves right as much on the way to it.
+export const LIBRARY_SHIFT = 180;
+// The share of the way to the library over which the first Space's page fades out.
+const LIBRARY_FADE = 0.5;
 
 export type Sample = { time: number; position: number };
 
@@ -30,9 +38,25 @@ export function follow(from: number, distance: number, width: number): number {
 }
 
 // A swipe goes at most one page from where it began, and not past the library before the first
-// Space or the page after the last of the `count` Spaces.
+// Space or the last of the `count` Spaces: past it, the fingers pull out a "+" instead, which
+// leads to the page after it, creating a Space.
 export function bounds(start: number, count: number): [number, number] {
-  return [Math.max(-1, start - 1), Math.min(count, start + 1)];
+  return [Math.max(-1, start - 1), start === count ? count : Math.min(count - 1, start + 1)];
+}
+
+// Whether the fingers pulled far enough past the last Space to open the page creating one.
+export function armed(pull: number): boolean {
+  return pull >= ARM_PULL;
+}
+
+// How far towards the library a position is, from 0 on the first Space to 1 on the library.
+export function libraryProgress(position: number): number {
+  return Math.min(1, Math.max(0, -position));
+}
+
+// The first Space's page fades out on the way to the library, and back in on the way back.
+export function libraryFade(position: number): number {
+  return Math.max(0, 1 - libraryProgress(position) / LIBRARY_FADE);
 }
 
 // Past its bounds, a position resists more and more and never goes past OVERSHOOT.
@@ -74,40 +98,53 @@ export function spring(from: number, to: number, speed: number, elapsed: number)
   return { position: settled ? to : position, settled };
 }
 
-// The sidebar's own color, which pages that are not a Space's leave untinted.
-export const NEUTRAL = "var(--background)";
-
-// The color between the two pages a position shows, to tint the sidebar with.
-export function tint(spaces: Space[], position: number): string | undefined {
+// The tint between the two pages a position shows: a page that is no Space's has no color, and
+// the other page's color fades towards none.
+export function tint(spaces: Space[], position: number): Tint | undefined {
   if (spaces.length === 0) return undefined;
-  const color = (page: number) => (spaces[page] ? COLORS[spaces[page].color] : NEUTRAL);
   const clamped = Math.min(spaces.length, Math.max(-1, position));
   const left = Math.floor(clamped);
-  const share = Math.round((clamped - left) * 100);
+  const share = clamped - left;
+  const color = (page: number) => spaces[page] && COLORS[spaces[page].color];
   const [from, to] = [color(left), color(left + 1)];
-  return share === 0 || from === to ? from : `color-mix(in srgb, ${from}, ${to} ${share}%)`;
+  return {
+    color: from && to ? mix(to, from, share * 100) : (from ?? to ?? COLORS.gray),
+    strength: (from ? 1 - share : 0) + (to ? share : 0),
+  };
 }
 
 // A trackpad swipe, from touch to lift, sent by the app as `arbalette:swipe` events (Gesture in
 // app/src/swipe.rs): `dx` is how far the content would scroll, in points.
-export type Gesture = { phase: "begin" | "move" | "end"; dx: number; time: number };
+// `y` is where the pointer is, in points from the window's top.
+export type Gesture = { phase: "begin" | "move" | "end"; dx: number; y: number; time: number };
 
 // Moves the pages with the fingers, then lets a spring take them to a page, which the app then
 // displays if it is a Space's. Pages move with a transform, frame by frame, without rendering. The
 // displayed Space changing otherwise, with a shortcut or the switcher, slides its page in.
+//
+// The sidebar beside the page also moves what the app draws around it, once per frame at most:
+// the window's colors follow the tint, and the page's card moves right on the way to the library,
+// which the app widens once the pages rest on it.
 class Pager {
   spaces: Space[] = [];
   displayed = 0;
   sidebar: HTMLElement | null = null;
   track: HTMLElement | null = null;
+  bubble: HTMLElement | null = null;
   // Told the page the pages come to rest on.
   onSettle: (page: number) => void = () => {};
+  private readonly native = location.hash === "";
+  private readonly painter = new WindowPainter();
+  private card = "card/offset/0";
   // The page the pages are on, or going to.
   private page = 0;
   private position = 0;
   private started = false;
   private swipe: { start: number; from: number; distance: number; width: number } | null = null;
   private samples: Sample[] = [];
+  // How far the fingers pull past the last Space, in pages, and where the pointer is.
+  private pull = 0;
+  private y = 0;
   private motion: { from: number; to: number; speed: number; start?: number } | null = null;
   private frame = 0;
 
@@ -141,7 +178,7 @@ class Pager {
     this.settle(page, 0);
   }
 
-  gesture({ phase, dx, time }: Gesture) {
+  gesture({ phase, dx, y, time }: Gesture) {
     if (phase === "begin") {
       this.motion = null;
       const width = this.track?.clientWidth || 1;
@@ -157,15 +194,21 @@ class Pager {
       ...this.samples.filter((s) => s.time >= time - FLICK_WINDOW_MS),
       { time, position: raw },
     ];
-    this.position = resist(raw, bounds(swipe.start, this.spaces.length));
+    const count = this.spaces.length;
+    const [min, max] = bounds(swipe.start, count);
+    this.position = resist(raw, [min, max]);
+    this.pull = swipe.start === count - 1 ? Math.max(0, raw - max) : 0;
+    this.y = y;
     if (phase === "end") this.release(swipe.start, time);
     this.schedule();
   }
 
   private release(start: number, time: number) {
     this.swipe = null;
+    const count = this.spaces.length;
     const speed = velocity(this.samples, time);
-    const page = target(this.position, speed, start, this.spaces.length);
+    const page = armed(this.pull) ? count : target(this.position, speed, start, count);
+    this.pull = 0;
     const toward = Math.sign(speed) === Math.sign(page - this.position);
     this.settle(page, toward ? speed : 0);
     const space = this.spaces[page];
@@ -211,36 +254,75 @@ class Pager {
   render() {
     if (this.track) this.track.style.transform = `translateX(${-this.position * 100}%)`;
     const color = tint(this.spaces, this.position);
-    if (this.sidebar && color) this.sidebar.style.setProperty("--space", color);
+    if (this.sidebar && color) {
+      this.sidebar.style.setProperty("--space", color.color);
+      this.sidebar.style.setProperty("--tinted", String(color.strength));
+    }
+    const first = this.spaces[0];
+    const firstPage = first && this.track?.querySelector<HTMLElement>(`[data-space="${first.id}"]`);
+    if (firstPage) {
+      const fade = libraryFade(this.position);
+      firstPage.style.opacity = fade < 1 ? String(fade) : "";
+    }
+    if (this.bubble) {
+      const reach = Math.min(1, this.pull / ARM_PULL);
+      this.bubble.style.opacity = String(reach);
+      this.bubble.style.transform = `translate(${(1 - reach) * 100}%, ${this.y}px)`;
+      this.bubble.toggleAttribute("data-armed", armed(this.pull));
+    }
+    const space = this.spaces[this.displayed];
+    if (this.native && color && space) {
+      this.painter.paint(color, COLORS[space.color]);
+      this.moveCard();
+    }
+  }
+
+  // The card follows the pages towards the library, and rests beside it once they do.
+  private moveCard() {
+    const resting = !this.motion && !this.swipe && this.position === -1;
+    const offset = Math.round(libraryProgress(this.position) * LIBRARY_SHIFT);
+    const card = resting ? "library/show" : `card/offset/${offset}`;
+    if (card === this.card) return;
+    this.card = card;
+    send(card);
+  }
+
+  start() {
+    this.painter.start();
   }
 
   stop() {
     cancelAnimationFrame(this.frame);
     this.frame = 0;
+    this.painter.stop();
   }
 }
 
-// The sidebar and the track holding the pages, to give to their elements, the page the pages rest
-// on, and `go` to slide to a page, for the Spaces in sidebar order and the displayed one's index.
+// The sidebar, the track holding the pages and the "+" pulled past the last Space, to give to
+// their elements, the page the pages rest on, and `go` to slide to a page, for the Spaces in
+// sidebar order and the displayed one's index.
 export function usePager(spaces: Space[], displayed: number) {
   const [pager] = useState(() => new Pager());
   const [settled, setSettled] = useState(displayed);
   pager.onSettle = setSettled;
   const sidebar = useRef<HTMLElement>(null);
   const track = useRef<HTMLDivElement>(null);
+  const bubble = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     pager.sidebar = sidebar.current;
     pager.track = track.current;
+    pager.bubble = bubble.current;
     pager.spaces = spaces;
     pager.show(displayed);
   });
   useEffect(() => {
     const listener = (event: Event) => pager.gesture((event as CustomEvent<Gesture>).detail);
     addEventListener("arbalette:swipe", listener);
+    pager.start();
     return () => {
       removeEventListener("arbalette:swipe", listener);
       pager.stop();
     };
   }, [pager]);
-  return { sidebar, track, settled, go: (page: number) => pager.go(page) };
+  return { sidebar, track, bubble, settled, go: (page: number) => pager.go(page) };
 }
