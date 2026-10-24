@@ -24,7 +24,14 @@ pub struct Profile {
     #[serde(default)]
     pub color: Color,
     pub favorites: NodeId,
+    /// The user dismissed the box inviting to drag tabs into the empty favorites; adding a
+    /// favorite brings it back for when they are empty again.
+    #[serde(default)]
+    pub favorites_hint_hidden: bool,
 }
+
+/// How many favorites a profile holds at most: the grid keeps 3 rows of 4 tiles.
+pub const MAX_FAVORITES: usize = 12;
 
 /// The colors a profile or a Space can take: a small palette, which the UI draws (ui/src/bridge.ts).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +120,8 @@ pub enum Error {
     LastSpace,
     /// A split joins two different tabs, neither a favorite nor already in a split.
     NotSplittable,
+    /// A profile holds at most `MAX_FAVORITES` favorites.
+    FavoritesFull,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -223,6 +232,7 @@ impl Sidebar {
             name: name.to_string(),
             color: Color::default(),
             favorites,
+            favorites_hint_hidden: false,
         });
         id
     }
@@ -367,6 +377,7 @@ impl Sidebar {
     /// Adds a tab at the end of `parent`; a pinned tab saves its url, as when it is pinned.
     pub fn add_tab(&mut self, parent: NodeId, url: &str, title: &str) -> Result<NodeId, Error> {
         self.check_container(parent)?;
+        self.check_room(parent)?;
         let tab = Tab {
             url: url.to_string(),
             title: title.to_string(),
@@ -374,6 +385,7 @@ impl Sidebar {
             opener: None,
             saved_url: self.is_pinned(parent).then(|| url.to_string()),
         };
+        self.show_favorites_hint(parent);
         Ok(self.insert(Some(parent), NodeKind::Tab(tab)))
     }
 
@@ -418,7 +430,17 @@ impl Sidebar {
         if !self.is_tab(id) && self.profiles.iter().any(|p| p.favorites == parent) {
             return Err(Error::NotATab);
         }
+        if parent != old_parent {
+            self.check_room(parent)?;
+        }
         self.place(id, old_parent, parent, index);
+        Ok(())
+    }
+
+    /// Hides the box inviting to drag tabs into the empty favorites of the Space's profile.
+    pub fn hide_favorites_hint(&mut self, space: SpaceId) -> Result<(), Error> {
+        let profile = self.space(space)?.profile;
+        self.profile_mut(profile)?.favorites_hint_hidden = true;
         Ok(())
     }
 
@@ -635,6 +657,7 @@ impl Sidebar {
         let children = self.children_mut(to);
         children.insert(index.min(children.len()), id);
         self.nodes.get_mut(&id).expect("a known node").parent = Some(to);
+        self.show_favorites_hint(to);
         self.dissolve(from);
         let pinned = self.is_pinned(id);
         if pinned != was_pinned {
@@ -675,6 +698,22 @@ impl Sidebar {
         let index = siblings.iter().position(|&id| id == split);
         let index = index.expect("a child of its parent");
         siblings.splice(index..=index, node.children);
+    }
+
+    /// Refuses a tab more into favorites already full.
+    fn check_room(&self, parent: NodeId) -> Result<(), Error> {
+        let favorites = self.profiles.iter().any(|p| p.favorites == parent);
+        if favorites && self.nodes[&parent].children.len() >= MAX_FAVORITES {
+            return Err(Error::FavoritesFull);
+        }
+        Ok(())
+    }
+
+    /// A favorite added to a profile brings back its hint for when its favorites are empty again.
+    fn show_favorites_hint(&mut self, parent: NodeId) {
+        if let Some(profile) = self.profiles.iter_mut().find(|p| p.favorites == parent) {
+            profile.favorites_hint_hidden = false;
+        }
     }
 
     fn is_split(&self, id: NodeId) -> bool {
@@ -900,6 +939,56 @@ mod tests {
         assert!(children(&sidebar, home.today).is_empty());
         assert_eq!(children(&sidebar, favorites), [tab]);
         assert_eq!(sidebar.node(tab).unwrap().parent, Some(favorites));
+    }
+
+    #[test]
+    fn refuses_a_favorite_beyond_the_limit_but_reorders_them() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        for _ in 0..MAX_FAVORITES {
+            sidebar.add_tab(favorites, "https://a.test/", "a").unwrap();
+        }
+        let tab = sidebar.open_tab(home.id, "https://b.test/").unwrap();
+        assert_eq!(
+            sidebar.move_node(tab, favorites, 0),
+            Err(Error::FavoritesFull)
+        );
+        assert_eq!(children(&sidebar, home.today), [tab]);
+        assert_eq!(
+            sidebar.add_tab(favorites, "https://c.test/", "c"),
+            Err(Error::FavoritesFull)
+        );
+        let first = children(&sidebar, favorites)[0];
+        sidebar.move_node(first, favorites, usize::MAX).unwrap();
+        assert_eq!(children(&sidebar, favorites).last(), Some(&first));
+        assert_eq!(children(&sidebar, favorites).len(), MAX_FAVORITES);
+    }
+
+    #[test]
+    fn hides_the_favorites_hint_until_a_favorite_is_added() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        sidebar.hide_favorites_hint(home.id).unwrap();
+        assert!(sidebar.profiles()[0].favorites_hint_hidden);
+        let tab = sidebar.open_tab(home.id, "https://a.test/").unwrap();
+        sidebar.move_node(tab, favorites, 0).unwrap();
+        assert!(!sidebar.profiles()[0].favorites_hint_hidden);
+        sidebar.hide_favorites_hint(home.id).unwrap();
+        sidebar.add_tab(favorites, "https://b.test/", "b").unwrap();
+        assert!(!sidebar.profiles()[0].favorites_hint_hidden);
+        assert_eq!(
+            sidebar.hide_favorites_hint(SpaceId(999)),
+            Err(Error::UnknownSpace)
+        );
+    }
+
+    #[test]
+    fn a_profile_saved_without_the_hint_flag_shows_the_hint() {
+        let json = r#"{ "id": 1, "name": "Default", "favorites": 2 }"#;
+        let profile: Profile = serde_json::from_str(json).unwrap();
+        assert!(!profile.favorites_hint_hidden);
     }
 
     #[test]
