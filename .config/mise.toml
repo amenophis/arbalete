@@ -54,3 +54,12 @@ run = [
 description = "Build and run the app"
 depends = ["app"]
 run = "target/bundle/arbalette.app/Contents/MacOS/arbalette"
+
+[tasks.bench]
+description = "Measure the performance prototype (docs/PLAN.md, phase 0)"
+depends = ["app"]
+run = [
+  "rm -rf target/bench",
+  "cargo run -q -p arbalette-core --example bench-session -- target/bench",
+  "node perf/measure.mjs target/bench",
+]
