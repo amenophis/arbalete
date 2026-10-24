@@ -132,8 +132,8 @@ test("the spring starts at the release speed", () => {
 });
 
 const spaces: Space[] = [
-  { id: 1, title: "Home", emoji: null, color: "blue" },
-  { id: 2, title: "Work", emoji: null, color: "red" },
+  { id: 1, title: "Home", emoji: null, color: "blue", profile: 1, pinned: [] },
+  { id: 2, title: "Work", emoji: null, color: "red", profile: 1, pinned: [] },
 ];
 
 test("the tint blends the colors of the two Spaces in view", () => {

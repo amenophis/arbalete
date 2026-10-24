@@ -74,7 +74,7 @@ export function Spaces({
 type Field = "emoji" | "name" | "color";
 
 // The emoji field keeps only its first character; emptying it brings the initial back.
-function SpaceEditor({ space, ref }: { space: Space; ref: Ref<HTMLDivElement> }) {
+export function SpaceEditor({ space, ref }: { space: Space; ref?: Ref<HTMLDivElement> }) {
   const { id, title, color } = space;
   const emoji = space.emoji ?? "";
   return (

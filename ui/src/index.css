@@ -1297,3 +1297,211 @@ button.folder:hover {
   background: none;
   opacity: 0.75;
 }
+
+/* Manage Spaces: a column card per Space, side by side, scrolling sideways. */
+.space-cards {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-height: 0;
+  margin: 0;
+  padding: 0 0 6px;
+  overflow-x: auto;
+  overscroll-behavior: none;
+  list-style: none;
+}
+
+.space-card {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 184px;
+  padding: 10px 8px 6px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-color) 22%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card-color) 30%, transparent);
+}
+
+/* Its buttons are flat until hovered. */
+.space-card :where(button) {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.space-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+}
+
+.space-card-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+}
+
+.space-card-name {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.space-card-header input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--hover);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  outline: 2px solid var(--accent);
+}
+
+.space-card-edit,
+.space-card-handle,
+.space-card-more {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  opacity: 0.7;
+}
+
+.space-card-edit:hover,
+.space-card-edit[aria-expanded="true"],
+.space-card-handle:hover,
+.space-card-more:hover {
+  background: var(--hover);
+  opacity: 1;
+}
+
+.space-card-profile {
+  align-self: flex-start;
+  max-width: 100%;
+  height: 20px;
+  padding: 0 9px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--hover);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.space-card-profile:hover {
+  background: var(--active);
+}
+
+/* In a card, the Space's editor sits under its name, not above the footer. */
+.space-card .space-editor {
+  position: static;
+  padding: 0;
+  background: none;
+}
+
+.space-card .swatches {
+  flex-wrap: wrap;
+  padding: 6px 2px 0;
+}
+
+.space-card-pinned {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.glance {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--active) 60%, transparent);
+}
+
+.library .space-card .glance svg {
+  flex: none;
+}
+
+.space-card-footer {
+  display: flex;
+  justify-content: space-between;
+}
+
+.space-card-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+/* A round accent "+" after the last card. */
+.space-add {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  padding: 0 4px;
+}
+
+.library .space-add button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+}
+
+:root .library .space-add button:hover {
+  filter: brightness(1.1);
+}
+
+/* Where a dragged card would land, between two cards. */
+.space-drop-line {
+  display: none;
+  position: fixed;
+  z-index: 10;
+  width: 1.5px;
+  border-radius: 1px;
+  background: var(--drop-line);
+  pointer-events: none;
+}
+
+/* A small ring at the line's top end. */
+.space-drop-line::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: -2.75px;
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--drop-line);
+  border-radius: 50%;
+}
