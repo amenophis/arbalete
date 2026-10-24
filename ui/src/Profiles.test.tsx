@@ -88,7 +88,7 @@ test("shows the color of each profile and picks another", () => {
 test("edits the name of the profile the app has just created, then stays open", () => {
   render(<Profiles profiles={profiles} open={false} onOpen={onOpen} />);
   act(() => {
-    dispatchEvent(new CustomEvent("arbalette:rename-profile", { detail: 7 }));
+    dispatchEvent(new CustomEvent("arbalete:rename-profile", { detail: 7 }));
   });
   const input = names()[1];
   expect(document.activeElement).toBe(input);
@@ -99,7 +99,7 @@ test("edits the name of the profile the app has just created, then stays open", 
 test("opens the list to edit the name of a profile the app has just created", () => {
   render(<Profiles profiles={profiles} open={false} onOpen={onOpen} />);
   act(() => {
-    dispatchEvent(new CustomEvent("arbalette:rename-profile", { detail: 1 }));
+    dispatchEvent(new CustomEvent("arbalete:rename-profile", { detail: 1 }));
   });
   expect(document.activeElement).toBe(names()[0]);
 });

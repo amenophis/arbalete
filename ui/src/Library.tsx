@@ -43,7 +43,7 @@ export function Library({
   const [section, setSection] = useState<Section>("spaces");
   const [query, setQuery] = useState("");
   // The Space menu's Manage Spaces opens the library on its Spaces.
-  useAppEvent("arbalette:library", () => pick("spaces"));
+  useAppEvent("arbalete:library", () => pick("spaces"));
   const pick = (next: Section) => {
     setSection(next);
     setQuery("");

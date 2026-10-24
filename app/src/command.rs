@@ -1,7 +1,7 @@
-//! Commands the UI sends to the app, as `https://arbalette.ui/command/<name>` requests.
+//! Commands the UI sends to the app, as `https://arbalete.ui/command/<name>` requests.
 
-use arbalette_core::import::Choice;
-use arbalette_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
+use arbalete_core::import::Choice;
+use arbalete_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -128,7 +128,7 @@ pub enum Command {
     CloseImport,
     /// Imports browser profiles: `import/run/<percent-encoded JSON array of choices>`.
     Import(Vec<Choice>),
-    /// Opens the System Settings pane where the user gives Arbalette Full Disk Access:
+    /// Opens the System Settings pane where the user gives Arbalete Full Disk Access:
     /// `import/full-disk-access`.
     OpenFullDiskAccess,
     /// Paints the window around the sidebar and the card, and an empty Space's card, with colors
@@ -414,7 +414,7 @@ fn percent_decode(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{Command, Target};
-    use arbalette_core::sidebar::Color;
+    use arbalete_core::sidebar::Color;
 
     #[test]
     fn parses_known_commands() {

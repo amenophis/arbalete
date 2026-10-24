@@ -29,7 +29,7 @@ const sources: Sources = {
 
 function receive(detail: Sources) {
   act(() => {
-    dispatchEvent(new CustomEvent("arbalette:sources", { detail }));
+    dispatchEvent(new CustomEvent("arbalete:sources", { detail }));
   });
 }
 

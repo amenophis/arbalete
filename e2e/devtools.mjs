@@ -8,24 +8,24 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const APP = resolve("target/bundle/arbalette.app/Contents/MacOS/arbalette");
+const APP = resolve("target/bundle/arbalete.app/Contents/MacOS/arbalete");
 const PORT = 9333;
 const TIMEOUT = 10_000;
 
-export const SIDEBAR = "https://arbalette.ui/index.html";
+export const SIDEBAR = "https://arbalete.ui/index.html";
 export const OVERLAY = `${SIDEBAR}#overlay`;
 export const REVEAL = `${SIDEBAR}#reveal`;
 export const IMPORT = `${SIDEBAR}#import`;
 
 // Starts the app on the session in `dataDir`, offering to import the browsers found in `home` on
 // a first launch; the caller kills it. By default a home without browsers, never the machine's.
-export function launch(dataDir, home = join(tmpdir(), "arbalette-no-home")) {
+export function launch(dataDir, home = join(tmpdir(), "arbalete-no-home")) {
   return spawn(APP, [], {
     env: {
       ...process.env,
-      ARBALETTE_DATA_DIR: dataDir,
-      ARBALETTE_HOME: home,
-      ARBALETTE_DEBUG_PORT: String(PORT),
+      ARBALETE_DATA_DIR: dataDir,
+      ARBALETE_HOME: home,
+      ARBALETE_DEBUG_PORT: String(PORT),
     },
     stdio: "ignore",
     // Not the repository, which may sit in Documents: macOS asks before an app reads it.

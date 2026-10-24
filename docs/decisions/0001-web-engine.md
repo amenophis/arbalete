@@ -5,7 +5,7 @@
 
 ## Context
 
-Arbalette needs, on macOS first and then on Linux and Windows:
+Arbalete needs, on macOS first and then on Linux and Windows:
 
 1. **One window holding several pages**: the sidebar, the active tab, Split View, overlays above the page
    (Command Bar, Peek).
@@ -51,9 +51,9 @@ extensions from the Chrome Web Store: uBlock Origin Lite, Bitwarden, 1Password a
 | `tabs.create`, `tabs.update` | ❌ "No current window" |
 | `action.openPopup` | ❌ |
 
-### Popups hosted by Arbalette, with a shim
+### Popups hosted by Arbalete, with a shim
 
-The popup page (`chrome-extension://<id>/<popup>`) is loaded in an Alloy view owned by Arbalette. Before it loads,
+The popup page (`chrome-extension://<id>/<popup>`) is loaded in an Alloy view owned by Arbalete. Before it loads,
 a script injected through the DevTools protocol (`Page.addScriptToEvaluateOnNewDocument`) makes
 `chrome.tabs.query`, `chrome.windows.getCurrent` and `chrome.windows.getLastFocused` answer with the active tab.
 
@@ -74,15 +74,15 @@ a script injected through the DevTools protocol (`Page.addScriptToEvaluateOnNewD
 
 ## Decision
 
-**Arbalette embeds Chromium through CEF, driven from Rust with the `cef` crate, with Alloy-style browsers**, in CEF
+**Arbalete embeds Chromium through CEF, driven from Rust with the `cef` crate, with Alloy-style browsers**, in CEF
 Views windows: one window holds the sidebar, the tabs and the overlays.
 
 Chrome extensions run in Alloy style, and **a compatibility layer in Rust** fills the gaps through the DevTools
 protocol:
 
-- Arbalette shows extension actions in its own UI and hosts their popups.
+- Arbalete shows extension actions in its own UI and hosts their popups.
 - A shim injected into extension popups and service workers answers `tabs.query` and `windows.*` with
-  Arbalette's state, and forwards `tabs.create` and `tabs.update` to Arbalette.
+  Arbalete's state, and forwards `tabs.create` and `tabs.update` to Arbalete.
 
 If the open questions below cannot be resolved, the fallback is a maintained CEF patch allowing several
 Chrome-style views per window.
@@ -95,7 +95,7 @@ Chrome-style views per window.
 - All engine code stays in the `engine` module.
 - Two traps of the `cef` crate, found during the spike: unimplemented callbacks return 0, which means
   "cancel" in `on_before_resource_load` and "no" in window options (`can_resize`, `can_minimize`…), and
-  a preferred size with a zero dimension is ignored. Every callback Arbalette relies on is implemented explicitly.
+  a preferred size with a zero dimension is ignored. Every callback Arbalete relies on is implemented explicitly.
 
 ## Open questions
 
@@ -107,6 +107,6 @@ To answer before the compatibility layer is built (phase 4), in this order:
    extension whose content script reports `sender.tab.id`.
 3. **Installing from the Chrome Web Store** when every browser is Alloy style. Lead: a dedicated Chrome-style
    window for the Web Store.
-4. **Forwarding `tabs.create` and `tabs.update`** to Arbalette.
+4. **Forwarding `tabs.create` and `tabs.update`** to Arbalete.
 5. **1Password**: find why its popup stays blank.
 6. **Several Alloy views and an overlay in one CEF Views window**: allowed by CEF, not yet built.

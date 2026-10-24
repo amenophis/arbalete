@@ -1,4 +1,4 @@
-# Arbalette
+# Arbalete
 
 A cross-platform browser inspired by Arc: vertical sidebar, Spaces, profiles and link routing.
 Built with Rust and React on Chromium.
@@ -38,13 +38,13 @@ and name it in `.config/mise.local.toml`, which is not committed:
 
 ```toml
 [env]
-ARBALETTE_SIGN_IDENTITY = "Arbalette Dev"
+ARBALETE_SIGN_IDENTITY = "Arbalete Dev"
 ```
 
 ## Logo
 
 The app icon is [assets/icon.svg](assets/icon.svg), with a single-color version in
-[assets/icon-mono.svg](assets/icon-mono.svg). The macOS icon, `app/resources/mac/arbalette.icns`, is rendered
+[assets/icon-mono.svg](assets/icon-mono.svg). The macOS icon, `app/resources/mac/arbalete.icns`, is rendered
 from it (16 to 1024 px) with `iconutil`. The proposals it was chosen from are in [assets/logo-history](assets/logo-history).
 
 ## Contributing
@@ -56,5 +56,5 @@ To report a security issue, see [SECURITY.md](SECURITY.md).
 
 [Mozilla Public License 2.0](LICENSE).
 
-Arbalette is an independent project, not affiliated with or endorsed by The Browser Company.
+Arbalete is an independent project, not affiliated with or endorsed by The Browser Company.
 Arc is a trademark of its owner.

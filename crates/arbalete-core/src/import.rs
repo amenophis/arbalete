@@ -1,4 +1,4 @@
-//! Turns other browsers' data into Arbalette's.
+//! Turns other browsers' data into Arbalete's.
 
 pub mod arc;
 pub mod bookmarks;
@@ -82,7 +82,7 @@ pub fn read(browsers: &[Browser], choices: &[Choice]) -> Vec<Source> {
 
 /// Adds the browser profiles read to `sidebar`: Arc's Spaces and favorites, other browsers'
 /// bookmarks into the profile's first Space. Every profile imported into has a Space, even when
-/// its browser's data cannot be read, so that it shows. Sources going into an Arbalette profile
+/// its browser's data cannot be read, so that it shows. Sources going into an Arbalete profile
 /// the sidebar no longer has are skipped. Quick: it only changes the sidebar in memory.
 pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
     let mut imported = Imported::default();
@@ -218,7 +218,7 @@ impl Copy {
     pub fn of(database: &Path) -> io::Result<Option<Self>> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("arbalette-import-{}-{n}", process::id()));
+        let dir = env::temp_dir().join(format!("arbalete-import-{}-{n}", process::id()));
         fs::create_dir_all(&dir)?;
         let copy = Self(dir);
         match fs::copy(database, copy.file()) {
@@ -253,7 +253,7 @@ pub(crate) struct TestDir(pub std::path::PathBuf);
 impl TestDir {
     /// `name` keeps tests running in parallel apart.
     pub fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("arbalette-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("arbalete-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
@@ -416,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_unknown_browser_profiles_and_arbalette_profiles() {
+    fn skips_unknown_browser_profiles_and_arbalete_profiles() {
         let chrome = TestDir::new("import-unknown");
         let browsers = browsers(&chrome);
         let mut sidebar = Sidebar::default();

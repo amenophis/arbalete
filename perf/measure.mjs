@@ -66,14 +66,14 @@ async function switchTab() {
 // times the update until the sidebar is laid out again.
 async function stateUpdate() {
   const state = await new Promise((resolve) => {
-    addEventListener("arbalette:state", (event) => resolve(event.detail), { once: true });
+    addEventListener("arbalete:state", (event) => resolve(event.detail), { once: true });
     fetch("/command/ready", { method: "POST" });
   });
   const title = `Renamed ${Math.random()}`;
   const page = state.pages.find((page) => page.space === state.space);
   page.today[0] = { ...page.today[0], title };
   const start = performance.now();
-  dispatchEvent(new CustomEvent("arbalette:state", { detail: state }));
+  dispatchEvent(new CustomEvent("arbalete:state", { detail: state }));
   const tabs = shown().querySelector(".today");
   // React may render during the dispatch, before an observer could see the change.
   if (!tabs.textContent.includes(title)) {
@@ -92,7 +92,7 @@ async function stateUpdate() {
 // the update until the sidebar tells the app where its rows now are (ui/src/menuTargets.ts).
 async function menuTargetsUpdate() {
   const state = await new Promise((resolve) => {
-    addEventListener("arbalette:state", (event) => resolve(event.detail), { once: true });
+    addEventListener("arbalete:state", (event) => resolve(event.detail), { once: true });
     fetch("/command/ready", { method: "POST" });
   });
   // The state brings the folder back: its targets go first.
@@ -112,7 +112,7 @@ async function menuTargetsUpdate() {
     };
   });
   const start = performance.now();
-  dispatchEvent(new CustomEvent("arbalette:state", { detail: update }));
+  dispatchEvent(new CustomEvent("arbalete:state", { detail: update }));
   await sent;
   return performance.now() - start;
 }
@@ -120,7 +120,7 @@ async function menuTargetsUpdate() {
 async function openOverlay(sidebar, overlay) {
   await overlay.eval(`(() => {
     window.shownAt = 0;
-    addEventListener("arbalette:show", () => requestAnimationFrame(() => {
+    addEventListener("arbalete:show", () => requestAnimationFrame(() => {
       if (document.activeElement?.tagName === "INPUT") shownAt = performance.timeOrigin + performance.now();
     }), { once: true });
   })()`);
@@ -153,7 +153,7 @@ function ms(time) {
 function memory() {
   const lines = execFileSync("ps", ["-A", "-o", "rss=,command="], { encoding: "utf8" }).split("\n");
   const types = new Map();
-  for (const line of lines.filter((line) => line.includes("arbalette.app/Contents"))) {
+  for (const line of lines.filter((line) => line.includes("arbalete.app/Contents"))) {
     const type = line.match(/--type=([\w-]+)/)?.[1] ?? "browser";
     const megabytes = Number.parseInt(line, 10) / 1024;
     types.set(type, (types.get(type) ?? []).concat(Math.round(megabytes)));

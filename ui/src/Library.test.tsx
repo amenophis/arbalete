@@ -77,7 +77,7 @@ test("the section picked stays picked until the Space menu's Manage Spaces asks 
   );
   expect(section("Recently Closed").getAttribute("aria-selected")).toBe("true");
   act(() => {
-    dispatchEvent(new CustomEvent("arbalette:library", { detail: null }));
+    dispatchEvent(new CustomEvent("arbalete:library", { detail: null }));
   });
   expect(section("Spaces").getAttribute("aria-selected")).toBe("true");
 });

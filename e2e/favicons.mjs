@@ -32,14 +32,14 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const helpers = `window.e2e = {
   send: (command) => fetch("/command/" + command, { method: "POST" }).then(() => {}),
   state: () => new Promise((resolve) => {
-    addEventListener("arbalette:state", (event) => resolve(event.detail), { once: true });
+    addEventListener("arbalete:state", (event) => resolve(event.detail), { once: true });
     e2e.send("ready");
   }),
   page: () => document.querySelector(".space-page:not([inert])"),
   row: (title) => [...e2e.page().querySelectorAll(".tab-row")].find((row) => row.textContent.includes(title)),
   tile: (title) => e2e.page().querySelector('.favorite[aria-label="' + title + '"]'),
   // An icon served by the app from its cache, loaded.
-  cached: (img) => !!img && img.src.startsWith("https://arbalette.ui/favicon/") && img.complete && img.naturalWidth > 0,
+  cached: (img) => !!img && img.src.startsWith("https://arbalete.ui/favicon/") && img.complete && img.naturalWidth > 0,
 }`;
 
 async function check(page, description, action, condition) {

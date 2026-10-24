@@ -1,6 +1,6 @@
 //! Reads Arc's sidebar, `StorableSidebar.json`, into Spaces and tabs.
 //!
-//! The format is described in docs/PLAN.md, section 4. Items Arbalette has no equivalent for, or
+//! The format is described in docs/PLAN.md, section 4. Items Arbalete has no equivalent for, or
 //! that are malformed, are skipped: one odd item must not stop the import of the others.
 
 use super::{Copy, chromium};
@@ -172,7 +172,7 @@ impl<'a> Import<'a> {
             let folder = self.sidebar.add_folder(parent, title).unwrap_or(parent);
             self.children(id, folder);
         } else if data.get("splitView").is_some() {
-            // Arbalette has no split views yet: their tabs take their place.
+            // Arbalete has no split views yet: their tabs take their place.
             self.children(id, parent);
         }
     }
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(
             content(&sidebar, home),
             [
-                "https://search.example.com/?q=arbalette",
+                "https://search.example.com/?q=arbalete",
                 "https://left.example.com/",
                 "https://right.example.com/",
             ]

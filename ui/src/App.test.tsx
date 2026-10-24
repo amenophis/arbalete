@@ -89,7 +89,7 @@ function receive(
     closed: [{ url: "https://example.com/gone", title: "Gone", favicon: null, closedAt: 0 }],
   };
   act(() => {
-    dispatchEvent(new CustomEvent("arbalette:state", { detail }));
+    dispatchEvent(new CustomEvent("arbalete:state", { detail }));
   });
 }
 
@@ -419,7 +419,7 @@ test("renames the folder the app has just created", () => {
   render(<App />);
   receive({});
   act(() => {
-    dispatchEvent(new CustomEvent("arbalette:rename", { detail: 8 }));
+    dispatchEvent(new CustomEvent("arbalete:rename", { detail: 8 }));
   });
   const input = screen.getByRole("textbox", { name: "Folder name" }) as HTMLInputElement;
   expect(input.value).toBe("Archive");
@@ -478,7 +478,7 @@ test("lays out the displayed Space's page between its neighbors, out of reach", 
 function swipe(dx: number, events: number, interval: number) {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(200);
   const send = (phase: string, dx: number, time: number) =>
-    dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, time } }));
+    dispatchEvent(new CustomEvent("arbalete:swipe", { detail: { phase, dx, time } }));
   act(() => {
     send("begin", dx, 0);
     for (let i = 1; i < events; i++) send("move", dx, i * interval);
@@ -535,7 +535,7 @@ test("the library resists a swipe towards a page before it", async () => {
   fetch.mockClear();
   act(() => {
     dispatchEvent(
-      new CustomEvent("arbalette:swipe", { detail: { phase: "begin", dx: 1000, time: 0 } }),
+      new CustomEvent("arbalete:swipe", { detail: { phase: "begin", dx: 1000, time: 0 } }),
     );
   });
   await frame();
@@ -544,7 +544,7 @@ test("the library resists a swipe towards a page before it", async () => {
   expect(offset).toBeLessThan(125);
   act(() => {
     dispatchEvent(
-      new CustomEvent("arbalette:swipe", { detail: { phase: "end", dx: 0, time: 500 } }),
+      new CustomEvent("arbalete:swipe", { detail: { phase: "end", dx: 0, time: 500 } }),
     );
   });
   await frame();
@@ -603,7 +603,7 @@ test("a swipe past the last Space shows the page creating one, without telling t
 function pull(dx: number, events: number, y = 0) {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(200);
   const send = (phase: string, time: number) =>
-    dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, y, time } }));
+    dispatchEvent(new CustomEvent("arbalete:swipe", { detail: { phase, dx, y, time } }));
   act(() => {
     send("begin", 0);
     for (let i = 1; i < events; i++) send("move", i * 50);
@@ -613,7 +613,7 @@ function pull(dx: number, events: number, y = 0) {
 function lift() {
   act(() => {
     dispatchEvent(
-      new CustomEvent("arbalette:swipe", { detail: { phase: "end", dx: 0, y: 0, time: 5000 } }),
+      new CustomEvent("arbalete:swipe", { detail: { phase: "end", dx: 0, y: 0, time: 5000 } }),
     );
   });
 }
@@ -741,7 +741,7 @@ test("a tab's menu moving it into a new Space slides to the page creating one", 
   render(<App />);
   receive({});
   act(() => {
-    dispatchEvent(new CustomEvent("arbalette:new-space", { detail: 3 }));
+    dispatchEvent(new CustomEvent("arbalete:new-space", { detail: 3 }));
   });
   await frame();
   expect(position()).toBe("translateX(-400%)");
@@ -789,7 +789,7 @@ test("the Space menu's Manage Spaces slides to the library", async () => {
   render(<App />);
   receive({});
   act(() => {
-    dispatchEvent(new CustomEvent("arbalette:library", { detail: null }));
+    dispatchEvent(new CustomEvent("arbalete:library", { detail: null }));
   });
   await frame();
   expect(position()).toBe("translateX(100%)");

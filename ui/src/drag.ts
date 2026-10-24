@@ -11,7 +11,7 @@ export const END = Number.MAX_SAFE_INTEGER;
 // How far the pointer moves before a press becomes a drag, so clicks still select.
 export const THRESHOLD = 4;
 
-// How many favorites a profile holds at most (MAX_FAVORITES in crates/arbalette-core/src/sidebar.rs).
+// How many favorites a profile holds at most (MAX_FAVORITES in crates/arbalete-core/src/sidebar.rs).
 export const MAX_FAVORITES = 12;
 
 // How long "Favorites are full" stays once the pointer leaves full favorites.

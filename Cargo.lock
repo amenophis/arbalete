@@ -74,10 +74,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "arbalette"
+name = "arbalete"
 version = "0.1.0"
 dependencies = [
- "arbalette-core",
+ "arbalete-core",
  "block2",
  "cef",
  "objc2",
@@ -88,7 +88,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbalette-core"
+name = "arbalete-core"
 version = "0.1.0"
 dependencies = [
  "md5",

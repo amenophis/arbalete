@@ -131,7 +131,7 @@
           "today-search",
           {
             "id": "today-search", "parentID": "today-home", "title": null, "childrenIds": [],
-            "data": { "tab": { "savedURL": "https://search.example.com/?q=arbalette", "savedTitle": "Search" } }
+            "data": { "tab": { "savedURL": "https://search.example.com/?q=arbalete", "savedTitle": "Search" } }
           },
           "split",
           {

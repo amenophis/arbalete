@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Arbalette - Ribbon Dart app icon">
-  <title>Arbalette - Ribbon Dart app icon</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Arbalete - Ribbon Dart app icon">
+  <title>Arbalete - Ribbon Dart app icon</title>
   <defs>
     <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="200" y1="200" x2="824" y2="824"><stop offset="0" stop-color="#3D5BFF"/><stop offset="1" stop-color="#9B3DFF"/></linearGradient>
     <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
