@@ -270,12 +270,29 @@ try {
   const reveal = await connect(REVEAL);
   const content = await connect((await pages()).find((url) => !url.startsWith(SIDEBAR)));
   const width = (await content.eval("innerWidth")) + 260;
+  // The card's margin, 9 pt from the window's edges and from the sidebar (CARD_MARGIN in shell.rs).
+  await check(
+    "the page is a card inset from the window's edges and from the sidebar",
+    ``,
+    `innerWidth === outerWidth - 260 - 2 * 9 && innerHeight === outerHeight - 2 * 9`,
+    content,
+  );
+  await check(
+    "the sidebar's view fills the window, to paint the window around the card",
+    ``,
+    `innerWidth === outerWidth && innerHeight === outerHeight`,
+  );
   await check(
     "the sidebar toggle command hides the sidebar",
     `e2e.send("sidebar/toggle")`,
     `document.visibilityState === "hidden"`,
   );
-  await check("the page then takes the whole window width", ``, `innerWidth === ${width}`, content);
+  await check(
+    "the page then takes the window's width within its margins",
+    ``,
+    `innerWidth === ${width} && innerWidth === outerWidth - 2 * 9`,
+    content,
+  );
   await check(
     "the sidebar hidden, a strip of the revealed sidebar lines the window's left edge",
     ``,

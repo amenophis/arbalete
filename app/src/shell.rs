@@ -26,6 +26,10 @@ const UI_ORIGIN: &str = "https://arbalette.ui/";
 
 const SIDEBAR_WIDTH: i32 = 260;
 
+/// The page is a card inset from the window's edges and from the sidebar, which paints the window
+/// around it (ui/src/index.css).
+const CARD_MARGIN: i32 = 9;
+
 /// The strip along the window's left edge that reveals the hidden sidebar when the pointer
 /// reaches it. Views cannot be transparent, so it shows the sidebar's background.
 const EDGE_WIDTH: i32 = 4;
@@ -54,7 +58,10 @@ const START_URL: &str = "https://www.wikipedia.org/";
 
 thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    /// As large as the window, below the card: it paints the window's background around it.
     static SIDEBAR: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    /// Holds the content views, inset from the window's edges.
+    static CARD: RefCell<Option<Panel>> = const { RefCell::new(None) };
     /// The content view of each profile, `None` until its browser is created. Tabs of the same
     /// profile share one view: switching between them only navigates.
     static CONTENTS: RefCell<HashMap<ProfileId, Option<BrowserView>>> = RefCell::default();
@@ -280,6 +287,7 @@ fn set_sidebar(mode: SidebarMode) {
     if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
         sidebar.set_visible(shown.into());
     }
+    place_card();
     place_reveal();
     let Some(window) = WINDOW.with_borrow(Clone::clone) else {
         return;
@@ -288,6 +296,24 @@ fn set_sidebar(mode: SidebarMode) {
     window.set_draggable_regions(Some(&regions));
     #[cfg(target_os = "macos")]
     crate::mac::sidebar_shown(window.window_handle(), shown);
+}
+
+/// Insets the card from the window's edges, and from the sidebar while it is shown.
+fn place_card() {
+    let Some(card) = CARD.with_borrow(Clone::clone) else {
+        return;
+    };
+    let left = match SIDEBAR_MODE.get() {
+        SidebarMode::Shown => SIDEBAR_WIDTH + CARD_MARGIN,
+        _ => CARD_MARGIN,
+    };
+    card.set_insets(Some(&Insets {
+        top: CARD_MARGIN,
+        left,
+        bottom: CARD_MARGIN,
+        right: CARD_MARGIN,
+    }));
+    card.layout();
 }
 
 /// Places the revealed sidebar, or the strip that reveals it, along the window's left edge.
@@ -350,7 +376,7 @@ fn show_import() {
     SOURCES.set(browsers::detect(&crate::import_home()));
     if IMPORT.with_borrow(Option::is_none) {
         let url = format!("{UI_ORIGIN}index.html#import");
-        let view = browser_view(UiClient::new(), &url, 0, None);
+        let view = browser_view(UiClient::new(), &url, None);
         let controller = window
             .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
             .expect("import");
@@ -762,8 +788,12 @@ fn show_content(profile: ProfileId, view: &BrowserView) {
     }
     SHOWN_PROFILE.set(Some(profile));
     view.set_visible(1);
+    if let Some(card) = CARD.with_borrow(Clone::clone) {
+        card.layout();
+    }
+    #[cfg(target_os = "macos")]
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
-        window.layout();
+        crate::mac::round_card(window.window_handle());
     }
 }
 
@@ -831,14 +861,10 @@ wrap_request_context_handler! {
         /// Adds the profile's content view to the window, hidden. Its browser is created after it
         /// (content_created).
         fn on_request_context_initialized(&self, context: Option<&mut RequestContext>) {
-            let Some(window) = WINDOW.with_borrow(Clone::clone) else { return };
-            let view = browser_view(ContentClient::new(self.profile), "about:blank", 0, context);
+            let Some(card) = CARD.with_borrow(Clone::clone) else { return };
+            let view = browser_view(ContentClient::new(self.profile), "about:blank", context);
             view.set_visible(0);
-            let mut child = View::from(&view);
-            window.add_child_view(Some(&mut child));
-            if let Some(layout) = window.get_layout().and_then(|layout| layout.as_box_layout()) {
-                layout.set_flex_for_view(Some(&mut child), 1);
-            }
+            card.add_child_view(Some(&mut View::from(&view)));
         }
     }
 }
@@ -1023,27 +1049,25 @@ wrap_window_delegate! {
         fn on_window_created(&self, window: Option<&mut Window>) {
             let window = window.expect("window").clone();
             window.set_title(Some(&CefString::from("Arbalette")));
-            let layout = window
-                .set_to_box_layout(Some(&BoxLayoutSettings {
-                    horizontal: 1,
-                    cross_axis_alignment: AxisAlignment::STRETCH,
-                    ..Default::default()
-                }))
-                .expect("box layout");
-            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH, None);
-            SIDEBAR.set(Some(sidebar.clone()));
-            let mut view = View::from(&sidebar);
-            window.add_child_view(Some(&mut view));
-            layout.set_flex_for_view(Some(&mut view), 0);
+            // The card above the sidebar, both as large as the window.
+            window.set_to_fill_layout();
+            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), None);
+            window.add_child_view(Some(&mut View::from(&sidebar)));
+            SIDEBAR.set(Some(sidebar));
+            let card = panel_create(None).expect("card");
+            card.set_to_fill_layout();
+            window.add_child_view(Some(&mut View::from(&card)));
+            CARD.set(Some(card));
+            place_card();
             // Below the overlay, which is added after it.
-            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), 0, None);
+            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
                 .expect("reveal");
             controller.set_visible(0);
             REVEAL_VIEW.set(Some(reveal));
             REVEAL.set(Some(controller));
-            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), 0, None);
+            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
                 .expect("overlay");
@@ -1104,12 +1128,11 @@ wrap_window_delegate! {
     }
 }
 
-/// An Alloy browser view. A width of 0 means "no preferred width": the layout decides. Without a
-/// request context, it uses the global one, which only the app's own UI uses.
+/// An Alloy browser view, sized by the layout or its overlay's bounds. Without a request context,
+/// it uses the global one, which only the app's own UI uses.
 fn browser_view(
     mut client: Client,
     url: &str,
-    width: i32,
     context: Option<&mut RequestContext>,
 ) -> BrowserView {
     browser_view_create(
@@ -1118,20 +1141,18 @@ fn browser_view(
         Some(&BrowserSettings::default()),
         None,
         context,
-        Some(&mut AlloyViewDelegate::new(width)),
+        Some(&mut AlloyViewDelegate::new()),
     )
     .expect("browser view")
 }
 
 wrap_browser_view_delegate! {
-    struct AlloyViewDelegate {
-        width: i32,
-    }
+    struct AlloyViewDelegate {}
 
     impl ViewDelegate {
         // A zero height would make the size "empty" and CEF would ignore it.
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: self.width, height: 1 }
+            Size { width: 0, height: 1 }
         }
     }
 

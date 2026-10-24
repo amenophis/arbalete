@@ -7,7 +7,7 @@ use objc2::{
     ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, extern_methods,
     msg_send,
     rc::Retained,
-    runtime::{AnyObject, Bool, NSObjectProtocol, Sel},
+    runtime::{AnyClass, AnyObject, Bool, NSObjectProtocol, Sel},
     sel,
 };
 use objc2_app_kit::{
@@ -18,6 +18,9 @@ use objc2_app_kit::{
 use objc2_foundation::{NSString, ns_string};
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
+
+/// The page's corner radius, in points.
+const CARD_RADIUS: f64 = 8.0;
 
 thread_local! {
     /// Its title says what it does: hide or show the sidebar.
@@ -423,5 +426,31 @@ fn item(
             Some(action),
             key,
         )
+    }
+}
+
+/// Rounds the corners of the page's views: the window's web views except the first, the sidebar,
+/// which fills the window below the card. Native views are drawn above the views of the window,
+/// which cannot clip them. `view` is the window's content view.
+pub fn round_card(view: *mut c_void) {
+    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
+    let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
+        return;
+    };
+    let Some(web_view) = AnyClass::get(c"WebContentsViewCocoa") else {
+        return;
+    };
+    let subviews = view.subviews();
+    let pages = subviews
+        .iter()
+        .filter(|v| v.isKindOfClass(web_view))
+        .skip(1);
+    for page in pages {
+        page.setWantsLayer(true);
+        let layer: Option<Retained<AnyObject>> = unsafe { msg_send![&*page, layer] };
+        if let Some(layer) = layer {
+            let _: () = unsafe { msg_send![&*layer, setCornerRadius: CARD_RADIUS] };
+            let _: () = unsafe { msg_send![&*layer, setMasksToBounds: Bool::YES] };
+        }
     }
 }
