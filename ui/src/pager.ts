@@ -268,11 +268,11 @@ class Pager {
       this.sidebar.style.setProperty("--space", color.color);
       this.sidebar.style.setProperty("--tinted", String(color.strength));
     }
-    const first = this.spaces[0];
-    const firstPage = first && this.track?.querySelector<HTMLElement>(`[data-space="${first.id}"]`);
-    if (firstPage) {
-      const fade = libraryFade(this.position);
-      firstPage.style.opacity = fade < 1 ? String(fade) : "";
+    // Only the first Space's page fades, and a reordering may make another page first.
+    const first = String(this.spaces[0]?.id);
+    for (const page of this.track?.querySelectorAll<HTMLElement>("[data-space]") ?? []) {
+      const fade = page.dataset.space === first ? libraryFade(this.position) : 1;
+      page.style.opacity = fade < 1 ? String(fade) : "";
     }
     if (this.bubble) {
       const reach = Math.min(1, this.pull / ARM_PULL);
