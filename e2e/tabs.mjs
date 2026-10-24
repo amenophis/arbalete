@@ -93,6 +93,12 @@ try {
     `e2e.send("close")`,
     `e2e.tile.isConnected && e2e.tiles().length === 6 && !e2e.tile.hasAttribute("aria-current") && e2e.current() === e2e.rows().at(-1)`,
   );
+  await check(
+    "scrolling the tabs keeps the url bar in place",
+    `e2e.top = document.querySelector(".url").getBoundingClientRect().top; document.querySelector(".scroll").scrollTop = 1000`,
+    `document.querySelector(".scroll").scrollTop > 0 && document.scrollingElement.scrollTop === 0
+      && document.querySelector(".url").getBoundingClientRect().top === e2e.top`,
+  );
 } finally {
   app.kill();
 }

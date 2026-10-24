@@ -23,8 +23,19 @@ body {
   background: var(--background);
 }
 
+/* Only the tabs scroll: the toolbar, url and favorites stay under the window buttons. */
 .sidebar {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100vh;
   padding: 0 8px 8px;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Drags the window, and leaves room for the macOS window buttons (TOOLBAR_HEIGHT in shell.rs). */
