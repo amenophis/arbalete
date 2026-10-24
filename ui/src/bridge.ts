@@ -139,7 +139,14 @@ export type Page = {
   canGoForward: boolean;
 };
 
-export type Item = Tab | Folder;
+export type Item = Tab | Folder | Split;
+
+// Two tabs in one row (NodeKind::Split): a click on either shows that tab alone, until Split View
+// shows them side by side (docs/PLAN.md, phase 9).
+export type Split = {
+  id: number;
+  split: Tab[];
+};
 
 export type Folder = {
   id: number;
@@ -199,6 +206,8 @@ export function showMenu(event: MouseEvent) {
   const target = event.target as Element;
   if (target.closest("input, textarea")) return;
   event.preventDefault();
+  const half = target.closest<HTMLElement>(".space-page .half[data-tab]");
+  if (half) return send(`menu/node/${half.dataset.tab}`);
   const row = target.closest<HTMLElement>(".space-page li[data-id]");
   if (row) return send(`menu/node/${row.dataset.id}`);
   const page = target.closest(".space-header")?.closest<HTMLElement>(".space-page");

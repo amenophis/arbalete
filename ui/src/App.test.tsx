@@ -12,9 +12,16 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-const today: Tab[] = [
+const today: Item[] = [
   { id: 3, url: "https://example.com/", title: "Example", favicon: null },
   { id: 4, url: "https://example.org/", title: "Other", favicon: null },
+  {
+    id: 20,
+    split: [
+      { id: 21, url: "https://example.com/left", title: "Left", favicon: null },
+      { id: 22, url: "https://example.com/right", title: "Right", favicon: null },
+    ],
+  },
 ];
 
 const pinned: Item[] = [
@@ -239,6 +246,18 @@ test("selects and closes a tab inside a folder", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/select/5", { method: "POST" });
   fireEvent.click(screen.getByRole("button", { name: "Close Manual" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/close/7", { method: "POST" });
+});
+
+test("shows a split as one row of two tabs, each selected by a click", () => {
+  render(<App />);
+  receive({}, 22);
+  const row = document.querySelector<HTMLElement>('.split-row[data-id="20"]');
+  const halves = within(row as HTMLElement).getAllByRole("button");
+  expect(halves.map((half) => half.textContent)).toEqual(["Left", "Right"]);
+  expect(halves[1].getAttribute("aria-current")).toBe("page");
+  expect(document.querySelector(".url")?.getAttribute("title")).toBe("https://example.com/right");
+  fireEvent.click(halves[0]);
+  expect(fetch).toHaveBeenLastCalledWith("/command/select/21", { method: "POST" });
 });
 
 test("shows the favorites as a grid of tiles named by their titles", () => {
@@ -820,6 +839,7 @@ test("a right-click on a row asks the app for its menu, and shows no page menu",
     [page.getByRole("button", { name: "Docs" }), 6],
     [page.getByRole("button", { name: "Mail" }), 10],
     [page.getByRole("button", { name: "Close Example" }), 3],
+    [page.getByRole("button", { name: "Right" }), 22],
   ] as const) {
     fetch.mockClear();
     expect(rightClick(row)).toBe(false);
