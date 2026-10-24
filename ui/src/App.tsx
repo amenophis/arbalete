@@ -1,4 +1,5 @@
-import { send, type Tab, useAppState } from "./bridge";
+import { memo } from "react";
+import { send, useAppState } from "./bridge";
 
 export function App() {
   const state = useAppState();
@@ -37,38 +38,50 @@ export function App() {
       </button>
       <ul className="tabs">
         {state?.tabs.map((tab) => (
-          <TabItem key={tab.id} tab={tab} active={tab.id === state.active} />
+          <TabItem
+            key={tab.id}
+            id={tab.id}
+            title={tab.title || tab.url}
+            favicon={tab.favicon}
+            active={tab.id === state.active}
+          />
         ))}
       </ul>
     </nav>
   );
 }
 
-function TabItem({ tab, active }: { tab: Tab; active: boolean }) {
-  const title = tab.title || tab.url;
+// Every state update brings new tab objects: primitive props let unchanged rows skip rendering.
+const TabItem = memo(function TabItem({
+  id,
+  title,
+  favicon,
+  active,
+}: {
+  id: number;
+  title: string;
+  favicon: string | null;
+  active: boolean;
+}) {
   return (
     <li className="tab-row">
       <button
         type="button"
         className="tab"
         aria-current={active ? "page" : undefined}
-        onClick={() => send(`select/${tab.id}`)}
+        onClick={() => send(`select/${id}`)}
       >
-        {tab.favicon ? (
-          <img className="favicon" src={tab.favicon} alt="" />
-        ) : (
-          <span className="favicon" />
-        )}
+        {favicon ? <img className="favicon" src={favicon} alt="" /> : <span className="favicon" />}
         <span className="title">{title}</span>
       </button>
       <button
         type="button"
         className="close"
         aria-label={`Close ${title}`}
-        onClick={() => send(`close/${tab.id}`)}
+        onClick={() => send(`close/${id}`)}
       >
         ✕
       </button>
     </li>
   );
-}
+});
