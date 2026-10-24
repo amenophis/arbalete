@@ -2,6 +2,7 @@
 
 use super::Copy;
 use super::bookmarks::{Bookmark, Bookmarks, Folder};
+use crate::history::{self, Entry};
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::io;
@@ -32,6 +33,25 @@ pub fn read_bookmarks(profile: &Path) -> Result<Bookmarks, Error> {
         return Ok(Bookmarks::default());
     };
     bookmarks(&Connection::open(copy.file())?)
+}
+
+/// Reads the history of the profile's `places.sqlite`. A profile Firefox has never opened has
+/// none.
+pub fn read_history(profile: &Path) -> Result<Vec<Entry>, Error> {
+    let Some(copy) = Copy::of(&profile.join("places.sqlite"))? else {
+        return Ok(Vec::new());
+    };
+    Ok(history(&Connection::open(copy.file())?)?)
+}
+
+/// The visited pages in `moz_places`, whose times are microseconds since the Unix epoch. Places
+/// only bookmarked have no visit; hidden ones are those of frames and redirect sources.
+fn history(db: &Connection) -> rusqlite::Result<Vec<Entry>> {
+    history::select(
+        db,
+        "SELECT url, IFNULL(title, ''), visit_count, last_visit_date / 1000 FROM moz_places
+         WHERE visit_count > 0 AND last_visit_date IS NOT NULL AND hidden = 0",
+    )
 }
 
 /// The root folders by their fixed `guid`. Firefox stores internal names as their titles and
@@ -105,6 +125,7 @@ fn content(children: &HashMap<i64, Vec<Row>>, id: i64) -> Vec<Bookmark> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::entry;
     use crate::import::TestDir;
     use crate::import::bookmarks::{folder, link};
 
@@ -172,6 +193,33 @@ mod tests {
         browser.execute_batch(PLACES).unwrap();
         // Unchecked, the changes are still in the write-ahead log only.
         assert_eq!(read_bookmarks(&dir.0).unwrap(), expected());
+    }
+
+    /// The part of `moz_places` the history import reads, with fictitious visits.
+    const HISTORY: &str = "
+        CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR,
+            visit_count INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0 NOT NULL,
+            last_visit_date INTEGER);
+        INSERT INTO moz_places (url, title, visit_count, hidden, last_visit_date) VALUES
+            ('https://mail.example.com/', 'Mail', 3, 0, 1705526400000000),
+            ('https://news.example.net/', NULL, 1, 0, 1705526401000000),
+            ('https://redirect.example.org/', 'Redirect', 1, 1, 1705526402000000),
+            ('https://bookmarked.example.org/', 'Bookmarked', 0, 0, NULL);
+    ";
+
+    #[test]
+    fn reads_the_visited_pages_with_unix_times() {
+        let dir = TestDir::new("firefox-history");
+        assert_eq!(read_history(&dir.0).unwrap(), vec![]);
+        let db = Connection::open(dir.0.join("places.sqlite")).unwrap();
+        db.execute_batch(HISTORY).unwrap();
+        assert_eq!(
+            read_history(&dir.0).unwrap(),
+            vec![
+                entry("https://mail.example.com/", "Mail", 3, 1_705_526_400_000),
+                entry("https://news.example.net/", "", 1, 1_705_526_401_000),
+            ]
+        );
     }
 
     #[test]

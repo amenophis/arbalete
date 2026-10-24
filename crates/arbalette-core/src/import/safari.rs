@@ -1,7 +1,10 @@
 //! Reads Safari's data, in `~/Library/Safari`.
 
+use super::Copy;
 use super::bookmarks::{Bookmark, Bookmarks, Folder};
+use crate::history::{self, Entry};
 use plist::{Dictionary, Value};
+use rusqlite::Connection;
 use std::{fs, io, io::Cursor, path::Path};
 
 #[derive(Debug)]
@@ -10,6 +13,37 @@ pub enum Error {
     NeedsFullDiskAccess,
     Io(io::Error),
     Invalid(plist::Error),
+    Sqlite(rusqlite::Error),
+}
+
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::PermissionDenied => Self::NeedsFullDiskAccess,
+            _ => Self::Io(error),
+        }
+    }
+}
+
+/// Reads `History.db` in Safari's data directory. Safari never opened has none.
+pub fn read_history(dir: &Path) -> Result<Vec<Entry>, Error> {
+    let Some(copy) = Copy::of(&dir.join("History.db"))? else {
+        return Ok(Vec::new());
+    };
+    let db = Connection::open(copy.file()).map_err(Error::Sqlite)?;
+    history(&db).map_err(Error::Sqlite)
+}
+
+/// The visited urls of a `History.db`, with the title of their latest visit, whose times are
+/// seconds since 2001.
+fn history(db: &Connection) -> rusqlite::Result<Vec<Entry>> {
+    history::select(
+        db,
+        "SELECT i.url, IFNULL(v.title, ''), i.visit_count,
+            CAST((MAX(v.visit_time) + 978307200) * 1000 AS INTEGER)
+         FROM history_items i JOIN history_visits v ON v.history_item = i.id
+         GROUP BY i.id",
+    )
 }
 
 /// Reads `Bookmarks.plist` in Safari's data directory. Safari without bookmarks has none.
@@ -17,10 +51,7 @@ pub fn read_bookmarks(dir: &Path) -> Result<Bookmarks, Error> {
     match fs::read(dir.join("Bookmarks.plist")) {
         Ok(plist) => bookmarks(&plist),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Bookmarks::default()),
-        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-            Err(Error::NeedsFullDiskAccess)
-        }
-        Err(error) => Err(Error::Io(error)),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -98,6 +129,7 @@ fn content(list: &Dictionary) -> Vec<Bookmark> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::entry;
     use crate::import::TestDir;
     use crate::import::bookmarks::{folder, link};
 
@@ -194,16 +226,50 @@ mod tests {
         );
     }
 
+    /// The part of Safari's `History.db` schema the import reads, with fictitious visits.
+    const HISTORY: &str = "
+        CREATE TABLE history_items (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE,
+            visit_count INTEGER NOT NULL);
+        CREATE TABLE history_visits (id INTEGER PRIMARY KEY, history_item INTEGER NOT NULL,
+            visit_time REAL NOT NULL, title TEXT);
+        INSERT INTO history_items (id, url, visit_count) VALUES
+            (1, 'https://mail.example.com/', 2), (2, 'https://news.example.net/', 1);
+        INSERT INTO history_visits (history_item, visit_time, title) VALUES
+            (1, 727219200.5, 'Old mail'), (1, 727219300.25, 'Mail'), (2, 727219250.0, NULL);
+    ";
+
+    #[test]
+    fn reads_the_visited_urls_with_their_latest_title_and_unix_times() {
+        let dir = TestDir::new("safari-history");
+        assert_eq!(read_history(&dir.0).unwrap(), vec![]);
+        let db = Connection::open(dir.0.join("History.db")).unwrap();
+        db.execute_batch(HISTORY).unwrap();
+        assert_eq!(
+            read_history(&dir.0).unwrap(),
+            vec![
+                entry("https://mail.example.com/", "Mail", 2, 1_705_526_500_250),
+                entry("https://news.example.net/", "", 1, 1_705_526_450_000),
+            ]
+        );
+    }
+
     #[cfg(unix)]
     #[test]
-    fn asks_for_full_disk_access_when_the_file_cannot_be_read() {
+    fn asks_for_full_disk_access_when_a_file_cannot_be_read() {
         use std::os::unix::fs::PermissionsExt;
         let dir = TestDir::new("safari-denied");
         dir.write("Bookmarks.plist", plist());
-        let file = dir.0.join("Bookmarks.plist");
-        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        dir.write("History.db", "");
+        for file in ["Bookmarks.plist", "History.db"] {
+            let file = dir.0.join(file);
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        }
         assert!(matches!(
             read_bookmarks(&dir.0),
+            Err(Error::NeedsFullDiskAccess)
+        ));
+        assert!(matches!(
+            read_history(&dir.0),
             Err(Error::NeedsFullDiskAccess)
         ));
     }
