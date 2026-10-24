@@ -90,6 +90,7 @@ dependencies = [
 name = "arbalette-core"
 version = "0.1.0"
 dependencies = [
+ "plist",
  "rusqlite",
  "serde",
  "serde_json",

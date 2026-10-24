@@ -5,6 +5,7 @@ pub mod bookmarks;
 pub mod browsers;
 pub mod chromium;
 pub mod firefox;
+pub mod safari;
 
 /// A directory under the system's temporary one for a test's files, removed when dropped.
 #[cfg(test)]
