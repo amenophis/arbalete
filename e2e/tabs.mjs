@@ -153,9 +153,11 @@ try {
   );
   // The benchmark session has 6 favorites.
   await check(
-    "the favorites show as a grid of 6 tiles above the pinned tabs",
+    "the favorites show as a grid of 6 tiles in two rows of 3 above the pinned tabs",
     `e2e.tiles = () => [...e2e.page().querySelectorAll(".favorites .favorite")]`,
     `e2e.tiles().length === 6 && e2e.tiles()[0].getAttribute("aria-label") === "Favorite 1"
+      && new Set(e2e.tiles().map((tile) => tile.getBoundingClientRect().top)).size === 2
+      && e2e.tiles()[2].getBoundingClientRect().top === e2e.tiles()[0].getBoundingClientRect().top
       && !!(e2e.tiles()[5].compareDocumentPosition(e2e.page().querySelector(".pinned")) & Node.DOCUMENT_POSITION_FOLLOWING)`,
   );
   await check(

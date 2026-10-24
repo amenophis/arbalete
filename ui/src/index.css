@@ -236,7 +236,8 @@ body {
   opacity: 0.85;
 }
 
-/* One tile takes the whole row, more share it, up to 4 a row (--columns, set by ui/src/App.tsx). */
+/* One tile takes the whole row, more share balanced rows of up to 4, a short last row keeping the
+   tiles' width (--columns, favoriteColumns in ui/src/App.tsx). */
 .favorites {
   display: grid;
   grid-template-columns: repeat(var(--columns), 1fr);

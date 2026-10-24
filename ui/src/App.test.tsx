@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App, DOUBLE_CLICK_MS, domain } from "./App";
+import { App, DOUBLE_CLICK_MS, domain, favoriteColumns } from "./App";
 import { COLORS, type Item, type Page, type Space, type Tab, windowColors } from "./bridge";
 
 const fetch = vi.fn();
@@ -232,6 +232,11 @@ test("shows a placeholder to drop tabs on when there are no favorites", () => {
   expect(within(grid).queryAllByRole("button")).toHaveLength(0);
 });
 
+test("balances the favorites' rows, up to 4 tiles a row", () => {
+  const columns = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(favoriteColumns);
+  expect(columns).toEqual([1, 1, 2, 3, 4, 3, 3, 4, 4, 3, 4]);
+});
+
 test("shares the favorites' rows in up to 4 columns", () => {
   render(<App />);
   const columns = () =>
@@ -242,7 +247,7 @@ test("shares the favorites' rows in up to 4 columns", () => {
   expect(columns()).toBe("2");
   const many = Array.from({ length: 6 }, (_, index) => ({ ...favorites[1], id: 20 + index }));
   receive({}, 3, many);
-  expect(columns()).toBe("4");
+  expect(columns()).toBe("3");
 });
 
 test("collapses and expands a folder with a click", () => {

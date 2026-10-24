@@ -158,7 +158,7 @@ function Sections({
         className="favorites"
         aria-label="Favorites"
         data-parent={roots.favorites}
-        style={{ "--columns": Math.min(Math.max(favorites.length, 1), 4) } as CSSProperties}
+        style={{ "--columns": favoriteColumns(favorites.length) } as CSSProperties}
       >
         {favorites.length === 0 && (
           <li className="favorites-empty">Drag tabs here to keep them close</li>
@@ -205,6 +205,13 @@ function Sections({
       </div>
     </section>
   );
+}
+
+// The favorites share rows of up to 4 tiles, as evenly as they can: 6 make two rows of 3, not 4
+// and 2. Without favorites, the placeholder takes the whole row.
+export function favoriteColumns(count: number): number {
+  const rows = Math.max(1, Math.ceil(count / 4));
+  return Math.max(1, Math.ceil(count / rows));
 }
 
 // What the url bar shows of a page's address: its host, without "www.", or the whole address
