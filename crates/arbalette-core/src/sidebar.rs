@@ -1,7 +1,8 @@
 //! The sidebar: profiles, Spaces and the tree of tabs and folders each Space holds.
 //!
-//! Every Space has two root containers: its pinned tabs and its "Today" tabs. Tabs and folders are
-//! nodes of a single tree, stored flat and linked by `parent` and `children`.
+//! Every profile has a root container for its favorites, shared by the Spaces attached to it. Every
+//! Space has two root containers: its pinned tabs and its "Today" tabs. Tabs and folders are nodes of
+//! a single tree, stored flat and linked by `parent` and `children`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ pub struct NodeId(u64);
 pub struct Profile {
     pub id: ProfileId,
     pub name: String,
+    pub favorites: NodeId,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -43,7 +45,7 @@ pub struct Node {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NodeKind {
-    /// A Space's root: its pinned tabs or its "Today" tabs.
+    /// A root: a profile's favorites, or a Space's pinned tabs or "Today" tabs.
     Container,
     Folder {
         title: String,
@@ -71,7 +73,7 @@ pub enum Error {
     NotATab,
     /// A folder cannot move inside itself or one of its descendants.
     MoveIntoItself,
-    /// A Space's root containers cannot be moved or removed.
+    /// Root containers cannot be moved or removed.
     RootNode,
 }
 
@@ -123,9 +125,11 @@ impl Sidebar {
 
     pub fn add_profile(&mut self, name: &str) -> ProfileId {
         let id = ProfileId(self.next_id());
+        let favorites = self.insert(None, NodeKind::Container);
         self.profiles.push(Profile {
             id,
             name: name.to_string(),
+            favorites,
         });
         id
     }
@@ -161,6 +165,7 @@ impl Sidebar {
         Ok(self.insert(Some(today), NodeKind::Tab(tab)))
     }
 
+    /// Shows `tab` in `space`. A favorite is shown in whichever Space it is selected from.
     pub fn select(&mut self, space: SpaceId, tab: NodeId) -> Result<(), Error> {
         match self.nodes.get(&tab).map(|n| &n.kind) {
             None => return Err(Error::UnknownNode),
@@ -321,6 +326,62 @@ mod tests {
         assert_eq!(home.profile, sidebar.profiles()[0].id);
         assert!(children(&sidebar, home.pinned).is_empty());
         assert!(children(&sidebar, home.today).is_empty());
+    }
+
+    #[test]
+    fn a_new_profile_has_no_favorites() {
+        let mut sidebar = Sidebar::default();
+        sidebar.add_profile("Work");
+        for profile in sidebar.profiles() {
+            assert!(children(&sidebar, profile.favorites).is_empty());
+        }
+        assert_ne!(
+            sidebar.profiles()[0].favorites,
+            sidebar.profiles()[1].favorites
+        );
+    }
+
+    #[test]
+    fn moves_a_tab_into_the_favorites() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let tab = sidebar.open_tab(home.id, "https://example.com/").unwrap();
+        sidebar.move_node(tab, favorites, 0).unwrap();
+        assert!(children(&sidebar, home.today).is_empty());
+        assert_eq!(children(&sidebar, favorites), [tab]);
+        assert_eq!(sidebar.node(tab).unwrap().parent, Some(favorites));
+    }
+
+    #[test]
+    fn keeps_the_favorites_root() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        assert_eq!(sidebar.remove(favorites), Err(Error::RootNode));
+        assert_eq!(
+            sidebar.move_node(favorites, home.pinned, 0),
+            Err(Error::RootNode)
+        );
+    }
+
+    #[test]
+    fn selects_a_favorite_in_any_space_of_its_profile() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let favorites = sidebar.profiles()[0].favorites;
+        let a = sidebar.open_tab(home.id, "a").unwrap();
+        let b = sidebar.open_tab(home.id, "b").unwrap();
+        sidebar.move_node(a, favorites, usize::MAX).unwrap();
+        sidebar.move_node(b, favorites, usize::MAX).unwrap();
+        sidebar.select(home.id, a).unwrap();
+        sidebar.select(work, a).unwrap();
+        assert_eq!(sidebar.spaces()[1].selected, Some(a));
+        assert_eq!(sidebar.next_after_close(a), Some(b));
+        sidebar.remove(a).unwrap();
+        assert_eq!(sidebar.spaces()[0].selected, None);
+        assert_eq!(sidebar.spaces()[1].selected, None);
     }
 
     #[test]
