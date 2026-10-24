@@ -29,6 +29,19 @@ try {
     moveTo: (target, fx, fy) => e2e.pointer("pointermove", target, fx, fy),
     drag: (row, target, fx, fy) => { e2e.press(row); e2e.moveTo(target, fx, fy); e2e.pointer("pointerup", target, fx, fy); },
     indicator: () => document.querySelector(".drop-indicator"),
+    // The tops of the favorites grid and the first pinned row, which must not move.
+    tops: () => [".favorites", ".pinned .tab-row"]
+      .map((selector) => document.querySelector(selector).getBoundingClientRect().top).join(),
+    // Records the tops after every change of the sidebar, until the page has loaded.
+    watchLayout: () => {
+      const layout = { before: e2e.tops(), during: [], loading: false };
+      const observer = new MutationObserver(() => {
+        layout.loading ||= !!document.querySelector(".progress");
+        layout.during.push(e2e.tops());
+      });
+      observer.observe(document.querySelector(".sidebar"), { childList: true, subtree: true, attributes: true });
+      return layout;
+    },
     has: (list, id) => [...list].some((element) => element.closest("li").dataset.id === id),
   }`);
 
@@ -52,6 +65,13 @@ try {
       return folders.length === 5 && folders[0].textContent.includes("Folder 1") && tabs.length === 10
         && e2e.above(folders[0]) && e2e.above(tabs[9]) && !e2e.above(e2e.rows()[0]);
     })()`,
+  );
+  await check("the first page finishes loading", ``, `!document.querySelector(".progress")`);
+  await check(
+    "loading a page moves nothing below the url bar",
+    `e2e.layout = e2e.watchLayout(); e2e.rows()[1].querySelector(".tab").click()`,
+    `e2e.layout.loading && !document.querySelector(".progress")
+      && e2e.layout.during.every((tops) => tops === e2e.layout.before) && e2e.tops() === e2e.layout.before`,
   );
   await check(
     "selecting a tab marks it aria-current",

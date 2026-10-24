@@ -35,9 +35,13 @@ export function App() {
           ↻
         </button>
       </div>
-      {active && <div className="url">{active.url}</div>}
-      {page?.loading && (
-        <progress className="progress" aria-label="Loading" value={page.progress} />
+      {active && (
+        <div className="url">
+          {active.url}
+          {page?.loading && (
+            <progress className="progress" aria-label="Loading" value={page.progress} />
+          )}
+        </div>
       )}
       {/* An empty grid shows only while a tab is dragged, to drop it there. */}
       {state && (state.favorites.length > 0 || dragging === "tab") && (
