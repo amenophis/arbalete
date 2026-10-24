@@ -1,0 +1,221 @@
+//! Reads the data of a Firefox browser's profile (Firefox, Zen, LibreWolf).
+
+use super::bookmarks::{Bookmark, Bookmarks, Folder};
+use rusqlite::Connection;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::{env, fs, io, process};
+
+#[derive(Debug)]
+pub enum Error {
+    Io(io::Error),
+    Sqlite(rusqlite::Error),
+}
+
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
+    }
+}
+
+/// Reads the bookmarks of the profile's `places.sqlite`. A profile Firefox has never opened has
+/// none.
+pub fn read_bookmarks(profile: &Path) -> Result<Bookmarks, Error> {
+    let Some(copy) = Copy::of(&profile.join("places.sqlite"))? else {
+        return Ok(Bookmarks::default());
+    };
+    bookmarks(&Connection::open(copy.file())?)
+}
+
+/// The root folders by their fixed `guid`. Firefox stores internal names as their titles and
+/// shows translated ones, so they get English names here.
+const BAR: (&str, &str) = ("toolbar_____", "Bookmarks Toolbar");
+const OTHERS: [(&str, &str); 3] = [
+    ("menu________", "Bookmarks Menu"),
+    ("unfiled_____", "Other Bookmarks"),
+    ("mobile______", "Mobile Bookmarks"),
+];
+
+struct Row {
+    id: i64,
+    kind: i64,
+    title: String,
+    url: Option<String>,
+}
+
+/// Reads the bookmarks of a `places.sqlite` database: `moz_bookmarks` is the tree, `moz_places`
+/// holds the urls.
+fn bookmarks(db: &Connection) -> Result<Bookmarks, Error> {
+    let mut statement = db.prepare(
+        "SELECT b.id, b.parent, b.type, IFNULL(b.title, ''), p.url, b.guid
+         FROM moz_bookmarks b LEFT JOIN moz_places p ON p.id = b.fk
+         ORDER BY b.parent, b.position",
+    )?;
+    let mut children: HashMap<i64, Vec<Row>> = HashMap::new();
+    let mut roots = HashMap::new();
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let id = row.get(0)?;
+        roots.insert(row.get::<_, String>(5)?, id);
+        children.entry(row.get(1)?).or_default().push(Row {
+            id,
+            kind: row.get(2)?,
+            title: row.get(3)?,
+            url: row.get(4)?,
+        });
+    }
+    let root = |(guid, title): (&str, &str)| Folder {
+        title: title.to_string(),
+        children: roots
+            .get(guid)
+            .map(|&id| content(&children, id))
+            .unwrap_or_default(),
+    };
+    Ok(Bookmarks {
+        bar: root(BAR),
+        others: OTHERS.into_iter().map(root).collect(),
+    })
+}
+
+/// The links and folders in the folder `id`. Separators, and `place:` queries such as "Most
+/// Visited", which are not pages, are skipped.
+fn content(children: &HashMap<i64, Vec<Row>>, id: i64) -> Vec<Bookmark> {
+    let rows = children.get(&id).into_iter().flatten();
+    rows.filter_map(|row| match (row.kind, &row.url) {
+        (1, Some(url)) if !url.starts_with("place:") => Some(Bookmark::Link {
+            title: row.title.clone(),
+            url: url.clone(),
+        }),
+        (2, _) => Some(Bookmark::Folder(Folder {
+            title: row.title.clone(),
+            children: content(children, row.id),
+        })),
+        _ => None,
+    })
+    .collect()
+}
+
+/// A copy of a SQLite database, with its write-ahead log, in a temporary directory removed when
+/// dropped. The browser keeps its database locked while it runs, and the log holds its latest
+/// changes.
+struct Copy(PathBuf);
+
+impl Copy {
+    /// `None` when there is no database to copy.
+    fn of(database: &Path) -> io::Result<Option<Self>> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = env::temp_dir().join(format!("arbalette-import-{}-{n}", process::id()));
+        fs::create_dir_all(&dir)?;
+        let copy = Self(dir);
+        match fs::copy(database, copy.file()) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            result => result?,
+        };
+        let mut wal = database.as_os_str().to_owned();
+        wal.push("-wal");
+        match fs::copy(wal, copy.0.join("database-wal")) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            result => _ = result?,
+        }
+        Ok(Some(copy))
+    }
+
+    fn file(&self) -> PathBuf {
+        self.0.join("database")
+    }
+}
+
+impl Drop for Copy {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::import::TestDir;
+    use crate::import::bookmarks::{folder, link};
+
+    /// The part of Firefox's schema the import reads, with fictitious bookmarks: one in the
+    /// toolbar, a folder in the menu and a separator and a query among the other bookmarks.
+    const PLACES: &str = "
+        CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR);
+        CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, type INTEGER, fk INTEGER,
+            parent INTEGER, position INTEGER, title LONGVARCHAR, guid TEXT);
+        INSERT INTO moz_places (id, url) VALUES
+            (1, 'https://mail.example.com/'), (2, 'https://docs.example.com/'),
+            (3, 'https://news.example.net/'), (4, 'place:sort=8&maxResults=10');
+        INSERT INTO moz_bookmarks (id, type, fk, parent, position, title, guid) VALUES
+            (1, 2, NULL, 0, 0, '', 'root________'),
+            (2, 2, NULL, 1, 0, 'menu', 'menu________'),
+            (3, 2, NULL, 1, 1, 'toolbar', 'toolbar_____'),
+            (4, 2, NULL, 1, 2, 'tags', 'tags________'),
+            (5, 2, NULL, 1, 3, 'unfiled', 'unfiled_____'),
+            (6, 2, NULL, 1, 4, 'mobile', 'mobile______'),
+            (10, 1, 1, 3, 0, 'Mail', 'aaaaaaaaaaaa'),
+            (11, 2, NULL, 2, 1, 'Reading', 'bbbbbbbbbbbb'),
+            (12, 1, 2, 11, 0, NULL, 'cccccccccccc'),
+            (13, 1, 4, 2, 0, 'Most Visited', 'dddddddddddd'),
+            (14, 3, NULL, 5, 0, NULL, 'eeeeeeeeeeee'),
+            (15, 1, 3, 5, 1, 'News', 'ffffffffffff');
+    ";
+
+    fn expected() -> Bookmarks {
+        Bookmarks {
+            bar: folder(
+                "Bookmarks Toolbar",
+                vec![link("Mail", "https://mail.example.com/")],
+            ),
+            others: vec![
+                folder(
+                    "Bookmarks Menu",
+                    vec![Bookmark::Folder(folder(
+                        "Reading",
+                        vec![link("", "https://docs.example.com/")],
+                    ))],
+                ),
+                folder(
+                    "Other Bookmarks",
+                    vec![link("News", "https://news.example.net/")],
+                ),
+                folder("Mobile Bookmarks", vec![]),
+            ],
+        }
+    }
+
+    #[test]
+    fn reads_the_bookmarks_tree_with_english_root_names() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(PLACES).unwrap();
+        assert_eq!(bookmarks(&db).unwrap(), expected());
+    }
+
+    #[test]
+    fn reads_a_copy_of_a_database_locked_by_a_running_browser() {
+        let dir = TestDir::new("firefox-locked");
+        let browser = Connection::open(dir.0.join("places.sqlite")).unwrap();
+        browser
+            .execute_batch("PRAGMA locking_mode = EXCLUSIVE; PRAGMA journal_mode = WAL;")
+            .unwrap();
+        browser.execute_batch(PLACES).unwrap();
+        // Unchecked, the changes are still in the write-ahead log only.
+        assert_eq!(read_bookmarks(&dir.0).unwrap(), expected());
+    }
+
+    #[test]
+    fn reads_no_bookmarks_from_a_profile_without_database() {
+        let dir = TestDir::new("firefox-empty");
+        assert_eq!(read_bookmarks(&dir.0).unwrap(), Bookmarks::default());
+        dir.write("places.sqlite", "not a database");
+        assert!(matches!(read_bookmarks(&dir.0), Err(Error::Sqlite(_))));
+    }
+}
