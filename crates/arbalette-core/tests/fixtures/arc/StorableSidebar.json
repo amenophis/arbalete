@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "sidebarSyncState": {
+    "items": [],
+    "spaceModels": [],
+    "container": { "value": { "orderedSpaceIDs": [], "topAppsContainerIDs": [] } }
+  },
+  "firebaseSyncState": { "syncData": { "items": [], "spaceModels": [] } },
+  "sidebar": {
+    "containers": [
+      { "global": {} },
+      {
+        "topAppsContainerIDs": [
+          { "default": true }, "favorites-personal",
+          { "custom": { "_0": { "directoryBasename": "Profile 1" } } }, "favorites-work"
+        ],
+        "spaces": [
+          "space-home",
+          {
+            "id": "space-home",
+            "title": "Home",
+            "customInfo": {
+              "iconType": { "emoji_v2": "🏡" },
+              "windowTheme": {
+                "primaryColorPalette": {
+                  "midTone": { "red": 0.9, "green": 0.3, "blue": 0.32, "alpha": 1 }
+                }
+              }
+            },
+            "profile": { "default": true },
+            "containerIDs": ["unpinned", "today-home", "pinned", "pinned-home"],
+            "newContainerIDs": [
+              { "pinned": {} }, "pinned-home",
+              { "unpinned": { "_0": { "shared": {} } } }, "today-home"
+            ]
+          },
+          "space-reading",
+          {
+            "id": "space-reading",
+            "customInfo": { "iconType": { "icon": "book" } },
+            "profile": { "default": true },
+            "containerIDs": ["unpinned", "today-reading", "pinned", "pinned-reading"]
+          },
+          "space-office",
+          {
+            "id": "space-office",
+            "title": "Office",
+            "customInfo": {
+              "iconType": { "emoji_v2": "💼" },
+              "windowTheme": {
+                "primaryColorPalette": {
+                  "midTone": { "red": 0.25, "green": 0.48, "blue": 0.97, "alpha": 1 }
+                }
+              }
+            },
+            "profile": { "custom": { "_0": { "directoryBasename": "Profile 1" } } },
+            "containerIDs": ["unpinned", "today-office", "pinned", "pinned-office"]
+          },
+          "space-broken",
+          { "id": "space-broken", "title": "Broken", "profile": { "default": true } }
+        ],
+        "items": [
+          "favorites-personal",
+          {
+            "id": "favorites-personal", "parentID": null, "title": null, "isUnread": false,
+            "childrenIds": ["fav-mail", "fav-calendar"], "createdAt": 700000000.0,
+            "data": { "itemContainer": { "containerType": { "topApps": { "_0": { "default": true } } } } }
+          },
+          "fav-mail",
+          {
+            "id": "fav-mail", "parentID": "favorites-personal", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://mail.example.com/", "savedTitle": "Mail" } }
+          },
+          "fav-calendar",
+          {
+            "id": "fav-calendar", "parentID": "favorites-personal", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://calendar.example.com/", "savedTitle": "Calendar" } }
+          },
+          "favorites-work",
+          {
+            "id": "favorites-work", "parentID": null, "title": null, "childrenIds": ["fav-tracker"],
+            "data": { "itemContainer": { "containerType": { "topApps": { "_0": { "custom": { "_0": { "directoryBasename": "Profile 1" } } } } } } }
+          },
+          "fav-tracker",
+          {
+            "id": "fav-tracker", "parentID": "favorites-work", "title": "Tracker", "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://tracker.example.com/", "savedTitle": "Issues" } }
+          },
+          "pinned-home",
+          {
+            "id": "pinned-home", "parentID": null, "title": null,
+            "childrenIds": ["folder-docs", "pinned-news"],
+            "data": { "itemContainer": { "containerType": { "spaceItems": { "_0": "space-home" } } } }
+          },
+          "folder-docs",
+          {
+            "id": "folder-docs", "parentID": "pinned-home", "title": "Docs",
+            "childrenIds": ["welcome", "doc-guide", "folder-recipes"], "data": { "list": {} }
+          },
+          "welcome",
+          {
+            "id": "welcome", "parentID": "folder-docs", "title": "Welcome", "childrenIds": [],
+            "data": { "welcomeToArc": { "tabType": "onboarding" } }
+          },
+          "doc-guide",
+          {
+            "id": "doc-guide", "parentID": "folder-docs", "title": "Guide", "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://docs.example.com/guide", "savedTitle": "The guide", "savedMuteStatus": "allowAudio" } }
+          },
+          "folder-recipes",
+          {
+            "id": "folder-recipes", "parentID": "folder-docs", "title": "Recipes",
+            "childrenIds": ["recipe-bread", "missing-item"], "data": { "list": {} }
+          },
+          "recipe-bread",
+          {
+            "id": "recipe-bread", "parentID": "folder-recipes", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://recipes.example.org/bread", "savedTitle": "Bread" } }
+          },
+          "pinned-news",
+          {
+            "id": "pinned-news", "parentID": "pinned-home", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://news.example.net/" } }
+          },
+          "today-home",
+          {
+            "id": "today-home", "parentID": null, "title": null,
+            "childrenIds": ["today-search", "split", "no-url"],
+            "data": { "itemContainer": { "containerType": { "spaceItems": { "_0": "space-home" } } } }
+          },
+          "today-search",
+          {
+            "id": "today-search", "parentID": "today-home", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://search.example.com/?q=arbalette", "savedTitle": "Search" } }
+          },
+          "split",
+          {
+            "id": "split", "parentID": "today-home", "title": null,
+            "childrenIds": ["split-left", "split-right"],
+            "data": { "splitView": { "layoutOrientation": "horizontal", "itemWidthFactors": [] } }
+          },
+          "split-left",
+          {
+            "id": "split-left", "parentID": "split", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://left.example.com/", "savedTitle": "Left" } }
+          },
+          "split-right",
+          {
+            "id": "split-right", "parentID": "split", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://right.example.com/", "savedTitle": "Right" } }
+          },
+          "no-url",
+          {
+            "id": "no-url", "parentID": "today-home", "title": "No url", "childrenIds": [],
+            "data": { "tab": { "savedTitle": "No url" } }
+          },
+          "pinned-reading",
+          {
+            "id": "pinned-reading", "parentID": null, "title": null, "childrenIds": [],
+            "data": { "itemContainer": { "containerType": { "spaceItems": { "_0": "space-reading" } } } }
+          },
+          "today-reading",
+          {
+            "id": "today-reading", "parentID": null, "title": null, "childrenIds": ["article"],
+            "data": { "itemContainer": { "containerType": { "spaceItems": { "_0": "space-reading" } } } }
+          },
+          "article",
+          {
+            "id": "article", "parentID": "today-reading", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://blog.example.org/post", "savedTitle": "A post" } }
+          },
+          "pinned-office",
+          {
+            "id": "pinned-office", "parentID": null, "title": null, "childrenIds": ["wiki"],
+            "data": { "itemContainer": { "containerType": { "spaceItems": { "_0": "space-office" } } } }
+          },
+          "wiki",
+          {
+            "id": "wiki", "parentID": "pinned-office", "title": null, "childrenIds": [],
+            "data": { "tab": { "savedURL": "https://wiki.example.com/", "savedTitle": "Wiki" } }
+          },
+          "today-office",
+          {
+            "id": "today-office", "parentID": null, "title": null, "childrenIds": [],
+            "data": { "itemContainer": { "containerType": { "spaceItems": { "_0": "space-office" } } } }
+          }
+        ]
+      }
+    ]
+  }
+}

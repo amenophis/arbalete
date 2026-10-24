@@ -119,13 +119,7 @@ pub struct Sidebar {
 impl Default for Sidebar {
     /// A first profile and a first Space, so the browser always has somewhere to open tabs.
     fn default() -> Self {
-        let mut sidebar = Self {
-            profiles: Vec::new(),
-            spaces: Vec::new(),
-            displayed: None,
-            nodes: HashMap::new(),
-            next_id: 1,
-        };
+        let mut sidebar = Self::empty();
         let profile = sidebar.add_profile("Default");
         sidebar
             .add_space("Home", profile)
@@ -135,6 +129,18 @@ impl Default for Sidebar {
 }
 
 impl Sidebar {
+    /// A sidebar without profiles or Spaces, for importers to fill: they must add a Space before
+    /// handing it over.
+    pub(crate) fn empty() -> Self {
+        Self {
+            profiles: Vec::new(),
+            spaces: Vec::new(),
+            displayed: None,
+            nodes: HashMap::new(),
+            next_id: 1,
+        }
+    }
+
     pub fn profiles(&self) -> &[Profile] {
         &self.profiles
     }
@@ -310,8 +316,25 @@ impl Sidebar {
         Ok(())
     }
 
+    /// Adds a tab at the end of `parent`; a pinned tab saves its url, as when it is pinned.
+    pub fn add_tab(&mut self, parent: NodeId, url: &str, title: &str) -> Result<NodeId, Error> {
+        self.check_container(parent)?;
+        let tab = Tab {
+            url: url.to_string(),
+            title: title.to_string(),
+            favicon: None,
+            opener: None,
+            saved_url: self.is_pinned(parent).then(|| url.to_string()),
+        };
+        Ok(self.insert(Some(parent), NodeKind::Tab(tab)))
+    }
+
+    /// Adds a folder at the end of `parent`, which cannot be favorites: they hold only tabs.
     pub fn add_folder(&mut self, parent: NodeId, title: &str) -> Result<NodeId, Error> {
         self.check_container(parent)?;
+        if self.profiles.iter().any(|p| p.favorites == parent) {
+            return Err(Error::NotATab);
+        }
         let folder = NodeKind::Folder {
             title: title.to_string(),
             expanded: true,
@@ -1189,6 +1212,40 @@ mod tests {
             sidebar.node(id).unwrap().kind,
             NodeKind::Folder { expanded: true, .. }
         )
+    }
+
+    #[test]
+    fn adds_a_tab_that_saves_its_url_when_pinned() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_folder(home.pinned, "Docs").unwrap();
+        let pinned = sidebar.add_tab(folder, "a", "A").unwrap();
+        let today = sidebar.add_tab(home.today, "b", "B").unwrap();
+        assert_eq!(children(&sidebar, folder), [pinned]);
+        assert_eq!(children(&sidebar, home.today), [today]);
+        let tab = sidebar.tab_mut(pinned).unwrap().clone();
+        assert_eq!(
+            (
+                tab.url.as_str(),
+                tab.title.as_str(),
+                tab.saved_url.as_deref()
+            ),
+            ("a", "A", Some("a"))
+        );
+        assert_eq!(saved_url(&mut sidebar, today), None);
+        assert_eq!(sidebar.add_tab(today, "c", "C"), Err(Error::NotAContainer));
+        assert_eq!(
+            sidebar.add_tab(NodeId(999), "c", "C"),
+            Err(Error::UnknownNode)
+        );
+    }
+
+    #[test]
+    fn adds_no_folder_to_the_favorites() {
+        let mut sidebar = Sidebar::default();
+        let favorites = sidebar.profiles()[0].favorites;
+        assert_eq!(sidebar.add_folder(favorites, "Docs"), Err(Error::NotATab));
+        assert!(children(&sidebar, favorites).is_empty());
     }
 
     #[test]
