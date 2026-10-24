@@ -121,8 +121,12 @@ export function App() {
           {state && (
             <Library
               closed={state.closed}
+              spaces={state.spaces}
+              profiles={state.profiles}
               shown={pager.settled === -1}
-              onReopen={() => pager.go(displayed)}
+              onBack={() => pager.go(displayed)}
+              onShow={pager.go}
+              onNewSpace={() => pager.go(count)}
             />
           )}
           {state && <NewSpace index={count} shown={pager.settled === count} />}

@@ -1,18 +1,54 @@
 import { useEffect, useRef, useState } from "react";
-import { type ClosedTab, send } from "./bridge";
+import { type ClosedTab, type Profile, type Space, send, useAppEvent } from "./bridge";
 import { Icon } from "./Icon";
+import { ManageSpaces, matches } from "./ManageSpaces";
 
-// The page before the first Space. Of a library, Arbalette keeps only the tabs closed since launch
-// so far; reopening one opens it in the displayed Space, whose page `onReopen` slides back to.
+export type Section = "spaces" | "closed";
+
+// The sections the library holds so far, in its rail.
+export const SECTIONS: { id: Section; label: string; icon: string }[] = [
+  {
+    id: "spaces",
+    label: "Spaces",
+    icon: "M2.5 4.5a2 2 0 0 1 2-2h2v11h-2a2 2 0 0 1-2-2zM6.5 2.5h3v11h-3zM9.5 2.5h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-2z",
+  },
+  {
+    id: "closed",
+    label: "Recently Closed",
+    icon: "M2.8 8a5.2 5.2 0 1 0 1.5-3.7M2.6 2.4v2.4H5M8 5.2V8l2 1.3",
+  },
+];
+
+// The page before the first Space: a rail of sections, the one picked last kept until the app
+// quits, and the picked section's content under a field searching it. Spaces are managed there;
+// the tabs closed since launch reopen in the displayed Space, whose page `onBack` slides back to.
 export function Library({
   closed,
+  spaces,
+  profiles,
   shown,
-  onReopen,
+  onBack,
+  onShow,
+  onNewSpace,
 }: {
   closed: ClosedTab[];
+  spaces: Space[];
+  profiles: Profile[];
   shown: boolean;
-  onReopen: () => void;
+  onBack: () => void;
+  // Shows the Space at an index in sidebar order.
+  onShow: (index: number) => void;
+  onNewSpace: () => void;
 }) {
+  const [section, setSection] = useState<Section>("spaces");
+  const [query, setQuery] = useState("");
+  // The Space menu's Manage Spaces opens the library on its Spaces.
+  useAppEvent("arbalette:library", () => pick("spaces"));
+  const pick = (next: Section) => {
+    setSection(next);
+    setQuery("");
+  };
+  const label = SECTIONS.find(({ id }) => id === section)?.label;
   return (
     <section
       className="end-page library"
@@ -20,34 +56,98 @@ export function Library({
       inert={!shown}
       style={{ left: "-100%" }}
     >
-      <h2>Library</h2>
-      <h3>Recently closed</h3>
-      {closed.length === 0 && <p className="library-empty">No tab closed yet</p>}
-      <ul className="tabs">
-        {closed.map((tab, rank) => (
-          // Closed tabs have no id: they are reopened by rank, the last closed first.
-          // biome-ignore lint/suspicious/noArrayIndexKey: the rank is what reopens the tab.
-          <li key={rank} className="tab-row">
+      <div className="library-rail">
+        <div role="tablist" aria-label="Library sections" aria-orientation="vertical">
+          {SECTIONS.map(({ id, label, icon }) => (
             <button
+              key={id}
               type="button"
-              className="tab"
-              title={tab.url}
-              onClick={() => {
-                send(`reopen/${rank}`);
-                onReopen();
-              }}
+              role="tab"
+              className="library-section"
+              aria-selected={id === section}
+              onClick={() => pick(id)}
             >
-              {tab.favicon ? (
-                <img className="favicon" src={tab.favicon} alt="" />
-              ) : (
-                <span className="favicon" />
-              )}
-              <span className="title">{tab.title || tab.url}</span>
+              <Icon d={icon} size={22} />
+              <span>{label}</span>
             </button>
-          </li>
-        ))}
-      </ul>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="library-back"
+          aria-label="Back to the Space"
+          title="Back to the Space"
+          onClick={onBack}
+        >
+          <Icon d="M13 8H3.5M7.5 4 3.5 8l4 4" />
+        </button>
+      </div>
+      <div className="library-panel" role="tabpanel" aria-label={label}>
+        <input
+          type="search"
+          className="library-search"
+          aria-label={`Search ${label}`}
+          placeholder={`Search ${label}…`}
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+        />
+        {section === "spaces" ? (
+          <ManageSpaces
+            spaces={spaces}
+            profiles={profiles}
+            query={query}
+            onShow={onShow}
+            onNewSpace={onNewSpace}
+          />
+        ) : (
+          <ClosedTabs closed={closed} query={query} onReopen={onBack} />
+        )}
+      </div>
     </section>
+  );
+}
+
+// The tabs closed since launch, the last closed first, which reopen in the displayed Space.
+function ClosedTabs({
+  closed,
+  query,
+  onReopen,
+}: {
+  closed: ClosedTab[];
+  query: string;
+  onReopen: () => void;
+}) {
+  if (closed.length === 0) return <p className="library-empty">No tab closed yet</p>;
+  // Closed tabs have no id: they are reopened by rank, the last closed first.
+  const found = closed
+    .map((tab, rank) => ({ tab, rank }))
+    .filter(({ tab }) => matches(query, tab.title, tab.url));
+  if (found.length === 0) return <p className="library-empty">No closed tab matches</p>;
+  const now = Date.now();
+  return (
+    <ul className="closed-tabs">
+      {found.map(({ tab, rank }) => (
+        <li key={rank}>
+          <button
+            type="button"
+            className="closed-tab"
+            title={tab.url}
+            onClick={() => {
+              send(`reopen/${rank}`);
+              onReopen();
+            }}
+          >
+            {tab.favicon ? (
+              <img className="favicon" src={tab.favicon} alt="" />
+            ) : (
+              <span className="favicon placeholder" />
+            )}
+            <span className="title closed-title">{tab.title || tab.url}</span>
+            <span className="when">{ago(tab.closedAt, now)}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

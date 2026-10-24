@@ -3,7 +3,8 @@
 // between sections and into splits, painting the window with the Space's color, hiding and revealing the sidebar, keeping
 // profiles' web data apart, switching Spaces, creating, renaming and coloring profiles, creating
 // Spaces from the page after the last one and editing them, switching Spaces by number and by
-// swiping between their pages, reopening closed tabs from the library before the first Space,
+// swiping between their pages, reopening closed tabs from the library before the first Space and
+// searching them, managing Spaces from its cards (reordering, showing and creating them),
 // showing the displayed profile's favorites, recording each profile's history, running the items
 // of the rows' and the Spaces' native menus, collapsing and deleting Spaces, and quitting, in the
 // real app.
@@ -995,11 +996,19 @@ try {
   await check("the page keeps its size while the card moves", ``, `innerWidth === ${width - 260}`, content);
   await check("lifting early goes back, the card with it", `e2e.gesture("end", 0, 1000)`, `e2e.settled(0) && e2e.offsets().at(-1) === 0`);
   await check(
-    "a swipe before the first Space shows the library listing it, the app keeping the first Space",
+    "a swipe before the first Space shows the library on its Spaces, the app keeping the first Space",
     `e2e.swipe(20, 15, 50)`,
-    `e2e.library()?.querySelector(".tab")?.textContent === e2e.closedText && e2e.offset() === 100
+    `e2e.library()?.querySelector('[role=tab][aria-selected=true]')?.textContent === "Spaces"
+      && e2e.library().querySelectorAll(".space-card").length === e2e.spaces.length && e2e.offset() === 100
       && e2e.state.space === e2e.spaces[0] && !e2e.page()
       && e2e.lastCommand().endsWith("/library/show")`,
+  );
+  await check(
+    "its Recently Closed section lists the closed tab",
+    `e2e.section = (name) => [...e2e.library().querySelectorAll("[role=tab]")].find((tab) => tab.textContent === name);
+     e2e.section("Recently Closed").click()`,
+    `e2e.library().querySelector(".closed-tab .title")?.textContent === e2e.closedText
+      && e2e.library().querySelector(".library-search").placeholder === "Search Recently Closed…"`,
   );
   // On the library, the sidebar and the window around it are untinted alike: no seam.
   const untinted = await sidebar.eval(`(() => {
@@ -1032,15 +1041,16 @@ try {
   await check("the library's width comes back with it", ``, `innerWidth === 440`);
   await check(
     "reopening a tab from the library slides back to the displayed Space, where it opens",
-    `e2e.closedCount = e2e.state.closed.length; e2e.library().querySelector(".tab").click()`,
+    `e2e.closedCount = e2e.state.closed.length; e2e.library().querySelector(".closed-tab").click()`,
     `e2e.settled(0) && !e2e.library() && e2e.rows().length === e2e.count
       && e2e.state.closed.length === e2e.closedCount - 1 && innerWidth === 260`,
   );
   await check("the card gets its place back beside the sidebar", ``, `innerWidth === ${width - 260}`, content);
   await check(
-    "the footer's Library button slides to the library, the app keeping the first Space",
+    "the footer's Library button slides to the library on the section picked last, the app keeping the first Space",
     `document.querySelector('.switcher [aria-label="Library"]').click()`,
-    `e2e.library() && e2e.offset() === 100 && e2e.state.space === e2e.spaces[0]`,
+    `e2e.library() && e2e.offset() === 100 && e2e.state.space === e2e.spaces[0]
+      && e2e.library().querySelector("[role=tab][aria-selected=true]").textContent === "Recently Closed"`,
   );
   await check("the first Space's dot slides back to its page", `e2e.spaceIcons()[0].click()`, `e2e.settled(0)`);
   const last = await sidebar.eval(`e2e.spaces.length - 1`);
@@ -1285,9 +1295,10 @@ try {
   );
   await pressEnter();
   await check(
-    "Manage Spaces slides to the library",
+    "Manage Spaces slides to the library's Spaces",
     `e2e.chooseSpace("manage")`,
-    `e2e.library() && e2e.offset() === 100`,
+    `e2e.library() && e2e.offset() === 100
+      && e2e.library().querySelector("[role=tab][aria-selected=true]").textContent === "Spaces"`,
   );
   await check("the first Space's dot slides back from the library", `e2e.spaceIcons()[0].click()`, `e2e.settled(0)`);
   const lastSpace = await sidebar.eval(`e2e.spaces.length - 1`);
@@ -1457,6 +1468,102 @@ try {
     `e2e.rows().length === 0 && !e2e.page().querySelector(".clear-today")
       && e2e.state.closed.length === Math.min(10, e2e.state.closed.length) && e2e.state.closed.length > 0
       && !e2e.page().querySelector(".today .tab[aria-current]")`,
+  );
+  // The library: its sections, searching them, and managing Spaces from their cards.
+  await check(
+    "the Library button opens the library, wider, on the section picked last",
+    `document.querySelector('.switcher [aria-label="Library"]').click()`,
+    `e2e.library() && e2e.offset() === 100 && innerWidth === 440
+      && e2e.library().querySelector("[role=tab][aria-selected=true]").textContent === "Spaces"`,
+  );
+  await check(
+    "Recently Closed lists the closed tabs under a field searching them",
+    `e2e.section("Recently Closed").click()`,
+    `e2e.library().querySelectorAll(".closed-tab").length === e2e.state.closed.length
+      && e2e.library().querySelector(".library-search").placeholder === "Search Recently Closed…"`,
+  );
+  const query = await sidebar.eval(`(() => {
+    const tab = e2e.state.closed.at(-1);
+    e2e.query = (tab.title || tab.url).slice(0, 8);
+    e2e.library().querySelector(".library-search").focus();
+    return e2e.query;
+  })()`);
+  await type(query);
+  await check(
+    "typing in the field keeps the closed tabs holding the text",
+    ``,
+    `(() => {
+      const wanted = e2e.query.toLowerCase();
+      const found = e2e.state.closed.filter((tab) => (tab.title + " " + tab.url).toLowerCase().includes(wanted));
+      const rows = [...e2e.library().querySelectorAll(".closed-tab")];
+      return found.length > 0 && rows.length === found.length
+        && rows.every((row) => (row.textContent + row.title).toLowerCase().includes(wanted));
+    })()`,
+  );
+  await check(
+    "the Spaces section shows a card per Space, the field emptied",
+    `e2e.section("Spaces").click()`,
+    `e2e.library().querySelectorAll(".space-card").length === e2e.spaces.length
+      && e2e.library().querySelector(".library-search").value === ""
+      && e2e.library().querySelector(".library-search").placeholder === "Search Spaces…"`,
+  );
+  await sidebar.eval(`e2e.cards = () => [...e2e.library().querySelectorAll(".space-card")];
+    e2e.order = e2e.spaces.slice(); e2e.shownSpace = e2e.state.space; 0`);
+  end = await hold(`e2e.cards()[1].querySelector(".space-card-handle")`, `e2e.cards()[0]`, 0.25, 0.5);
+  await check(
+    "a card dragged by its handle stays dimmed while its copy follows the pointer and a line shows where it lands",
+    ``,
+    `(() => {
+      const ghost = document.querySelector(".card-ghost")?.getBoundingClientRect();
+      const line = document.querySelector(".space-drop-line");
+      const first = e2e.cards()[0].getBoundingClientRect();
+      return e2e.cards()[1].classList.contains("dragged") && ghost.width === first.width
+        && ghost.left < ${end.x} && ghost.right > ${end.x}
+        && getComputedStyle(line).display === "block" && line.getBoundingClientRect().left < first.left;
+    })()`,
+  );
+  await release(end);
+  await check(
+    "dropping it before the first card moves its Space first, the library staying in view",
+    ``,
+    `e2e.spaces.join() === [e2e.order[1], e2e.order[0], ...e2e.order.slice(2)].join()
+      && e2e.cards()[0].dataset.id === String(e2e.order[1]) && !document.querySelector(".card-ghost, .dragged")
+      && e2e.library() && e2e.offset() === 100 && e2e.state.space === e2e.shownSpace`,
+  );
+  const order = await sidebar.eval(`e2e.spaces.join()`);
+  await checkSession("the session saves the Spaces' new order", (saved) =>
+    saved.spaces.map((space) => space.id).join() === order,
+  );
+  await check(
+    "the profile pill's menu moves a card's Space to another profile",
+    `e2e.card = e2e.cards()[0];
+     e2e.otherProfile = e2e.state.profiles.find((profile) => profile.id !== e2e.state.spaces[0].profile);
+     e2e.send("menu/choose/space-profile/" + e2e.spaces[0] + "/profile/" + e2e.otherProfile.id)`,
+    `e2e.state.spaces[0].profile === e2e.otherProfile.id
+      && e2e.card.querySelector(".space-card-profile").textContent === e2e.otherProfile.name`,
+  );
+  await check(
+    "clicking a card shows its Space and leaves the library",
+    `e2e.cards()[2].querySelector(".space-card-pinned").click()`,
+    `e2e.settled(2) && !e2e.library() && e2e.state.space === e2e.spaces[2]`,
+  );
+  await check(
+    "the Library button opens it again",
+    `document.querySelector('.switcher [aria-label="Library"]').click()`,
+    `e2e.library() && e2e.offset() === 100`,
+  );
+  await check(
+    "the + after the cards slides to the page creating a Space, its name field focused",
+    `e2e.spaceCount = e2e.spaces.length; e2e.library().querySelector(".space-add button").click()`,
+    `e2e.newPage() && e2e.offset() === -e2e.spaceCount * 100 && document.activeElement === e2e.newField("name")`,
+  );
+  await type("From the library");
+  await pressEnter();
+  await check(
+    "creating it there adds a Space after the others and shows it",
+    ``,
+    `e2e.spaces.length === e2e.spaceCount + 1 && e2e.state.spaces.at(-1).title === "From the library"
+      && e2e.settled(e2e.spaceCount)`,
   );
   await quit(app);
   console.log("ok - quitting once closes every browser and exits the app");
