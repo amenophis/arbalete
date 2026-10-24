@@ -37,3 +37,6 @@ selected tab for now).
   included. Timed until the sidebar is laid out again, a state update takes 0.1 ms median, 0.3 ms
   p95, before and after memoizing tab rows. Memoizing matters as tabs grow: with 500 rows, one
   renamed tab went from 2.6 ms to 1.1 ms median.
+- 2026-10-24, phase 1: cold starts of about 1.8 s came from launching each new build for the first
+  time, when macOS checks its code, whatever the signing identity. Later launches start in about
+  300 ms, as in phase 0. `mise run bench` now reports the two separately.
