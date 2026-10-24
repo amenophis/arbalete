@@ -36,11 +36,20 @@ export function App() {
       <div className="toolbar">
         <button
           type="button"
+          aria-label="Toggle sidebar"
+          title="Toggle sidebar"
+          onClick={() => send("sidebar/toggle")}
+        >
+          <Icon d="M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2zM6.5 2.5v11" />
+        </button>
+        <span className="spacer" />
+        <button
+          type="button"
           aria-label="Back"
           disabled={!page?.canGoBack}
           onClick={() => send("back")}
         >
-          ‹
+          <Icon d="M10 3.5 5.5 8l4.5 4.5" />
         </button>
         <button
           type="button"
@@ -48,10 +57,10 @@ export function App() {
           disabled={!page?.canGoForward}
           onClick={() => send("forward")}
         >
-          ›
+          <Icon d="M6 3.5 10.5 8 6 12.5" />
         </button>
         <button type="button" aria-label="Reload" onClick={() => send("reload")}>
-          ↻
+          <Icon d="M12.8 8.5a4.8 4.8 0 1 1-1.4-3.9M11.9 2.2v2.7H9.2" />
         </button>
       </div>
       {/* Kept empty without a selected tab, so the sections below do not move. */}
@@ -366,6 +375,25 @@ const Favorite = memo(function Favorite({
     </li>
   );
 });
+
+// A toolbar icon: a thin stroke drawn on a 16 px grid.
+function Icon({ d }: { d: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={d} />
+    </svg>
+  );
+}
 
 // A folder, open while its tabs show.
 function FolderIcon({ open }: { open: boolean }) {

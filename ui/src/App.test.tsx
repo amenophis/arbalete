@@ -88,10 +88,11 @@ test("asks the app for its state", () => {
   expect(fetch).toHaveBeenCalledWith("/command/ready", { method: "POST" });
 });
 
-test("sends navigation commands to the app", () => {
+test("sends the toolbar's commands to the app", () => {
   render(<App />);
   receive({});
   for (const [label, command] of [
+    ["Toggle sidebar", "sidebar/toggle"],
     ["Back", "back"],
     ["Forward", "forward"],
     ["Reload", "reload"],
@@ -107,6 +108,7 @@ test("shows the active tab and the loading progress", () => {
   expect(screen.getByText("https://example.com/")).toBeDefined();
   expect(screen.getByRole("progressbar", { name: "Loading" })).toBeDefined();
   expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", true);
+  expect(screen.getByRole("button", { name: "Forward" })).toHaveProperty("disabled", false);
   expect(screen.getByRole("button", { name: "Example" }).getAttribute("aria-current")).toBe("page");
 });
 
