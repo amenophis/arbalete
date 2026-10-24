@@ -13,6 +13,7 @@ const TIMEOUT = 10_000;
 
 export const SIDEBAR = "https://arbalette.ui/index.html";
 export const OVERLAY = `${SIDEBAR}#overlay`;
+export const REVEAL = `${SIDEBAR}#reveal`;
 
 // Starts the app on the session in `dataDir`; the caller kills it.
 export function launch(dataDir) {
@@ -22,6 +23,12 @@ export function launch(dataDir) {
     // Not the repository, which may sit in Documents: macOS asks before an app reads it.
     cwd: tmpdir(),
   });
+}
+
+// The urls of the pages open in the app.
+export async function pages() {
+  const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((response) => response.json());
+  return list.map((page) => page.url);
 }
 
 // Connects to the page at `url` once the app has opened it.
@@ -72,6 +79,8 @@ export async function connect(url) {
   }
   return {
     eval: evaluate,
+    // Calls a DevTools protocol method on the page.
+    call,
     // The page's JavaScript heap in use, in MB.
     async heap() {
       const { usedSize } = await call("Runtime.getHeapUsage");

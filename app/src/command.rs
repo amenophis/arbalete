@@ -18,6 +18,12 @@ pub enum Command {
     Favorite(usize),
     ShowOverlay,
     HideOverlay,
+    /// Hides the sidebar, or shows it again: `sidebar/toggle`.
+    ToggleSidebar,
+    /// Shows the hidden sidebar above the page, `sidebar/reveal`, or hides it again,
+    /// `sidebar/conceal`.
+    RevealSidebar,
+    ConcealSidebar,
     /// Opens a tab: `open/<percent-encoded url>`.
     Open(String),
     /// Closes a tab, `close/<tab id>`, or the selected one, `close`.
@@ -46,6 +52,9 @@ impl Command {
             "reload" => Some(Self::Reload),
             "overlay/show" => Some(Self::ShowOverlay),
             "overlay/hide" => Some(Self::HideOverlay),
+            "sidebar/toggle" => Some(Self::ToggleSidebar),
+            "sidebar/reveal" => Some(Self::RevealSidebar),
+            "sidebar/conceal" => Some(Self::ConcealSidebar),
             "close" => Some(Self::Close(None)),
             "reopen" => Some(Self::Reopen),
             "pin" => Some(Self::Pin(None)),
@@ -149,6 +158,23 @@ mod tests {
         assert_eq!(Command::parse("favorite/0"), None);
         assert_eq!(Command::parse("favorite/10"), None);
         assert_eq!(Command::parse("favorite/x"), None);
+    }
+
+    #[test]
+    fn parses_sidebar_commands() {
+        assert_eq!(
+            Command::parse("sidebar/toggle"),
+            Some(Command::ToggleSidebar)
+        );
+        assert_eq!(
+            Command::parse("sidebar/reveal"),
+            Some(Command::RevealSidebar)
+        );
+        assert_eq!(
+            Command::parse("sidebar/conceal"),
+            Some(Command::ConcealSidebar)
+        );
+        assert_eq!(Command::parse("sidebar"), None);
     }
 
     #[test]

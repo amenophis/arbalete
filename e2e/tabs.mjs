@@ -1,10 +1,10 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
-// between tabs and to favorites, creating, renaming and collapsing folders, and dragging tabs
-// between sections, in the real app.
+// between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
+// between sections, and hiding and revealing the sidebar, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
-import { connect, launch, SIDEBAR, waitFor } from "./devtools.mjs";
+import { connect, launch, pages, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs";
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error("usage: node e2e/tabs.mjs <data dir>");
@@ -45,10 +45,10 @@ try {
     has: (list, id) => [...list].some((element) => element.closest("li").dataset.id === id),
   }`);
 
-  async function check(description, action, condition) {
+  async function check(description, action, condition, page = sidebar) {
     await sidebar.eval(action);
     try {
-      await sidebar.eval(waitFor(condition));
+      await page.eval(waitFor(condition));
     } catch (error) {
       throw new Error(`not ok - ${description}\n  ${error.message}`);
     }
@@ -241,6 +241,49 @@ try {
     `document.querySelector(".scroll").scrollTop > 0 && document.scrollingElement.scrollTop === 0
       && document.querySelector(".url").getBoundingClientRect().top === e2e.top`,
   );
+
+  const reveal = await connect(REVEAL);
+  const content = await connect((await pages()).find((url) => !url.startsWith(SIDEBAR)));
+  const width = (await content.eval("innerWidth")) + 260;
+  await check(
+    "the sidebar toggle command hides the sidebar",
+    `e2e.send("sidebar/toggle")`,
+    `document.visibilityState === "hidden"`,
+  );
+  await check("the page then takes the whole window width", ``, `innerWidth === ${width}`, content);
+  await check(
+    "the sidebar hidden, a strip of the revealed sidebar lines the window's left edge",
+    ``,
+    `document.visibilityState === "visible" && innerWidth === 4 && innerHeight === outerHeight`,
+    reveal,
+  );
+  const mouse = (x) => reveal.call("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: 200 });
+  await mouse(2);
+  await check(
+    "the pointer at the window's left edge reveals the sidebar above the page",
+    ``,
+    `innerWidth === 260 && document.querySelectorAll(".today .tab-row").length > 0`,
+    reveal,
+  );
+  await check("the revealed sidebar does not resize the page", ``, `innerWidth === ${width}`, content);
+  await check(
+    "a tab clicked in the revealed sidebar is selected",
+    ``,
+    `(() => {
+      const row = document.querySelectorAll(".today .tab-row")[1];
+      if (!row.querySelector(".tab[aria-current]")) row.querySelector(".tab").click();
+      return !!row.querySelector(".tab[aria-current]");
+    })()`,
+    reveal,
+  );
+  await mouse(600);
+  await check("the pointer leaving the revealed sidebar hides it", ``, `innerWidth === 4`, reveal);
+  await check(
+    "the sidebar toggle command shows the sidebar again",
+    `e2e.send("sidebar/toggle")`,
+    `document.visibilityState === "visible" && e2e.current() === e2e.rows()[1]`,
+  );
+  await check("the revealed sidebar is hidden with it", ``, `document.visibilityState === "hidden"`, reveal);
 } finally {
   app.kill();
 }

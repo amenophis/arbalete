@@ -11,10 +11,16 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApp, NSApplication, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags, NSMenu,
-    NSMenuItem, NSUpArrowFunctionKey,
+    NSMenuItem, NSUpArrowFunctionKey, NSView, NSWindowButton,
 };
 use objc2_foundation::{NSString, ns_string};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::ffi::c_void;
+
+thread_local! {
+    /// Its title says what it does: hide or show the sidebar.
+    static SIDEBAR_ITEM: RefCell<Option<Retained<NSMenuItem>>> = const { RefCell::new(None) };
+}
 
 #[derive(Default)]
 pub struct AppIvars {
@@ -93,6 +99,11 @@ define_class!(
         #[unsafe(method(arbaletteForward:))]
         fn forward(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Forward);
+        }
+
+        #[unsafe(method(arbaletteToggleSidebar:))]
+        fn toggle_sidebar(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ToggleSidebar);
         }
 
         #[unsafe(method(arbaletteReload:))]
@@ -184,12 +195,15 @@ pub fn setup_menu() {
         (ns_string!("Tabs"), tabs_menu(mtm)),
         (
             ns_string!("View"),
-            vec![item(
-                mtm,
-                ns_string!("Reload Page"),
-                sel!(arbaletteReload:),
-                ns_string!("r"),
-            )],
+            vec![
+                sidebar_item(mtm),
+                item(
+                    mtm,
+                    ns_string!("Reload Page"),
+                    sel!(arbaletteReload:),
+                    ns_string!("r"),
+                ),
+            ],
         ),
         (
             ns_string!("History"),
@@ -218,6 +232,42 @@ pub fn setup_menu() {
         menu_bar.addItem(&menu_item);
     }
     NSApp(mtm).setMainMenu(Some(&menu_bar));
+}
+
+fn sidebar_item(mtm: MainThreadMarker) -> Retained<NSMenuItem> {
+    let item = item(
+        mtm,
+        ns_string!("Hide Sidebar"),
+        sel!(arbaletteToggleSidebar:),
+        ns_string!("s"),
+    );
+    SIDEBAR_ITEM.set(Some(item.clone()));
+    item
+}
+
+/// Updates the menu once the sidebar is shown or hidden, and hides the window buttons with it,
+/// as they sit in its toolbar. `view` is the window's content view.
+pub fn sidebar_shown(view: *mut c_void, shown: bool) {
+    if let Some(item) = SIDEBAR_ITEM.with_borrow(Clone::clone) {
+        item.setTitle(if shown {
+            ns_string!("Hide Sidebar")
+        } else {
+            ns_string!("Show Sidebar")
+        });
+    }
+    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
+    let Some(window) = unsafe { view.cast::<NSView>().as_ref() }.and_then(NSView::window) else {
+        return;
+    };
+    for button in [
+        NSWindowButton::CloseButton,
+        NSWindowButton::MiniaturizeButton,
+        NSWindowButton::ZoomButton,
+    ] {
+        if let Some(button) = window.standardWindowButton(button) {
+            button.setHidden(!shown);
+        }
+    }
 }
 
 /// Next and previous tab with ⌘⌥↓ and ⌘⌥↑, then the favorites with ⌘1 to ⌘9.
