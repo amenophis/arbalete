@@ -289,6 +289,17 @@ Commit sequence (the phase 0 measurements put the state update first, before the
 - Switching Spaces: switcher at the bottom of the sidebar, horizontal swipe, shortcuts.
 - Favorites follow the profile of the displayed Space.
 
+Commit sequence:
+
+| # | Branch | Commit |
+|---|---|---|
+| 32 | `feat/profiles` | `feat(app): give each profile its own web data` |
+| 33 | | `feat(ui): create, rename and color profiles` |
+| 34 | `feat/spaces` | `feat(ui): show one Space at a time with a switcher at the bottom` |
+| 35 | | `feat(ui): create and edit Spaces (name, emoji, color)` |
+| 36 | | `feat(app): switch Spaces with ⌃1…9 and a horizontal swipe` |
+| 37 | | `feat(ui): show the favorites of the displayed Space's profile` |
+
 ### Phase 3 — Imports
 - Import assistant on first launch and in Settings.
 - Chromium browsers, Firefox, Safari: profiles, bookmarks, history.
