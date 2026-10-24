@@ -3,7 +3,8 @@
 //! The `cef` crate's default callbacks return 0, which means "no" or "cancel": every callback the app
 //! relies on is implemented explicitly.
 
-use crate::command::Command;
+use crate::command::{Command, Target};
+use crate::menu::{self, Action};
 use arbalette_core::history::{self, History};
 use arbalette_core::import::browsers::{self, Family};
 use arbalette_core::import::{self, Choice, safari};
@@ -985,17 +986,26 @@ fn close_tab(tab: Option<NodeId>) {
                 .expect("the displayed Space")
         })
     } else {
-        let next = STATE.with_borrow_mut(|state| {
-            let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
-            state.closed.push(closed);
-            state.sidebar.next_after_close(tab)
-        });
-        update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
-        next
+        remove_tab(tab)
     };
-    if selected != Some(tab) {
-        return;
+    if selected == Some(tab) {
+        show_next(next);
     }
+}
+
+/// Removes an open tab, which may be reopened, and returns the tab to show instead.
+fn remove_tab(tab: NodeId) -> Option<NodeId> {
+    let next = STATE.with_borrow_mut(|state| {
+        let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
+        state.closed.push(closed);
+        state.sidebar.next_after_close(tab)
+    });
+    update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
+    next
+}
+
+/// Shows the tab that replaces the selected one, or the overlay when none is left.
+fn show_next(next: Option<NodeId>) {
     match next {
         Some(next) => select_tab(next),
         None => {
@@ -1003,6 +1013,86 @@ fn close_tab(tab: Option<NodeId>) {
             show_overlay(true);
         }
     }
+}
+
+/// Closes the tabs of a folder, the selected one last, so the tab shown instead is not one about
+/// to close.
+fn close_folder_tabs(folder: NodeId) {
+    let tabs = STATE.with_borrow(|state| {
+        let mut tabs = state.sidebar.folder_tabs(folder).ok()?;
+        let selected = state.sidebar.displayed().selected;
+        tabs.sort_by_key(|&tab| Some(tab) == selected);
+        Some(tabs)
+    });
+    for tab in tabs.unwrap_or_default() {
+        close_tab(Some(tab));
+    }
+}
+
+/// Removes a favorite for good, unlike closing it; it may be reopened like a closed tab.
+fn remove_favorite(tab: NodeId) {
+    let (favorite, selected) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        (
+            sidebar.is_favorite(tab),
+            sidebar.displayed().selected == Some(tab),
+        )
+    });
+    if !favorite {
+        return;
+    }
+    let next = remove_tab(tab);
+    if selected {
+        show_next(next);
+    }
+}
+
+/// Moves a tab to another Space; the selected tab takes the Space along, so it stays in view.
+fn move_to_space(tab: NodeId, space: SpaceId) {
+    let selected = STATE.with_borrow(|state| state.sidebar.displayed().selected == Some(tab));
+    // Like a selection, an unknown tab or Space from a menu is ignored.
+    if update_sidebar(|sidebar| sidebar.move_to_space(tab, space)).is_ok() && selected {
+        select_tab(tab);
+    }
+}
+
+/// Shows the menu of a sidebar row at the pointer.
+fn show_menu(target: Target) {
+    let Some(entries) = STATE.with_borrow(|state| menu::build(&state.sidebar, target)) else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    crate::mac::pop_up(entries);
+    #[cfg(not(target_os = "macos"))]
+    let _ = entries;
+}
+
+/// Runs an item of a row's menu, as if it was picked.
+fn choose_menu(target: Target, item: &str) {
+    let entries = STATE.with_borrow(|state| menu::build(&state.sidebar, target));
+    if let Some(action) = entries.and_then(|entries| menu::find(entries, item)) {
+        perform(action);
+    }
+}
+
+/// Runs the item picked in a menu.
+pub fn perform(action: Action) {
+    match action {
+        Action::Run(command) => run(command),
+        Action::Ask(event, detail) => ask(event, &detail),
+        #[cfg(target_os = "macos")]
+        Action::CopyLink(url) => crate::mac::copy(&url),
+        #[cfg(not(target_os = "macos"))]
+        Action::CopyLink(_) => {}
+    }
+}
+
+/// Dispatches an event in the sidebars, which takes the keyboard focus, even from the page.
+fn ask(event: &str, detail: &serde_json::Value) {
+    focus_sidebar();
+    let event = format!(r#"new CustomEvent("{event}", {{ detail: {detail} }})"#);
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
 }
 
 /// Pins or unpins a tab, or the selected one.
@@ -1017,20 +1107,16 @@ fn toggle_pin(tab: Option<NodeId>) {
     });
 }
 
-/// Creates a folder at the end of the pinned tabs and asks the sidebar to rename it, giving it the
-/// keyboard focus even when the menu was used from the page.
-fn new_folder() {
+/// Creates a folder at the end of `parent`, or of the pinned tabs, and asks the sidebar to rename
+/// it, even when the menu was used from the page. Like a selection, an unknown parent is ignored.
+fn new_folder(parent: Option<NodeId>) {
     let folder = update_sidebar(|sidebar| {
-        let pinned = sidebar.displayed().pinned;
-        sidebar
-            .add_folder(pinned, "New Folder")
-            .expect("the pinned tabs")
+        let parent = parent.unwrap_or(sidebar.displayed().pinned);
+        sidebar.add_folder(parent, "New Folder")
     });
-    focus_sidebar();
-    let folder = serde_json::to_string(&folder).expect("an id");
-    let event = format!(r#"new CustomEvent("arbalette:rename", {{ detail: {folder} }})"#);
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
+    if let Ok(folder) = folder {
+        ask("arbalette:rename", &json!(folder));
+    }
 }
 
 /// Gives the sidebar the keyboard focus, even from the page, whose card is a window of its own.
@@ -1050,21 +1136,24 @@ fn new_profile() {
             .create_profile("New Profile")
             .expect("a name that is not blank")
     });
-    focus_sidebar();
-    let profile = serde_json::to_string(&profile).expect("an id");
-    let event = format!(r#"new CustomEvent("arbalette:rename-profile", {{ detail: {profile} }})"#);
-    dispatch(&SIDEBAR, &event);
-    dispatch(&REVEAL_VIEW, &event);
+    ask("arbalette:rename-profile", &json!(profile));
 }
 
-/// Creates a Space in the displayed Space's profile and shows it. Like a rename, a blank title
-/// from the UI is ignored.
-fn create_space(title: &str, emoji: &str, color: Color) {
+/// Creates a Space in the displayed Space's profile and shows it, with `tab` moved into it and
+/// selected. Like a rename, a blank title from the UI is ignored, and like a selection, an unknown
+/// tab.
+fn create_space(title: &str, emoji: &str, color: Color, tab: Option<NodeId>) {
     let created = update_sidebar(|sidebar| {
         let profile = sidebar.displayed().profile;
         let space = sidebar.create_space(title, profile)?;
         sidebar.set_space_emoji(space, emoji)?;
-        sidebar.set_space_color(space, color)
+        sidebar.set_space_color(space, color)?;
+        if let Some(tab) = tab
+            && sidebar.move_to_space(tab, space).is_ok()
+        {
+            sidebar.select(space, tab)?;
+        }
+        Ok::<_, arbalette_core::sidebar::Error>(())
     });
     if created.is_ok() {
         show_selected();
@@ -1295,7 +1384,12 @@ pub fn run(command: Command) {
         (Command::Close(tab), _) => close_tab(tab),
         (Command::Reopen(rank), _) => reopen_tab(rank),
         (Command::Pin(tab), _) => toggle_pin(tab),
-        (Command::NewFolder, _) => new_folder(),
+        (Command::NewFolder(parent), _) => new_folder(parent),
+        (Command::CloseFolderTabs(folder), _) => close_folder_tabs(folder),
+        (Command::RemoveFavorite(tab), _) => remove_favorite(tab),
+        (Command::MoveToSpace(tab, space), _) => move_to_space(tab, space),
+        (Command::Menu(target), _) => show_menu(target),
+        (Command::ChooseMenu(target, item), _) => choose_menu(target, &item),
         // Like a selection, an unknown folder or a blank title from the UI is ignored.
         (Command::ToggleFolder(id), _) => {
             let _ = update_sidebar(|sidebar| sidebar.toggle_folder(id));
@@ -1319,9 +1413,10 @@ pub fn run(command: Command) {
                 title,
                 emoji,
                 color,
+                tab,
             },
             _,
-        ) => create_space(&title, &emoji, color),
+        ) => create_space(&title, &emoji, color, tab),
         // Like a profile, an unknown Space or a blank title from the UI is ignored.
         (Command::RenameSpace(id, title), _) => {
             let _ = update_sidebar(|sidebar| sidebar.rename_space(id, &title));

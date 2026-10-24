@@ -40,8 +40,20 @@ pub enum Command {
     Reopen(usize),
     /// Pins or unpins a tab, `pin/<tab id>`, or the selected one, `pin`.
     Pin(Option<NodeId>),
-    /// Creates a folder at the end of the pinned tabs, for the UI to rename: `folder/new`.
-    NewFolder,
+    /// Creates a folder for the UI to rename, at the end of the displayed Space's pinned tabs,
+    /// `folder/new`, or of a folder, from its menu.
+    NewFolder(Option<NodeId>),
+    /// Closes every tab of a folder, from its menu.
+    CloseFolderTabs(NodeId),
+    /// Removes a tab from the favorites, from its menu.
+    RemoveFavorite(NodeId),
+    /// Moves a tab to another Space's "Today" tabs, from its menu.
+    MoveToSpace(NodeId, SpaceId),
+    /// Opens the native menu of a sidebar row at the pointer: `menu/node/<tab or folder id>`.
+    Menu(Target),
+    /// Runs an item of a row's menu without showing it, by the item's id (app/src/menu.rs), as the
+    /// end-to-end checks cannot pick in native menus: `menu/choose/node/<id>/<item id>`.
+    ChooseMenu(Target, String),
     /// Collapses or expands a folder: `toggle/<folder id>`.
     ToggleFolder(NodeId),
     /// Renames a folder: `rename/<folder id>/<percent-encoded title>`.
@@ -64,11 +76,12 @@ pub enum Command {
     PreviousSpace,
     /// Creates a Space in the displayed Space's profile and displays it:
     /// `space/create/<color>/<percent-encoded emoji>/<percent-encoded title>`, an empty emoji for
-    /// none.
+    /// none, and `/<tab id>` after it to move a tab into it.
     CreateSpace {
         title: String,
         emoji: String,
         color: Color,
+        tab: Option<NodeId>,
     },
     /// Renames a Space: `space/rename/<space id>/<percent-encoded title>`.
     RenameSpace(SpaceId, String),
@@ -96,6 +109,20 @@ pub enum Command {
     },
 }
 
+/// What a menu is about.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Target {
+    /// A tab, a folder or a favorite.
+    Node(NodeId),
+}
+
+impl Target {
+    fn parse(path: &str) -> Option<Self> {
+        let id = path.strip_prefix("node/")?;
+        serde_json::from_str(id).ok().map(Self::Node)
+    }
+}
+
 impl Command {
     pub fn parse(path: &str) -> Option<Self> {
         match path {
@@ -112,7 +139,7 @@ impl Command {
             "close" => Some(Self::Close(None)),
             "reopen" => Some(Self::Reopen(0)),
             "pin" => Some(Self::Pin(None)),
-            "folder/new" => Some(Self::NewFolder),
+            "folder/new" => Some(Self::NewFolder(None)),
             "next" => Some(Self::NextTab),
             "previous" => Some(Self::PreviousTab),
             "profile/new" => Some(Self::NewProfile),
@@ -154,13 +181,31 @@ impl Command {
                     return parse_color(color).map(|color| Self::ColorProfile(id, color));
                 }
                 if let Some(args) = path.strip_prefix("space/create/") {
-                    let mut args = args.splitn(3, '/');
+                    let mut args = args.split('/');
                     let (color, emoji, title) = (args.next()?, args.next()?, args.next()?);
+                    let tab = match args.next() {
+                        Some(tab) => Some(serde_json::from_str(tab).ok()?),
+                        None => None,
+                    };
+                    if args.next().is_some() {
+                        return None;
+                    }
                     return Some(Self::CreateSpace {
                         title: percent_decode(title)?,
                         emoji: percent_decode(emoji)?,
                         color: parse_color(color)?,
+                        tab,
                     });
+                }
+                if let Some(args) = path.strip_prefix("menu/choose/") {
+                    // The target's kind and id, then the item's id, which may hold slashes.
+                    let mut args = args.splitn(3, '/');
+                    let (kind, id, item) = (args.next()?, args.next()?, args.next()?);
+                    let target = Target::parse(&format!("{kind}/{id}"))?;
+                    return Some(Self::ChooseMenu(target, item.to_string()));
+                }
+                if let Some(target) = path.strip_prefix("menu/") {
+                    return Target::parse(target).map(Self::Menu);
                 }
                 if let Some((id, title)) = path
                     .strip_prefix("space/rename/")
@@ -272,7 +317,7 @@ fn percent_decode(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::Command;
+    use super::{Command, Target};
     use arbalette_core::sidebar::Color;
 
     #[test]
@@ -368,7 +413,7 @@ mod tests {
 
     #[test]
     fn parses_folder_commands() {
-        assert_eq!(Command::parse("folder/new"), Some(Command::NewFolder));
+        assert_eq!(Command::parse("folder/new"), Some(Command::NewFolder(None)));
         assert!(matches!(
             Command::parse("toggle/6"),
             Some(Command::ToggleFolder(_))
@@ -466,14 +511,24 @@ mod tests {
                 title: "Café/2".into(),
                 emoji: "🏡".into(),
                 color: Color::Green,
+                tab: None,
             })
         );
+        let Some(Command::CreateSpace { tab: Some(tab), .. }) =
+            Command::parse("space/create/blue//Home/12")
+        else {
+            panic!("not a Space with a tab")
+        };
+        assert_eq!(serde_json::to_string(&tab).unwrap(), "12");
+        assert_eq!(Command::parse("space/create/blue//Home/x"), None);
+        assert_eq!(Command::parse("space/create/blue//Home/12/3"), None);
         assert_eq!(
             Command::parse("space/create/blue//Home"),
             Some(Command::CreateSpace {
                 title: "Home".into(),
                 emoji: "".into(),
                 color: Color::Blue,
+                tab: None,
             })
         );
         assert_eq!(Command::parse("space/create/teal//Home"), None);
@@ -507,6 +562,28 @@ mod tests {
         assert_eq!(Command::parse("space/color/x/blue"), None);
         assert_eq!(Command::parse("space/rename/4"), None);
         assert_eq!(Command::parse("space/emoji/x/a"), None);
+    }
+
+    #[test]
+    fn parses_menu_commands() {
+        let Some(Command::Menu(Target::Node(id))) = Command::parse("menu/node/12") else {
+            panic!("not a menu")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "12");
+        let Some(Command::ChooseMenu(Target::Node(id), item)) =
+            Command::parse("menu/choose/node/12/move/4")
+        else {
+            panic!("not a menu choice")
+        };
+        assert_eq!(
+            (serde_json::to_string(&id).unwrap(), item.as_str()),
+            ("12".into(), "move/4")
+        );
+        assert_eq!(Command::parse("menu/node/x"), None);
+        assert_eq!(Command::parse("menu/tab/12"), None);
+        assert_eq!(Command::parse("menu/choose/node/12"), None);
+        assert_eq!(Command::parse("menu/choose/node/x/pin"), None);
+        assert_eq!(Command::parse("menu"), None);
     }
 
     #[test]

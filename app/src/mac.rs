@@ -1,6 +1,7 @@
 //! The NSApplication subclass CEF requires on macOS, and the menus.
 
 use crate::command::Command;
+use crate::menu::{Action, Entry};
 use crate::swipe::{Phase, Scroll};
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::{
@@ -11,9 +12,10 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApp, NSApplication, NSColor, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags,
-    NSEventPhase, NSEventType, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSRightArrowFunctionKey,
-    NSUpArrowFunctionKey, NSView, NSWindowButton, NSWorkspace,
+    NSApp, NSApplication, NSColor, NSControlStateValueOn, NSDownArrowFunctionKey, NSEvent,
+    NSEventModifierFlags, NSEventPhase, NSEventType, NSLeftArrowFunctionKey, NSMenu, NSMenuItem,
+    NSPasteboard, NSPasteboardTypeString, NSRightArrowFunctionKey, NSUpArrowFunctionKey, NSView,
+    NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{NSArray, NSNumber, NSString, ns_string};
 use std::cell::{Cell, RefCell};
@@ -39,6 +41,8 @@ const CARD_EDGE: f64 = 0.5;
 thread_local! {
     /// Its title says what it does: hide or show the sidebar.
     static SIDEBAR_ITEM: RefCell<Option<Retained<NSMenuItem>>> = const { RefCell::new(None) };
+    /// The actions of the menu last shown, which its items' tags index.
+    static MENU_ACTIONS: RefCell<Vec<Action>> = const { RefCell::new(Vec::new()) };
 }
 
 #[derive(Default)]
@@ -93,7 +97,7 @@ define_class!(
 
         #[unsafe(method(arbaletteNewFolder:))]
         fn new_folder(&self, _sender: Option<&AnyObject>) {
-            crate::shell::run(Command::NewFolder);
+            crate::shell::run(Command::NewFolder(None));
         }
 
         #[unsafe(method(arbaletteImport:))]
@@ -150,6 +154,17 @@ define_class!(
         #[unsafe(method(arbaletteToggleSidebar:))]
         fn toggle_sidebar(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ToggleSidebar);
+        }
+
+        // The item's tag indexes the actions of the menu last shown.
+        #[unsafe(method(arbaletteMenuItem:))]
+        fn menu_item(&self, sender: Option<&NSMenuItem>) {
+            let action = sender.and_then(|item| {
+                MENU_ACTIONS.with_borrow(|actions| actions.get(item.tag() as usize).cloned())
+            });
+            if let Some(action) = action {
+                crate::shell::perform(action);
+            }
         }
 
         #[unsafe(method(arbaletteReload:))]
@@ -461,6 +476,57 @@ fn item(
             key,
         )
     }
+}
+
+/// Shows a menu at the pointer until an item is picked, which runs, or the menu is dismissed.
+pub fn pop_up(entries: Vec<Entry>) {
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let mut actions = Vec::new();
+    let menu = native_menu(mtm, entries, &mut actions);
+    MENU_ACTIONS.set(actions);
+    menu.popUpMenuPositioningItem_atLocation_inView(None, NSEvent::mouseLocation(), None);
+}
+
+fn native_menu(
+    mtm: MainThreadMarker,
+    entries: Vec<Entry>,
+    actions: &mut Vec<Action>,
+) -> Retained<NSMenu> {
+    let menu = NSMenu::new(mtm);
+    for entry in entries {
+        let item = match entry {
+            Entry::Item(entry) => {
+                let item = item(
+                    mtm,
+                    &NSString::from_str(&entry.title),
+                    sel!(arbaletteMenuItem:),
+                    ns_string!(""),
+                );
+                item.setTag(actions.len() as isize);
+                if entry.checked {
+                    item.setState(NSControlStateValueOn);
+                }
+                actions.push(entry.action);
+                item
+            }
+            Entry::Submenu(title, entries) => {
+                let item = NSMenuItem::new(mtm);
+                item.setTitle(&NSString::from_str(&title));
+                item.setSubmenu(Some(&native_menu(mtm, entries, actions)));
+                item
+            }
+            Entry::Separator => NSMenuItem::separatorItem(mtm),
+        };
+        menu.addItem(&item);
+    }
+    menu
+}
+
+/// Puts a link on the clipboard.
+pub fn copy(url: &str) {
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
+    pasteboard.setString_forType(&NSString::from_str(url), unsafe { NSPasteboardTypeString });
 }
 
 /// Rounds the corners of the card's window, which draws the page, and outlines it. `view` is
