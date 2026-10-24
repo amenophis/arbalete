@@ -6,6 +6,7 @@
 //! one too, or the Favorites of the Space's profile.
 
 use crate::sidebar::{self, NodeId, Sidebar, SpaceId};
+use serde::Deserialize;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Bookmarks {
@@ -27,7 +28,8 @@ pub enum Bookmark {
 }
 
 /// Where the bookmarks bar goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Bar {
     Favorites,
     PinnedFolder,

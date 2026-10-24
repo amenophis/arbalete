@@ -1,4 +1,4 @@
-//! Reads Arc's sidebar, `StorableSidebar.json`, into profiles, Spaces and tabs.
+//! Reads Arc's sidebar, `StorableSidebar.json`, into Spaces and tabs.
 //!
 //! The format is described in docs/PLAN.md, section 4. Items Arbalette has no equivalent for, or
 //! that are malformed, are skipped: one odd item must not stop the import of the others.
@@ -12,73 +12,79 @@ use std::{fs, io, path::Path};
 pub enum Error {
     Io(io::Error),
     Invalid(serde_json::Error),
-    /// Arbalette needs at least one Space to open tabs in.
-    NoSpaces,
 }
 
-/// Reads the sidebar in Arc's data directory, or `None` when Arc saved none there.
-pub fn read(dir: &Path) -> Result<Option<Sidebar>, Error> {
-    let storable_sidebar = match fs::read_to_string(dir.join("StorableSidebar.json")) {
-        Ok(json) => json,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(Error::Io(error)),
-    };
-    let local_state = fs::read_to_string(dir.join("User Data/Local State")).ok();
-    sidebar(&storable_sidebar, local_state.as_deref()).map(Some)
+/// Adds the Spaces and the favorites of one Arc profile, the one in `User Data/<directory>`, to
+/// `profile`, from the sidebar in Arc's data directory `dir`. Nothing when Arc saved none there.
+pub fn add(
+    sidebar: &mut Sidebar,
+    dir: &Path,
+    directory: &str,
+    profile: ProfileId,
+) -> Result<(), Error> {
+    match fs::read_to_string(dir.join("StorableSidebar.json")) {
+        Ok(json) => add_json(sidebar, &json, directory, profile),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(Error::Io(error)),
+    }
 }
 
-/// Builds a sidebar from `StorableSidebar.json`. `local_state`, Arc's `User Data/Local State`,
-/// gives its profiles their names; without it they are named after their directory.
-pub fn sidebar(storable_sidebar: &str, local_state: Option<&str>) -> Result<Sidebar, Error> {
+/// The same from the content of `StorableSidebar.json`.
+fn add_json(
+    sidebar: &mut Sidebar,
+    storable_sidebar: &str,
+    directory: &str,
+    profile: ProfileId,
+) -> Result<(), Error> {
     let json: Value = serde_json::from_str(storable_sidebar).map_err(Error::Invalid)?;
     let containers = json["sidebar"]["containers"].as_array();
-    let container = containers
+    let Some(container) = containers
         .into_iter()
         .flatten()
         .find(|c| c.get("spaces").is_some())
-        .ok_or(Error::NoSpaces)?;
+    else {
+        return Ok(());
+    };
     let mut import = Import {
-        sidebar: Sidebar::empty(),
+        sidebar,
         items: pairs(&container["items"])
             .filter_map(|(id, item)| Some((id.as_str()?, item)))
             .collect(),
-        names: local_state.map(profile_names).unwrap_or_default(),
-        profiles: HashMap::new(),
+        directory,
+        profile,
         imported: HashSet::new(),
     };
     for (_, space) in pairs(&container["spaces"]) {
         import.space(space);
     }
-    for (profile, favorites) in pairs(&container["topAppsContainerIDs"]) {
-        import.favorites(profile, favorites);
+    for (arc_profile, favorites) in pairs(&container["topAppsContainerIDs"]) {
+        import.favorites(arc_profile, favorites);
     }
-    if import.sidebar.spaces().is_empty() {
-        return Err(Error::NoSpaces);
-    }
-    Ok(import.sidebar)
+    Ok(())
 }
 
 struct Import<'a> {
-    sidebar: Sidebar,
+    sidebar: &'a mut Sidebar,
     items: HashMap<&'a str, &'a Value>,
-    /// Profile names by directory, from Local State.
-    names: HashMap<String, String>,
-    /// Arbalette's profiles by Arc profile directory.
-    profiles: HashMap<String, ProfileId>,
+    /// The directory of the Arc profile imported, and the profile it goes into.
+    directory: &'a str,
+    profile: ProfileId,
     /// Guards against an item listed twice, or inside itself.
     imported: HashSet<&'a str>,
 }
 
 impl<'a> Import<'a> {
+    /// The Spaces of other Arc profiles are left out.
     fn space(&mut self, space: &'a Value) -> Option<()> {
-        let directory = profile_directory(&space["profile"])?;
+        if profile_directory(&space["profile"])? != self.directory {
+            return None;
+        }
         let containers: HashMap<_, _> = pairs(&space["containerIDs"])
             .filter_map(|(kind, id)| Some((kind.as_str()?, id.as_str()?)))
             .collect();
         let (arc_pinned, arc_today) = (*containers.get("pinned")?, *containers.get("unpinned")?);
-        let profile = self.profile(directory);
         let title = text(&space["title"]).unwrap_or("Space");
-        let id = self.sidebar.add_space(title, profile).ok()?;
+        let id = self.sidebar.add_space(title, self.profile).ok()?;
         let custom = &space["customInfo"];
         if let Some(emoji) = custom["iconType"]["emoji_v2"].as_str() {
             self.sidebar.set_space_emoji(id, emoji).ok()?;
@@ -94,23 +100,18 @@ impl<'a> Import<'a> {
         Some(())
     }
 
-    /// Favorites of a profile no Space uses are left out: no Space would show them.
-    fn favorites(&mut self, profile: &Value, container: &'a Value) -> Option<()> {
-        let profile = *self.profiles.get(&profile_directory(profile)?)?;
-        let favorites = self.sidebar.profiles().iter().find(|p| p.id == profile)?;
+    fn favorites(&mut self, arc_profile: &Value, container: &'a Value) -> Option<()> {
+        if profile_directory(arc_profile)? != self.directory {
+            return None;
+        }
+        let favorites = self
+            .sidebar
+            .profiles()
+            .iter()
+            .find(|p| p.id == self.profile)?;
         let favorites = favorites.favorites;
         self.children(container.as_str()?, favorites);
         Some(())
-    }
-
-    fn profile(&mut self, directory: String) -> ProfileId {
-        if let Some(&id) = self.profiles.get(&directory) {
-            return id;
-        }
-        let name = self.names.get(&directory).unwrap_or(&directory);
-        let id = self.sidebar.add_profile(name);
-        self.profiles.insert(directory, id);
-        id
     }
 
     /// Imports the children of Arc's item `id` at the end of `parent`.
@@ -168,19 +169,6 @@ fn profile_directory(profile: &Value) -> Option<String> {
     Some(directory.to_string())
 }
 
-fn profile_names(local_state: &str) -> HashMap<String, String> {
-    let Ok(json) = serde_json::from_str::<Value>(local_state) else {
-        return HashMap::new();
-    };
-    let profiles = json["profile"]["info_cache"]
-        .as_object()
-        .into_iter()
-        .flatten();
-    profiles
-        .filter_map(|(directory, info)| Some((directory.clone(), text(&info["name"])?.to_string())))
-        .collect()
-}
-
 fn text(value: &Value) -> Option<&str> {
     value.as_str().filter(|text| !text.trim().is_empty())
 }
@@ -220,10 +208,14 @@ mod tests {
     use serde_json::json;
 
     const SIDEBAR: &str = include_str!("../../tests/fixtures/arc/StorableSidebar.json");
-    const LOCAL_STATE: &str = include_str!("../../tests/fixtures/arc/User Data/Local State");
-
+    /// The fixture's two Arc profiles, each into a profile of its own.
     fn fixture() -> Sidebar {
-        sidebar(SIDEBAR, Some(LOCAL_STATE)).unwrap()
+        let mut sidebar = Sidebar::empty();
+        for (directory, name) in [("Default", "Personal"), ("Profile 1", "Work")] {
+            let profile = sidebar.add_profile(name);
+            add_json(&mut sidebar, SIDEBAR, directory, profile).unwrap();
+        }
+        sidebar
     }
 
     /// A node's content, as urls and `folder[...]`, for comparisons that read like the sidebar.
@@ -242,15 +234,18 @@ mod tests {
     }
 
     #[test]
-    fn imports_one_profile_per_arc_profile_named_after_local_state() {
-        let names = |sidebar: Sidebar| -> Vec<String> {
-            sidebar.profiles().iter().map(|p| p.name.clone()).collect()
-        };
-        assert_eq!(names(fixture()), ["Personal", "Work"]);
-        let unnamed = sidebar(SIDEBAR, None).unwrap();
-        assert_eq!(names(unnamed), ["Default", "Profile 1"]);
-        let invalid = sidebar(SIDEBAR, Some("not json")).unwrap();
-        assert_eq!(names(invalid), ["Default", "Profile 1"]);
+    fn imports_only_the_spaces_and_favorites_of_one_arc_profile_into_another() {
+        let mut sidebar = Sidebar::default();
+        let profile = sidebar.profiles()[0].id;
+        add_json(&mut sidebar, SIDEBAR, "Profile 1", profile).unwrap();
+        let titles: Vec<_> = sidebar.spaces().iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles, ["Home", "Office"]);
+        assert_eq!(sidebar.spaces()[1].profile, profile);
+        let favorites = sidebar.profiles()[0].favorites;
+        assert_eq!(
+            content(&sidebar, favorites),
+            ["https://tracker.example.com/"]
+        );
     }
 
     #[test]
@@ -343,7 +338,9 @@ mod tests {
                 "tab", { "data": { "tab": { "savedURL": "https://example.com/" } } },
             ],
         }]}});
-        let sidebar = sidebar(&json.to_string(), None).unwrap();
+        let mut sidebar = Sidebar::empty();
+        let profile = sidebar.add_profile("Default");
+        add_json(&mut sidebar, &json.to_string(), "Default", profile).unwrap();
         let space = &sidebar.spaces()[0];
         assert_eq!(content(&sidebar, space.pinned), ["Loop[]"]);
         assert!(content(&sidebar, space.today).is_empty());
@@ -354,19 +351,25 @@ mod tests {
     #[test]
     fn reads_the_sidebar_in_arc_s_data_directory() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/arc");
-        assert_eq!(read(&dir).unwrap(), Some(fixture()));
-        assert!(matches!(read(&dir.join("missing")), Ok(None)));
+        let mut sidebar = Sidebar::empty();
+        let profile = sidebar.add_profile("Personal");
+        add(&mut sidebar, &dir, "Default", profile).unwrap();
+        assert_eq!(sidebar.spaces().len(), 2);
+        add(&mut sidebar, &dir.join("missing"), "Default", profile).unwrap();
+        assert_eq!(sidebar.spaces().len(), 2);
     }
 
     #[test]
-    fn refuses_a_file_without_spaces() {
-        assert!(matches!(sidebar("not json", None), Err(Error::Invalid(_))));
-        assert!(matches!(sidebar("{}", None), Err(Error::NoSpaces)));
+    fn imports_nothing_from_a_file_without_spaces() {
+        let mut sidebar = Sidebar::default();
+        let profile = sidebar.profiles()[0].id;
+        let invalid = add_json(&mut sidebar, "not json", "Default", profile);
+        assert!(matches!(invalid, Err(Error::Invalid(_))));
         let empty = json!({ "sidebar": { "containers": [{ "global": {} }, { "spaces": [] }] } });
-        assert!(matches!(
-            sidebar(&empty.to_string(), None),
-            Err(Error::NoSpaces)
-        ));
+        for json in ["{}".to_string(), empty.to_string()] {
+            add_json(&mut sidebar, &json, "Default", profile).unwrap();
+        }
+        assert_eq!(sidebar, Sidebar::default());
     }
 
     #[test]

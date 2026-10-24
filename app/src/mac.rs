@@ -74,6 +74,11 @@ define_class!(
             crate::shell::run(Command::NewFolder);
         }
 
+        #[unsafe(method(arbaletteImport:))]
+        fn import(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowImport);
+        }
+
         #[unsafe(method(arbaletteNextTab:))]
         fn next_tab(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::NextTab);
@@ -208,6 +213,13 @@ pub fn setup_menu() {
                     ns_string!("New Folder"),
                     sel!(arbaletteNewFolder:),
                     ns_string!("N"),
+                ),
+                // No shortcut: imports are rare.
+                item(
+                    mtm,
+                    ns_string!("Import…"),
+                    sel!(arbaletteImport:),
+                    ns_string!(""),
                 ),
             ],
         ),

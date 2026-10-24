@@ -68,13 +68,10 @@ fn default_data_dir() -> PathBuf {
     }
 }
 
-/// Where Arc keeps its data, imported on the first launch. `ARBALETTE_ARC_DIR` overrides it, so
-/// that tests import their own data and never the machine's.
-fn arc_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("ARBALETTE_ARC_DIR") {
-        return Some(dir.into());
-    }
-    cfg!(target_os = "macos").then(|| home().join("Library/Application Support/Arc"))
+/// The home directory whose browsers are imported. `ARBALETTE_HOME` overrides it, so that tests
+/// import their own data and never the machine's.
+fn import_home() -> PathBuf {
+    std::env::var_os("ARBALETTE_HOME").map_or_else(home, PathBuf::from)
 }
 
 fn home() -> PathBuf {

@@ -129,9 +129,9 @@ impl Default for Sidebar {
 }
 
 impl Sidebar {
-    /// A sidebar without profiles or Spaces, for importers to fill: they must add a Space before
-    /// handing it over.
-    pub(crate) fn empty() -> Self {
+    /// A sidebar without profiles or Spaces, for importers to fill: it must have a Space before
+    /// it is used.
+    pub fn empty() -> Self {
         Self {
             profiles: Vec::new(),
             spaces: Vec::new(),

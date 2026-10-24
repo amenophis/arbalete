@@ -5,8 +5,10 @@
 
 use crate::command::Command;
 use arbalette_core::history::{self, History};
+use arbalette_core::import::browsers::{self, Family};
+use arbalette_core::import::{self, Choice, safari};
 use arbalette_core::sidebar::{NodeId, NodeKind, ProfileId, Sidebar, SpaceId, Tab};
-use arbalette_core::{import, store};
+use arbalette_core::store;
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
 use serde::Serialize;
@@ -33,6 +35,16 @@ const OVERLAY_SIZE: Size = Size {
     height: 56,
 };
 
+/// The import assistant's size, at most (ui/src/Import.tsx).
+const IMPORT_SIZE: Size = Size {
+    width: 560,
+    height: 480,
+};
+
+/// The Privacy & Security pane of System Settings that lists the apps with Full Disk Access.
+const FULL_DISK_ACCESS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
 /// The height of the sidebar's toolbar, which holds the window buttons on macOS (ui/src/index.css).
 const TOOLBAR_HEIGHT: f32 = 40.0;
 
@@ -53,6 +65,14 @@ thread_local! {
     /// A second sidebar, shown above the page while the sidebar is hidden.
     static REVEAL_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static REVEAL: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// The import assistant, shown above the page; created the first time it is shown, as most
+    /// sessions never import.
+    static IMPORT_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// The browsers the import assistant lists, which its choices refer to by index.
+    static SOURCES: RefCell<Vec<browsers::Browser>> = const { RefCell::new(Vec::new()) };
+    /// The first launch shows the import assistant with the window, instead of the start page.
+    static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
     /// The sidebar's draggable regions, which move the window while the sidebar is shown.
     static DRAG_REGIONS: RefCell<Vec<DraggableRegion>> = const { RefCell::new(Vec::new()) };
@@ -258,35 +278,162 @@ fn place_reveal() {
     reveal.set_visible((mode != SidebarMode::Shown).into());
 }
 
-/// Loads the sidebar saved by the previous session, or on the first launch imports Arc's; a file
-/// that cannot be read is replaced on the next save.
+/// Loads the sidebar saved by the previous session; a file that cannot be read is replaced on the
+/// next save. The first launch offers to import the browsers found, if any, before the start page.
 fn restore(path: PathBuf) {
-    match store::load(&path) {
-        Ok(Some(sidebar)) => STATE.with_borrow_mut(|state| state.sidebar = sidebar),
-        Ok(None) => {
-            if let Some(sidebar) = import_arc() {
-                // Saved at once, so that the next launch restores it instead of importing again.
-                if let Err(error) = store::save(&sidebar, &path) {
-                    eprintln!("cannot save the session: {error}");
-                }
-                STATE.with_borrow_mut(|state| state.sidebar = sidebar);
-            }
+    let first_launch = match store::load(&path) {
+        Ok(Some(sidebar)) => {
+            STATE.with_borrow_mut(|state| state.sidebar = sidebar);
+            false
         }
-        Err(error) => eprintln!("cannot restore the session: {error:?}"),
-    }
+        Ok(None) => true,
+        Err(error) => {
+            eprintln!("cannot restore the session: {error:?}");
+            false
+        }
+    };
     SESSION_FILE.set(Some(path));
-    if STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_none()) {
+    if first_launch && !browsers::detect(&crate::import_home()).is_empty() {
+        IMPORT_AT_LAUNCH.set(true);
+    } else if STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_none()) {
         open_tab(START_URL);
     }
 }
 
-/// Arc's sidebar, when Arc was used on this machine; an import that fails leaves the default one.
-fn import_arc() -> Option<Sidebar> {
-    let dir = crate::arc_dir()?;
-    import::arc::read(&dir).unwrap_or_else(|error| {
-        eprintln!("cannot import Arc: {error:?}");
-        None
-    })
+/// The first launch's sidebar, which nothing has changed yet: an import replaces it.
+fn is_untouched(sidebar: &Sidebar) -> bool {
+    *sidebar == Sidebar::default()
+}
+
+/// Shows the import assistant above the page, with the browsers found now.
+fn show_import() {
+    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+        return;
+    };
+    SOURCES.set(browsers::detect(&crate::import_home()));
+    if IMPORT.with_borrow(Option::is_none) {
+        let url = format!("{UI_ORIGIN}index.html#import");
+        let view = browser_view(UiClient::new(), &url, 0, None);
+        let controller = window
+            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
+            .expect("import");
+        IMPORT_VIEW.set(Some(view));
+        IMPORT.set(Some(controller));
+    }
+    let Some(controller) = IMPORT.with_borrow(Clone::clone) else {
+        return;
+    };
+    let size = window.size();
+    let (width, height) = (
+        IMPORT_SIZE.width.min(size.width),
+        IMPORT_SIZE.height.min(size.height),
+    );
+    controller.set_bounds(Some(&Rect {
+        x: (size.width - width) / 2,
+        y: (size.height - height) / 2,
+        width,
+        height,
+    }));
+    controller.set_visible(1);
+    // A page still loading asks for them once it listens (Command::ImportReady).
+    send_sources();
+    if let Some(view) = controller.contents_view() {
+        view.request_focus();
+    }
+}
+
+/// Sends the import assistant the browsers to list, and the profiles to merge them into: none
+/// on the first launch, whose sidebar the import replaces.
+fn send_sources() {
+    let profiles = STATE.with_borrow(|state| {
+        if is_untouched(&state.sidebar) {
+            return Vec::new();
+        }
+        let profiles = state.sidebar.profiles().iter();
+        profiles
+            .map(|p| json!({ "id": p.id, "name": p.name }))
+            .collect()
+    });
+    let browsers = SOURCES.with_borrow(|browsers| {
+        let browsers = browsers.iter().map(|browser| {
+            let profiles = browser.profiles.iter().map(|profile| {
+                let denied = browser.family == Family::Safari
+                    && safari::needs_full_disk_access(&profile.path);
+                json!({ "name": profile.name, "needsFullDiskAccess": denied })
+            });
+            json!({
+                "name": browser.name,
+                "arc": browser.family == Family::Arc,
+                "profiles": profiles.collect::<Vec<_>>(),
+            })
+        });
+        browsers.collect::<Vec<_>>()
+    });
+    let detail = json!({ "browsers": browsers, "profiles": profiles });
+    let event = format!(r#"new CustomEvent("arbalette:sources", {{ detail: {detail} }})"#);
+    dispatch(&IMPORT_VIEW, &event);
+}
+
+fn hide_import() {
+    if let Some(controller) = IMPORT.with_borrow(Clone::clone) {
+        controller.set_visible(0);
+    }
+}
+
+/// Closes the import assistant. Closed on the first launch, it leaves the session as it would
+/// have been without it: with the start page.
+fn close_import() {
+    hide_import();
+    if STATE.with_borrow(|state| is_untouched(&state.sidebar)) {
+        open_tab(START_URL);
+    }
+}
+
+/// Imports browser profiles, then shows the first Space imported with its first tab, or a blank
+/// page when it has none.
+fn run_import(choices: &[Choice]) {
+    let browsers = SOURCES.take();
+    let (imported, shown) = update_sidebar(|sidebar| {
+        let mut new = if is_untouched(sidebar) {
+            Sidebar::empty()
+        } else {
+            sidebar.clone()
+        };
+        let before = new.spaces().len();
+        let imported = import::import(&mut new, &browsers, choices);
+        let shown = new.spaces().get(before).map(|space| space.id);
+        if let Some(space) = shown {
+            new.display(space).expect("an imported Space");
+            if let Some(tab) = new.next_tab(space, true) {
+                new.select(space, tab).expect("a tab of the Space");
+            }
+        }
+        // Nothing was imported into an empty sidebar: it keeps the default one.
+        if !new.spaces().is_empty() {
+            *sidebar = new;
+        }
+        (imported, shown)
+    });
+    for error in &imported.errors {
+        eprintln!("cannot import {error}");
+    }
+    for (profile, entries) in &imported.histories {
+        update_history(*profile, |history| history.merge(entries));
+    }
+    close_import();
+    if shown.is_some() {
+        show_selected();
+    }
+}
+
+fn open_full_disk_access() {
+    if cfg!(target_os = "macos")
+        && let Err(error) = std::process::Command::new("open")
+            .arg(FULL_DISK_ACCESS)
+            .status()
+    {
+        eprintln!("cannot open System Settings: {error}");
+    }
 }
 
 fn active_tab(sidebar: &mut Sidebar) -> Option<&mut Tab> {
@@ -560,13 +707,18 @@ fn profile_dir(profile: ProfileId) -> PathBuf {
 /// be written is not worth stopping the browsing for.
 fn update_history<E: std::fmt::Display>(
     profile: ProfileId,
-    change: impl FnOnce(&History) -> Result<(), E>,
+    change: impl FnOnce(&mut History) -> Result<(), E>,
 ) {
     HISTORIES.with_borrow_mut(|histories| {
         let history = match histories.entry(profile) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                match History::open(&profile_dir(profile).join(history::FILE_NAME)) {
+                // An imported profile has no directory before its pages first load.
+                let dir = profile_dir(profile);
+                if let Err(error) = std::fs::create_dir_all(&dir) {
+                    return eprintln!("cannot create the profile's directory: {error}");
+                }
+                match History::open(&dir.join(history::FILE_NAME)) {
                     Ok(history) => entry.insert(history),
                     Err(error) => return eprintln!("cannot open the history: {error}"),
                 }
@@ -669,6 +821,11 @@ pub fn run(command: Command) {
         (Command::ColorSpace(id, color), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_space_color(id, color));
         }
+        (Command::ShowImport, _) => show_import(),
+        (Command::ImportReady, _) => send_sources(),
+        (Command::CloseImport, _) => close_import(),
+        (Command::Import(choices), _) => run_import(&choices),
+        (Command::OpenFullDiskAccess, _) => open_full_disk_access(),
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
@@ -777,11 +934,14 @@ wrap_window_delegate! {
             WINDOW.set(Some(window));
             // Only the selected tab loads: the others wait until they are selected.
             show_selected();
+            if IMPORT_AT_LAUNCH.take() {
+                show_import();
+            }
         }
 
         /// Asks every browser to close; the window closes once they all have.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW]
+            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW]
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
                 .collect();

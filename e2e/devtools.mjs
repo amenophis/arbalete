@@ -1,5 +1,5 @@
 // Runs the bundled app and drives its UI pages through the DevTools protocol.
-// Shared by the end-to-end checks (e2e/tabs.mjs, e2e/arc.mjs) and the benchmark (perf/measure.mjs).
+// Shared by the end-to-end checks (e2e/tabs.mjs, e2e/import.mjs) and the benchmark (perf/measure.mjs).
 // Needs Node.js 22 or later (global WebSocket).
 
 import { spawn } from "node:child_process";
@@ -14,15 +14,16 @@ const TIMEOUT = 10_000;
 export const SIDEBAR = "https://arbalette.ui/index.html";
 export const OVERLAY = `${SIDEBAR}#overlay`;
 export const REVEAL = `${SIDEBAR}#reveal`;
+export const IMPORT = `${SIDEBAR}#import`;
 
-// Starts the app on the session in `dataDir`, importing Arc's data from `arcDir` on a first launch;
-// the caller kills it. By default no Arc data, never the machine's.
-export function launch(dataDir, arcDir = join(tmpdir(), "arbalette-no-arc")) {
+// Starts the app on the session in `dataDir`, offering to import the browsers found in `home` on
+// a first launch; the caller kills it. By default a home without browsers, never the machine's.
+export function launch(dataDir, home = join(tmpdir(), "arbalette-no-home")) {
   return spawn(APP, [], {
     env: {
       ...process.env,
       ARBALETTE_DATA_DIR: dataDir,
-      ARBALETTE_ARC_DIR: arcDir,
+      ARBALETTE_HOME: home,
       ARBALETTE_DEBUG_PORT: String(PORT),
     },
     stdio: "ignore",
