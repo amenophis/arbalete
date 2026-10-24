@@ -400,14 +400,19 @@ impl Sidebar {
     /// The favorite at `number`, counted from 1, of the Space's profile; 9 is the last one, as
     /// ⌘9 is in browsers.
     pub fn favorite(&self, space: SpaceId, number: usize) -> Option<NodeId> {
-        let profile = self.space(space).ok()?.profile;
-        let profile = self.profiles.iter().find(|p| p.id == profile)?;
-        let favorites = &self.nodes[&profile.favorites].children;
+        let favorites = &self.nodes[&self.favorites_of(space)?].children;
         if number == 9 {
             favorites.last().copied()
         } else {
             favorites.get(number.checked_sub(1)?).copied()
         }
+    }
+
+    /// The favorites of the Space's profile, which its Space shows.
+    pub fn favorites_of(&self, space: SpaceId) -> Option<NodeId> {
+        let profile = self.space(space).ok()?.profile;
+        let profile = self.profiles.iter().find(|p| p.id == profile)?;
+        Some(profile.favorites)
     }
 
     /// The profile whose web data shows a node: the profile of its favorites, or of its Space.
@@ -1292,5 +1297,25 @@ mod tests {
         assert_eq!(sidebar.favorite(home.id, 4), None);
         assert_eq!(sidebar.favorite(home.id, 9), Some(tabs[2]));
         assert_eq!(sidebar.favorite(home.id, 0), None);
+    }
+
+    #[test]
+    fn numbers_the_favorites_of_each_profile() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.create_profile("Work").unwrap();
+        let office = sidebar.spaces()[1].id;
+        let personal = sidebar.open_tab(home.id, "personal").unwrap();
+        let job = sidebar.open_tab(office, "job").unwrap();
+        let favorites = sidebar.favorites_of(home.id).unwrap();
+        let work_favorites = sidebar.favorites_of(office).unwrap();
+        assert_eq!(favorites, sidebar.profiles()[0].favorites);
+        assert_eq!(work_favorites, sidebar.profiles()[1].favorites);
+        sidebar.move_node(personal, favorites, 0).unwrap();
+        sidebar.move_node(job, work_favorites, 0).unwrap();
+        assert_eq!(sidebar.favorite(home.id, 1), Some(personal));
+        assert_eq!(sidebar.favorite(office, 1), Some(job));
+        assert_eq!(sidebar.profile_of(job), Some(work));
+        assert_eq!(sidebar.favorites_of(SpaceId(999)), None);
     }
 }

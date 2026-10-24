@@ -2,7 +2,8 @@
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
 // between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
 // Spaces, creating, renaming and coloring profiles, creating and editing Spaces, and switching
-// Spaces by number and with a horizontal swipe, in the real app.
+// Spaces by number and with a horizontal swipe, and showing the displayed profile's favorites,
+// in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -381,6 +382,51 @@ try {
     (saved) =>
       saved.displayed === otherProfileSpace.id &&
       saved.spaces[other].selected === todayTab(otherProfileSpace, 2),
+  );
+  // The benchmark session gives the other profile 2 favorites of its own.
+  const favoritesOf = (space) => session.profiles.find((profile) => profile.id === space.profile).favorites;
+  const otherFavorites = session.nodes[favoritesOf(otherProfileSpace)].children;
+  const tileIds = `e2e.tiles().map((tile) => tile.closest("li").dataset.id).join()`;
+  await check(
+    "the favorites grid shows the favorites of the displayed Space's profile",
+    ``,
+    `${tileIds} === "${otherFavorites.join()}"`,
+  );
+  await check(
+    "the favorite/1 command selects that profile's first favorite",
+    `e2e.send("favorite/1")`,
+    `e2e.tiles()[0].getAttribute("aria-current") === "page" && !e2e.current()`,
+  );
+  await checkPage(
+    "that favorite opens in its profile's content view, apart from the first profile's web data",
+    otherFavorites[0],
+    `localStorage.getItem("profile") === null && !document.cookie.includes("profile=")`,
+  );
+  await check(
+    "dropping a tab on that grid makes it a favorite of that profile",
+    `e2e.moved = e2e.rows()[3].dataset.id; e2e.drag(e2e.rows()[3], e2e.tiles()[1], 0.8, 0.5)`,
+    `e2e.tiles().length === 3 && e2e.tiles()[2].closest("li").dataset.id === e2e.moved`,
+  );
+  await checkSession("the session saves the dropped tab in that profile's favorites", (saved) =>
+    saved.nodes[favoritesOf(otherProfileSpace)].children.includes(Number(todayTab(otherProfileSpace, 3))),
+  );
+  await check(
+    "switching back to the first Space shows the first profile's favorites",
+    `e2e.send("space/${home.id}")`,
+    `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.tiles().length === 7
+      && !e2e.has(e2e.tiles(), "${otherFavorites[0]}")`,
+  );
+  await check(
+    "there the favorite/1 command selects the first profile's first favorite",
+    `e2e.send("favorite/1")`,
+    `e2e.tiles()[0].getAttribute("aria-current") === "page"
+      && e2e.tiles()[0].closest("li").dataset.id === "${session.nodes[favoritesOf(home)].children[0]}"`,
+  );
+  await check(
+    "switching to the other Space again shows its profile's favorites",
+    `e2e.send("space/${otherProfileSpace.id}")`,
+    `e2e.spaceIcons()[${other}].getAttribute("aria-current") === "true" && e2e.tiles().length === 3
+      && e2e.tiles()[0].getAttribute("aria-current") === "page"`,
   );
 
   await check(
