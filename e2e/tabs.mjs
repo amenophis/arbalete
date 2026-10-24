@@ -1,4 +1,5 @@
-// Checks the sidebar sections, and selecting, closing and reopening tabs, in the real app.
+// Checks the sidebar sections, and selecting, closing and reopening tabs and favorites, in the
+// real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -74,6 +75,23 @@ try {
     "selecting a pinned tab inside a folder marks it aria-current",
     `e2e.picked = document.querySelectorAll(".pinned .folder-tabs .tab-row")[13]; e2e.picked.querySelector(".tab").click()`,
     `e2e.current() === e2e.picked`,
+  );
+  // The benchmark session has 6 favorites.
+  await check(
+    "the favorites show as a grid of 6 tiles above the pinned tabs",
+    `e2e.tiles = () => [...document.querySelectorAll(".favorites .favorite")]`,
+    `e2e.tiles().length === 6 && e2e.tiles()[0].getAttribute("aria-label") === "Favorite 1"
+      && !!(e2e.tiles()[5].compareDocumentPosition(document.querySelector(".pinned")) & Node.DOCUMENT_POSITION_FOLLOWING)`,
+  );
+  await check(
+    "selecting a favorite marks its tile aria-current and shows its url",
+    `e2e.tile = e2e.tiles()[1]; e2e.tile.click()`,
+    `e2e.tile.getAttribute("aria-current") === "page" && document.querySelector(".url")?.textContent.includes("favorite=2")`,
+  );
+  await check(
+    "closing the selected favorite with the close command keeps its tile and deselects it",
+    `e2e.send("close")`,
+    `e2e.tile.isConnected && e2e.tiles().length === 6 && !e2e.tile.hasAttribute("aria-current") && e2e.current() === e2e.rows().at(-1)`,
   );
 } finally {
   app.kill();

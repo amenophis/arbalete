@@ -5,7 +5,10 @@ export function App() {
   const state = useAppState();
   const page = state?.page;
   const active =
-    state && tabs([...state.pinned, ...state.today]).find((tab) => tab.id === state.active);
+    state &&
+    [...state.favorites, ...tabs([...state.pinned, ...state.today])].find(
+      (tab) => tab.id === state.active,
+    );
   return (
     <nav className="sidebar">
       <div className="toolbar">
@@ -32,6 +35,19 @@ export function App() {
       {active && <div className="url">{active.url}</div>}
       {page?.loading && (
         <progress className="progress" aria-label="Loading" value={page.progress} />
+      )}
+      {state && state.favorites.length > 0 && (
+        <ul className="favorites" aria-label="Favorites">
+          {state.favorites.map((tab) => (
+            <Favorite
+              key={tab.id}
+              id={tab.id}
+              title={tab.title || tab.url}
+              favicon={tab.favicon}
+              active={tab.id === state.active}
+            />
+          ))}
+        </ul>
       )}
       <ul className="tabs pinned">
         <Items items={state?.pinned ?? []} active={state?.active} />
@@ -108,6 +124,34 @@ const TabItem = memo(function TabItem({
         onClick={() => send(`close/${id}`)}
       >
         ✕
+      </button>
+    </li>
+  );
+});
+
+// Favorites are not closed from the grid: closing the selected one only deselects it.
+const Favorite = memo(function Favorite({
+  id,
+  title,
+  favicon,
+  active,
+}: {
+  id: number;
+  title: string;
+  favicon: string | null;
+  active: boolean;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className="favorite"
+        aria-label={title}
+        title={title}
+        aria-current={active ? "page" : undefined}
+        onClick={() => send(`select/${id}`)}
+      >
+        {favicon ? <img className="favicon" src={favicon} alt="" /> : <span className="favicon" />}
       </button>
     </li>
   );

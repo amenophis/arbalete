@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import type { Item, Page, Tab } from "./bridge";
@@ -33,9 +33,20 @@ const pinned: Item[] = [
   },
 ];
 
-function receive(page: Partial<Page>, active = 3) {
+const favorites: Tab[] = [
+  {
+    id: 10,
+    url: "https://example.com/mail",
+    title: "Mail",
+    favicon: "https://example.com/mail.ico",
+  },
+  { id: 11, url: "https://example.com/calendar", title: "", favicon: null },
+];
+
+function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites) {
   const detail = {
     page: { progress: 1, loading: false, canGoBack: true, canGoForward: true, ...page },
+    favorites: favoriteTabs,
     pinned,
     today,
     active,
@@ -114,4 +125,32 @@ test("selects and closes a tab inside a folder", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/select/5", { method: "POST" });
   fireEvent.click(screen.getByRole("button", { name: "Close Manual" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/close/7", { method: "POST" });
+});
+
+test("shows the favorites as a grid of tiles named by their titles", () => {
+  render(<App />);
+  receive({}, 10);
+  const grid = screen.getByRole("list", { name: "Favorites" });
+  expect(within(grid).getAllByRole("button")).toHaveLength(2);
+  const mail = screen.getByRole("button", { name: "Mail" });
+  expect(mail.getAttribute("title")).toBe("Mail");
+  expect(mail.textContent).toBe("");
+  expect(mail.getAttribute("aria-current")).toBe("page");
+  expect(screen.getByText("https://example.com/mail")).toBeDefined();
+  const calendar = screen.getByRole("button", { name: "https://example.com/calendar" });
+  expect(calendar.getAttribute("aria-current")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Close Mail" })).toBeNull();
+});
+
+test("selects a favorite", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "Mail" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/select/10", { method: "POST" });
+});
+
+test("hides the favorites when there are none", () => {
+  render(<App />);
+  receive({}, 3, []);
+  expect(screen.queryByRole("list", { name: "Favorites" })).toBeNull();
 });

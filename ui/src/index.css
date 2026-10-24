@@ -82,6 +82,38 @@ body {
   font-size: 12px;
 }
 
+.favorites {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.favorite {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 10px;
+  background: var(--hover);
+  color: inherit;
+}
+
+.favorite:hover,
+.favorite[aria-current] {
+  background: var(--active);
+}
+
+/* Until the page gives its icon. */
+.favorite span.favicon {
+  border-radius: 50%;
+  background: var(--hover);
+}
+
 .tabs {
   margin: 8px 0 0;
   padding: 0;

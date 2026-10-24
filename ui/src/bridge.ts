@@ -8,6 +8,8 @@ export function send(command: string) {
 // Sent whole by the app on every change (UiState in app/src/shell.rs).
 export type State = {
   page: Page;
+  // The favorites of the displayed Space's profile.
+  favorites: Tab[];
   pinned: Item[];
   today: Item[];
   active: number | null;
