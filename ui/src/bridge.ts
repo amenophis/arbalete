@@ -8,17 +8,24 @@ export function send(command: string) {
 // Sent whole by the app on every change (UiState in app/src/shell.rs).
 export type State = {
   page: Page;
-  // The containers of the sections, to move tabs and folders into.
-  roots: { favorites: number; pinned: number; today: number };
-  // The favorites of the displayed Space's profile.
-  favorites: Tab[];
-  pinned: Item[];
-  today: Item[];
-  active: number | null;
   // The displayed Space, among every Space in sidebar order.
   space: number;
   spaces: Space[];
+  // The pages of the displayed Space and its neighbors.
+  pages: SpacePage[];
   profiles: Profile[];
+};
+
+// What the sidebar shows of a Space: its tabs, and the favorites of its profile.
+export type SpacePage = {
+  space: number;
+  // The tab the content view shows while the Space is displayed.
+  selected: number | null;
+  // The containers of the sections, to move tabs and folders into.
+  roots: { favorites: number; pinned: number; today: number };
+  favorites: Tab[];
+  pinned: Item[];
+  today: Item[];
 };
 
 export type Space = {
