@@ -44,6 +44,11 @@ define_class!(
             crate::shell::run(Command::ShowOverlay);
         }
 
+        #[unsafe(method(arbaletteCloseTab:))]
+        fn close_tab(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Close(None));
+        }
+
         #[unsafe(method(arbaletteBack:))]
         fn back(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Back);
@@ -106,12 +111,20 @@ pub fn setup_menu() {
         ),
         (
             ns_string!("File"),
-            vec![item(
-                mtm,
-                ns_string!("New Tab"),
-                sel!(arbaletteNewTab:),
-                ns_string!("t"),
-            )],
+            vec![
+                item(
+                    mtm,
+                    ns_string!("New Tab"),
+                    sel!(arbaletteNewTab:),
+                    ns_string!("t"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Close Tab"),
+                    sel!(arbaletteCloseTab:),
+                    ns_string!("w"),
+                ),
+            ],
         ),
         (
             ns_string!("View"),

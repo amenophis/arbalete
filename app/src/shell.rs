@@ -180,6 +180,31 @@ fn select_tab(id: NodeId) {
     }
 }
 
+/// Closes a tab; closing the selected one shows the next tab, or the overlay when none is left.
+fn close_tab(tab: Option<NodeId>) {
+    let (selected, next) = STATE.with_borrow_mut(|state| {
+        let selected = state.sidebar.spaces()[0].selected;
+        let tab = tab
+            .or(selected)
+            .filter(|&id| state.sidebar.tab_mut(id).is_some());
+        (
+            selected,
+            tab.map(|tab| (tab, state.sidebar.next_after_close(tab))),
+        )
+    });
+    let Some((tab, next)) = next else { return };
+    update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
+    if selected == Some(tab) {
+        match next {
+            Some(next) => select_tab(next),
+            None => {
+                load("about:blank");
+                show_overlay(true);
+            }
+        }
+    }
+}
+
 fn load(url: &str) {
     if let Some(frame) = CONTENT.with_borrow(|view| view.as_ref()?.browser()?.main_frame()) {
         frame.load_url(Some(&CefString::from(url)));
@@ -198,6 +223,7 @@ pub fn run(command: Command) {
             show_overlay(false);
             open_tab(&url);
         }
+        (Command::Close(tab), _) => close_tab(tab),
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),

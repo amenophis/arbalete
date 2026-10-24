@@ -37,9 +37,7 @@ export function App() {
       </button>
       <ul className="tabs">
         {state?.tabs.map((tab) => (
-          <li key={tab.id}>
-            <TabItem tab={tab} active={tab.id === state.active} />
-          </li>
+          <TabItem key={tab.id} tab={tab} active={tab.id === state.active} />
         ))}
       </ul>
     </nav>
@@ -47,19 +45,30 @@ export function App() {
 }
 
 function TabItem({ tab, active }: { tab: Tab; active: boolean }) {
+  const title = tab.title || tab.url;
   return (
-    <button
-      type="button"
-      className="tab"
-      aria-current={active ? "page" : undefined}
-      onClick={() => send(`select/${tab.id}`)}
-    >
-      {tab.favicon ? (
-        <img className="favicon" src={tab.favicon} alt="" />
-      ) : (
-        <span className="favicon" />
-      )}
-      <span className="title">{tab.title || tab.url}</span>
-    </button>
+    <li className="tab-row">
+      <button
+        type="button"
+        className="tab"
+        aria-current={active ? "page" : undefined}
+        onClick={() => send(`select/${tab.id}`)}
+      >
+        {tab.favicon ? (
+          <img className="favicon" src={tab.favicon} alt="" />
+        ) : (
+          <span className="favicon" />
+        )}
+        <span className="title">{title}</span>
+      </button>
+      <button
+        type="button"
+        className="close"
+        aria-label={`Close ${title}`}
+        onClick={() => send(`close/${tab.id}`)}
+      >
+        ✕
+      </button>
+    </li>
   );
 }

@@ -15,6 +15,8 @@ pub enum Command {
     HideOverlay,
     /// Opens a tab: `open/<percent-encoded url>`.
     Open(String),
+    /// Closes a tab, `close/<tab id>`, or the selected one, `close`.
+    Close(Option<NodeId>),
 }
 
 impl Command {
@@ -26,9 +28,15 @@ impl Command {
             "reload" => Some(Self::Reload),
             "overlay/show" => Some(Self::ShowOverlay),
             "overlay/hide" => Some(Self::HideOverlay),
+            "close" => Some(Self::Close(None)),
             _ => {
                 if let Some(id) = path.strip_prefix("select/") {
                     return serde_json::from_str(id).ok().map(Self::Select);
+                }
+                if let Some(id) = path.strip_prefix("close/") {
+                    return serde_json::from_str(id)
+                        .ok()
+                        .map(|id| Self::Close(Some(id)));
                 }
                 percent_decode(path.strip_prefix("open/")?).map(Self::Open)
             }
@@ -65,6 +73,11 @@ mod tests {
         assert_eq!(Command::parse("reload"), Some(Command::Reload));
         assert_eq!(Command::parse("overlay/show"), Some(Command::ShowOverlay));
         assert_eq!(Command::parse("overlay/hide"), Some(Command::HideOverlay));
+        assert_eq!(Command::parse("close"), Some(Command::Close(None)));
+        assert!(matches!(
+            Command::parse("close/3"),
+            Some(Command::Close(Some(_)))
+        ));
     }
 
     #[test]
