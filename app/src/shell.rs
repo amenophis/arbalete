@@ -220,10 +220,18 @@ wrap_app! {
     }
 
     impl App {
-        // Development builds are signed ad hoc, so each build would ask for keychain access.
         fn on_before_command_line_processing(&self, _process_type: Option<&CefString>, command_line: Option<&mut CommandLine>) {
-            if cfg!(debug_assertions) && let Some(command_line) = command_line {
+            let Some(command_line) = command_line else { return };
+            // Development builds are signed ad hoc, so each build would ask for keychain access.
+            if cfg!(debug_assertions) {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
+            }
+            // Lets the benchmark script (perf/measure.mjs) drive the UI through DevTools.
+            if let Ok(port) = std::env::var("ARBALETTE_DEBUG_PORT") {
+                command_line.append_switch_with_value(
+                    Some(&CefString::from("remote-debugging-port")),
+                    Some(&CefString::from(port.as_str())),
+                );
             }
         }
 
