@@ -15,9 +15,9 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const spaces: Space[] = [
-  { id: 13, title: "Home", emoji: null, color: "purple" },
-  { id: 14, title: "Work", emoji: "💼", color: "blue" },
-  { id: 15, title: "😀 fun", emoji: null, color: "green" },
+  { id: 13, title: "Home", emoji: null, color: "purple", profile: 1, pinned: [] },
+  { id: 14, title: "Work", emoji: "💼", color: "blue", profile: 1, pinned: [] },
+  { id: 15, title: "😀 fun", emoji: null, color: "green", profile: 1, pinned: [] },
 ];
 
 const icon = (title: string) => screen.getByRole("button", { name: title });

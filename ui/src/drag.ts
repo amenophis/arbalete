@@ -9,7 +9,7 @@ export type Place = { parent: number; index: number };
 export const END = Number.MAX_SAFE_INTEGER;
 
 // How far the pointer moves before a press becomes a drag, so clicks still select.
-const THRESHOLD = 4;
+export const THRESHOLD = 4;
 
 // How many favorites a profile holds at most (MAX_FAVORITES in crates/arbalette-core/src/sidebar.rs).
 export const MAX_FAVORITES = 12;
@@ -22,7 +22,7 @@ const TILE = 47;
 const GAP = 8;
 
 // How long rows and tiles slide to their new place, unless motion is reduced.
-const ROW_SLIDE = "200ms ease-in-out";
+export const ROW_SLIDE = "200ms ease-in-out";
 const TILE_SLIDE = "200ms ease-out";
 
 // What is dragged: a tab row, a folder, a split row or a favorite tile.
@@ -342,7 +342,7 @@ function displayedPage(): HTMLElement | null {
 }
 
 // The click that ends a drag must not select the tab or toggle the folder.
-function swallowClick() {
+export function swallowClick() {
   const swallow = (event: Event) => event.stopPropagation();
   addEventListener("click", swallow, { capture: true, once: true });
   setTimeout(() => removeEventListener("click", swallow, { capture: true }));
@@ -362,7 +362,7 @@ function rowElements(root: ParentNode): Map<string, HTMLElement> {
   return rows;
 }
 
-function rowRects(root: ParentNode): Map<string, DOMRect> {
+export function rowRects(root: ParentNode): Map<string, DOMRect> {
   const rects = new Map<string, DOMRect>();
   for (const [id, row] of rowElements(root)) rects.set(id, row.getBoundingClientRect());
   return rects;
@@ -370,7 +370,7 @@ function rowRects(root: ParentNode): Map<string, DOMRect> {
 
 // Slides the rows of `root` from where they were, `before`, to where they are now, with the
 // transform alone; the lifted tile follows the pointer instead.
-function slideFrom(before: Map<string, DOMRect>, root: ParentNode, timing: string) {
+export function slideFrom(before: Map<string, DOMRect>, root: ParentNode, timing: string) {
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
   const rows = [...rowElements(root)].filter(([, row]) => !row.classList.contains("lifted"));
   for (const [, row] of rows) {

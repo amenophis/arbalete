@@ -47,7 +47,12 @@ export type Space = {
   title: string;
   emoji: string | null;
   color: Color;
+  profile: number;
+  // What the library shows of its pinned tabs: tabs, and folders without their tabs.
+  pinned: Glance[];
 };
+
+export type Glance = Tab | { id: number; title: string; folder: true };
 
 export type Profile = {
   id: number;

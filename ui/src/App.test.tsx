@@ -52,10 +52,10 @@ const favorites: Tab[] = [
 ];
 
 const spaces: Space[] = [
-  { id: 13, title: "Home", emoji: null, color: "blue" },
-  { id: 14, title: "work", emoji: null, color: "green" },
-  { id: 15, title: "Travel", emoji: null, color: "red" },
-  { id: 16, title: "Books", emoji: null, color: "gray" },
+  { id: 13, title: "Home", emoji: null, color: "blue", profile: 1, pinned: [] },
+  { id: 14, title: "work", emoji: null, color: "green", profile: 1, pinned: [] },
+  { id: 15, title: "Travel", emoji: null, color: "red", profile: 1, pinned: [] },
+  { id: 16, title: "Books", emoji: null, color: "gray", profile: 1, pinned: [] },
 ];
 
 // The first Space shows the tabs above, the others none. The app sends the pages of the displayed
@@ -721,7 +721,7 @@ test("creating a Space shows its page where the new Space's was", async () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/space/create/purple//Reading", {
     method: "POST",
   });
-  spaces.push({ id: 17, title: "Reading", emoji: null, color: "purple" });
+  spaces.push({ id: 17, title: "Reading", emoji: null, color: "purple", profile: 1, pinned: [] });
   try {
     receive({}, 3, favorites, 17);
     await frame();
