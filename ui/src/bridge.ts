@@ -63,6 +63,44 @@ export const COLORS = {
 
 export type Color = keyof typeof COLORS;
 
+// `share` percent of `color` mixed into `base`, both #rrggbb, like CSS's color-mix in srgb.
+export function mix(color: string, base: string, share: number): string {
+  const channels = (hex: string) => [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+  const [from, to] = [channels(color), channels(base)];
+  return `#${from
+    .map((value, i) => Math.round((value * share + to[i] * (100 - share)) / 100))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+// The command painting the window around the sidebar and the card, and an empty Space's card
+// (WindowColors in app/src/command.rs): the end of the sidebar's gradient and the panel's color,
+// tinted by the Space's `color` as the sidebar tints them (index.css).
+export function windowColors(color: string, end: string, panel: string): string {
+  return `window/colors/${mix(color, end, 14).slice(1)}/${mix(color, panel, 8).slice(1)}`;
+}
+
+// Sends the window's colors for a Space's `color`, and again when the appearance changes the
+// colors they derive from, read from index.css.
+export function useWindowColors(color: string | undefined) {
+  useEffect(() => {
+    if (!color) return;
+    const paint = () => {
+      const style = getComputedStyle(document.documentElement);
+      const end = style.getPropertyValue("--window-end").trim();
+      const panel = style.getPropertyValue("--panel").trim();
+      if (!end || !panel) return false;
+      send(windowColors(color, end, panel));
+      return true;
+    };
+    // Without the stylesheet, as in tests, there is nothing to paint with.
+    if (!paint()) return;
+    const scheme = matchMedia("(prefers-color-scheme: dark)");
+    scheme.addEventListener("change", paint);
+    return () => scheme.removeEventListener("change", paint);
+  }, [color]);
+}
+
 export type Page = {
   progress: number;
   loading: boolean;

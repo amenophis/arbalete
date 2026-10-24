@@ -1,5 +1,6 @@
 import { type CSSProperties, type KeyboardEvent, memo, useRef } from "react";
 import {
+  COLORS,
   type Item,
   type Space,
   type SpacePage,
@@ -7,6 +8,7 @@ import {
   type Tab,
   useAppState,
   useRenaming,
+  useWindowColors,
 } from "./bridge";
 import { useDrag } from "./drag";
 import { Library } from "./Library";
@@ -24,6 +26,9 @@ export function App() {
   const count = state?.spaces.length ?? 0;
   // The pages may rest on one that is not a Space's, while the app still displays a Space.
   const onSpace = pager.settled >= 0 && pager.settled < count;
+  // Only the sidebar beside the page paints the window, not the one revealed above it.
+  const space = state?.spaces[displayed];
+  useWindowColors(space && location.hash === "" ? COLORS[space.color] : undefined);
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =
@@ -106,13 +111,6 @@ export function App() {
         <Profiles profiles={state?.profiles ?? []} />
       </div>
       <div className="drop-indicator" ref={indicator} />
-      {/* In place of the page's card, which the app leaves empty without a selected tab. */}
-      {current && current.selected === null && <div className="empty-space" />}
-      {/* The window's margins around the card move it, like the toolbar (shell.rs). */}
-      <div className="margin top" />
-      <div className="margin left" />
-      <div className="margin bottom" />
-      <div className="margin right" />
     </nav>
   );
 }

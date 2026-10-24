@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App, DOUBLE_CLICK_MS, domain } from "./App";
-import type { Item, Page, Space, Tab } from "./bridge";
+import { COLORS, type Item, type Page, type Space, type Tab, windowColors } from "./bridge";
 
 const fetch = vi.fn();
 
@@ -584,10 +584,35 @@ test("the library reopens a closed tab in the displayed Space and slides back to
   expect(library()?.hasAttribute("inert")).toBe(true);
 });
 
-test("shows a flat panel in place of the page in a Space without a selected tab", () => {
-  render(<App />);
-  receive({});
-  expect(document.querySelector(".empty-space")).toBeNull();
-  receive({}, 3, favorites, 14);
-  expect(document.querySelector(".empty-space")).not.toBeNull();
+test("asks the app to paint the window with the displayed Space's color", () => {
+  const root = document.documentElement.style;
+  root.setProperty("--window-end", "#1b0e1f");
+  root.setProperty("--panel", "#1e1a28");
+  const scheme = { addEventListener: vi.fn(), removeEventListener: vi.fn() };
+  vi.stubGlobal("matchMedia", () => scheme);
+  try {
+    render(<App />);
+    receive({});
+    expect(fetch).toHaveBeenLastCalledWith(
+      `/command/${windowColors(COLORS.blue, "#1b0e1f", "#1e1a28")}`,
+      { method: "POST" },
+    );
+    receive({}, 3, favorites, 14);
+    expect(fetch).toHaveBeenLastCalledWith(
+      `/command/${windowColors(COLORS.green, "#1b0e1f", "#1e1a28")}`,
+      { method: "POST" },
+    );
+    // A change of appearance changes the colors they derive from.
+    root.setProperty("--window-end", "#e7e2f1");
+    act(() => scheme.addEventListener.mock.lastCall?.[1]());
+    expect(fetch).toHaveBeenLastCalledWith(
+      `/command/${windowColors(COLORS.green, "#e7e2f1", "#1e1a28")}`,
+      { method: "POST" },
+    );
+  } finally {
+    root.removeProperty("--window-end");
+    root.removeProperty("--panel");
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", fetch);
+  }
 });

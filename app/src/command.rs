@@ -82,6 +82,12 @@ pub enum Command {
     /// Opens the System Settings pane where the user gives Arbalette Full Disk Access:
     /// `import/full-disk-access`.
     OpenFullDiskAccess,
+    /// Paints the window around the sidebar and the card, and an empty Space's card, with colors
+    /// as opaque ARGB: `window/colors/<window rrggbb>/<card rrggbb>`.
+    WindowColors {
+        window: u32,
+        card: u32,
+    },
 }
 
 impl Command {
@@ -110,6 +116,15 @@ impl Command {
             "import/close" => Some(Self::CloseImport),
             "import/full-disk-access" => Some(Self::OpenFullDiskAccess),
             _ => {
+                if let Some((window, card)) = path
+                    .strip_prefix("window/colors/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    return Some(Self::WindowColors {
+                        window: parse_rgb(window)?,
+                        card: parse_rgb(card)?,
+                    });
+                }
                 if let Some(choices) = path.strip_prefix("import/run/") {
                     let choices = serde_json::from_str(&percent_decode(choices)?).ok();
                     return choices.map(Self::Import);
@@ -218,6 +233,16 @@ fn parse_color(name: &str) -> Option<Color> {
     serde_json::from_value(serde_json::Value::String(name.to_string())).ok()
 }
 
+/// An opaque ARGB color from its hexadecimal RGB, like `1b0e1f`.
+fn parse_rgb(hex: &str) -> Option<u32> {
+    if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(hex, 16)
+        .ok()
+        .map(|rgb| 0xff00_0000 | rgb)
+}
+
 /// Decodes what `encodeURIComponent` encodes.
 fn percent_decode(text: &str) -> Option<String> {
     let mut bytes = Vec::new();
@@ -261,6 +286,21 @@ mod tests {
             Command::parse("pin/3"),
             Some(Command::Pin(Some(_)))
         ));
+    }
+
+    #[test]
+    fn parses_window_colors() {
+        assert_eq!(
+            Command::parse("window/colors/1b0e1f/F8F6FB"),
+            Some(Command::WindowColors {
+                window: 0xff1b_0e1f,
+                card: 0xfff8_f6fb,
+            })
+        );
+        assert_eq!(Command::parse("window/colors/1b0e1f"), None);
+        assert_eq!(Command::parse("window/colors/1b0e1/f8f6fb"), None);
+        assert_eq!(Command::parse("window/colors/+b0e1f/f8f6fb"), None);
+        assert_eq!(Command::parse("window/colors/1b0e1fff/f8f6fb"), None);
     }
 
     #[test]
