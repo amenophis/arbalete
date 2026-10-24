@@ -72,6 +72,8 @@ try {
     // A native menu would wait for a real pick: the checks run its items by id instead.
     window.fetch = (url, init) => {
       e2e.sent.push(String(url));
+      // Nor do the checks put anything on the user's clipboard.
+      if (String(url).endsWith("/command/link/copy")) return Promise.resolve(new Response("{}"));
       if (["node", "space"].some((kind) => String(url).includes("/command/menu/" + kind + "/"))) {
         return Promise.resolve(new Response("{}"));
       }
@@ -1312,6 +1314,129 @@ try {
   );
   await checkSession("the session saves the Space with its new profile", (saved) =>
     saved.profiles.find((profile) => profile.id === saved.spaces[0].profile)?.name === "New Profile",
+  );
+  await pressEnter();
+  await check(
+    "Escape closes the profiles, which covered the tabs",
+    `dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`,
+    `!document.querySelector(".profiles")`,
+  );
+  const newProfile = () => {
+    const saved = readSession();
+    return saved.profiles.find((profile) => profile.id === saved.spaces[0].profile);
+  };
+  await check(
+    "empty favorites show a dashed box with a star, a title, a subtitle and a ×",
+    ``,
+    `(() => {
+      const hint = e2e.page().querySelector(".favorites-empty");
+      return !!hint && !!hint.querySelector("svg") && hint.querySelector("strong").textContent === "Drag tabs here to keep them close"
+        && hint.querySelector("span").textContent.length > 0 && getComputedStyle(hint).borderStyle === "dashed"
+        && !!hint.querySelector('[aria-label="Hide this hint"]');
+    })()`,
+  );
+  await check(
+    "the hint's × hides it",
+    `e2e.page().querySelector('.favorites-empty [aria-label="Hide this hint"]').click()`,
+    `!e2e.page().querySelector(".favorites-empty") && e2e.page().querySelector(".favorites").children.length === 0`,
+  );
+  await checkSession("the session keeps the hint hidden for the profile", () => newProfile().favorites_hint_hidden === true);
+  await check(
+    "the footer menu lists New Space, New Folder, New Tab and Profiles with icons, shortcuts and separators",
+    `document.querySelector(".new-toggle").click()`,
+    `(() => {
+      const menu = document.querySelector('.menu[role="menu"]');
+      const items = [...(menu?.querySelectorAll('[role="menuitem"]') ?? [])];
+      return items.map((item) => item.getAttribute("aria-label")).join() === "New Space,New Folder,New Tab,Profiles…"
+        && items.every((item) => item.querySelector("svg"))
+        && items[2].querySelector("kbd")?.textContent === "⌘T"
+        && menu.querySelectorAll("hr").length === 2
+        && document.querySelector(".new-toggle").getAttribute("aria-expanded") === "true";
+    })()`,
+  );
+  await check(
+    "the menu's New Folder adds a folder to the pinned tabs, its name being edited",
+    `e2e.folders = e2e.page().querySelectorAll(".pinned > .folder-item").length;
+     document.querySelector('[role="menuitem"][aria-label="New Folder"]').click()`,
+    `e2e.page().querySelectorAll(".pinned > .folder-item").length === e2e.folders + 1
+      && !document.querySelector(".menu") && document.activeElement?.getAttribute("aria-label") === "Folder name"`,
+  );
+  await pressEnter();
+  await check(
+    "the menu's New Tab opens the overlay to type an address",
+    `e2e.menu("New Tab")`,
+    `e2e.sent.at(-1).endsWith("/command/overlay/show") && !document.querySelector(".menu")`,
+  );
+  await sidebar.eval(`e2e.send("overlay/hide")`);
+  await check(
+    "13 new tabs open",
+    `(async () => {
+      e2e.count = e2e.rows().length;
+      for (let i = 0; i < 13; i++) await e2e.send("open/" + encodeURIComponent("about:blank#" + i));
+    })()`,
+    `e2e.rows().length === e2e.count + 13`,
+  );
+  await check(
+    "12 of them become favorites, filling 3 rows of 4 tiles of one width, the hint back for later",
+    `(async () => {
+      const root = e2e.page().querySelector(".favorites").dataset.parent;
+      for (const row of e2e.rows().slice(-13, -1)) await e2e.send("move/" + row.dataset.id + "/" + root + "/99");
+    })()`,
+    `(() => {
+      const tiles = e2e.tiles().map((tile) => tile.getBoundingClientRect());
+      return tiles.length === 12 && new Set(tiles.map((tile) => tile.top)).size === 3
+        && new Set(tiles.map((tile) => tile.width)).size === 1
+        && Math.abs(tiles[3].right - e2e.page().querySelector(".favorites").getBoundingClientRect().right) < 1;
+    })()`,
+  );
+  await checkSession("adding a favorite brings the hint back for the profile", () => newProfile().favorites_hint_hidden === false);
+  await sidebar.eval(`e2e.send("move/" + e2e.rows().at(-1).dataset.id + "/" + e2e.page().querySelector(".favorites").dataset.parent + "/0")`);
+  await sleep(200);
+  await check("the app refuses a 13th favorite", ``, `e2e.tiles().length === 12 && e2e.rows().length === e2e.count + 1`);
+  await sidebar.eval(`e2e.rows().at(-1).scrollIntoView({ block: "nearest" })`);
+  end = await hold(`e2e.rows().at(-1)`, `e2e.tiles()[5]`, 0.5, 0.5);
+  await check(
+    "a tab dragged over full favorites opens no slot and says they are full",
+    ``,
+    `e2e.page().querySelector(".favorites-full")?.textContent === "Favorites are full" && !e2e.page().querySelector(".favorite-slot")`,
+  );
+  await release(end);
+  await check(
+    "dropping it there keeps the tab where it was, the hint fading after a moment",
+    ``,
+    `e2e.tiles().length === 12 && e2e.rows().length === e2e.count + 1 && !e2e.page().querySelector(".favorites-full")`,
+  );
+  // The pointer rests on the Library button, then leaves it.
+  const library = await point(`document.querySelector('.switcher [aria-label="Library"]')`, 0.5, 0.5);
+  const away = await point(`document.querySelector(".url")`, 0.3, 0.5);
+  await sidebar.eval(`e2e.send("close/" + e2e.rows().at(-1).dataset.id)`);
+  await sidebar.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...away });
+  await sidebar.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...library });
+  await check(
+    "resting on the Library button shows the closed tabs above the footer, with how long ago",
+    ``,
+    `(() => {
+      const items = [...document.querySelectorAll(".library-popover li button")];
+      const popover = document.querySelector(".library-popover")?.getBoundingClientRect();
+      return items.length === e2e.state.closed.length && items[0].querySelector(".when").textContent === "Just now"
+        && popover.bottom <= document.querySelector(".switcher").getBoundingClientRect().top + 1;
+    })()`,
+  );
+  await check(
+    "clicking one reopens it in the displayed Space, the popover gone",
+    `e2e.count = e2e.rows().length; document.querySelector(".library-popover li button").click()`,
+    `e2e.rows().length === e2e.count + 1 && e2e.urlOf(e2e.rows().at(-1).dataset.id) === "about:blank#12"
+      && !document.querySelector(".library-popover")`,
+  );
+  await sidebar.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...away });
+  await sidebar.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...library });
+  await check("resting on it again shows the popover", ``, `!!document.querySelector(".library-popover")`);
+  await sidebar.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...away });
+  await check("leaving it hides the popover", ``, `!document.querySelector(".library-popover")`);
+  await check(
+    "the url bar's copy button copies the link and says so",
+    `document.querySelector(".copy-link").click()`,
+    `e2e.sent.at(-1).endsWith("/command/link/copy") && document.querySelector(".copy-link").textContent === "Copied"`,
   );
   await quit(app);
   console.log("ok - quitting once closes every browser and exits the app");
