@@ -168,7 +168,8 @@ body {
   padding-right: 30px;
 }
 
-.tab:hover {
+.tab:hover,
+button.folder:hover {
   background: var(--hover);
 }
 
@@ -219,4 +220,41 @@ body {
   background: none;
   color: inherit;
   font-size: 16px;
+}
+
+.divider-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.divider-row .divider {
+  flex: 1;
+}
+
+.new-folder {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  opacity: 0.5;
+}
+
+.new-folder:hover {
+  background: var(--hover);
+  opacity: 1;
+}
+
+.folder input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  outline: 2px solid var(--active);
+  background: var(--active);
+  color: inherit;
+  font: inherit;
 }

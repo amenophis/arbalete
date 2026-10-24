@@ -1,5 +1,5 @@
-// Checks the sidebar sections, and selecting, closing, reopening and pinning tabs and favorites, in
-// the real app.
+// Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, and
+// creating, renaming and collapsing folders, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -115,6 +115,32 @@ try {
     "the pin command unpins a pinned tab to the top of today's tabs",
     `e2e.send("pin")`,
     `e2e.pinnedRows().length === 0 && e2e.current() === e2e.rows()[0] && e2e.rows().length === e2e.count`,
+  );
+  await check(
+    "the new folder button adds a folder at the end of the pinned tabs and edits its title",
+    `e2e.folders = () => [...document.querySelectorAll(".pinned > li > .folder")];
+     document.querySelector(".new-folder").click()`,
+    `(() => {
+      const input = e2e.folders()[5]?.querySelector("input");
+      return e2e.folders().length === 6 && input?.value === "New Folder" && document.activeElement === input;
+    })()`,
+  );
+  await check(
+    "Enter saves the edited folder title",
+    `e2e.input = document.activeElement; e2e.input.value = "Reading";
+     e2e.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`,
+    `!e2e.input.isConnected && e2e.folders()[5].textContent.endsWith("Reading")`,
+  );
+  await check(
+    "clicking a folder collapses it and hides its tabs",
+    `e2e.folder = e2e.folders()[0]; e2e.folder.click()`,
+    `e2e.folder.getAttribute("aria-expanded") === "false" && !e2e.folder.parentElement.querySelector(".folder-tabs")`,
+  );
+  await check(
+    "clicking a collapsed folder expands it and shows its tabs again",
+    `e2e.folder.click()`,
+    `e2e.folder.getAttribute("aria-expanded") === "true"
+      && e2e.folder.parentElement.querySelectorAll(".folder-tabs .tab-row").length === 10`,
   );
   await check(
     "scrolling the tabs keeps the url bar in place",

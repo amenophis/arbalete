@@ -154,3 +154,74 @@ test("hides the favorites when there are none", () => {
   receive({}, 3, []);
   expect(screen.queryByRole("list", { name: "Favorites" })).toBeNull();
 });
+
+test("collapses and expands a folder with a click", () => {
+  render(<App />);
+  receive({});
+  const docs = screen.getByRole("button", { name: "Docs" });
+  expect(docs.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(docs);
+  expect(fetch).toHaveBeenLastCalledWith("/command/toggle/6", { method: "POST" });
+  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/toggle/8", { method: "POST" });
+});
+
+test("creates a folder from the divider", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "New folder" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/folder/new", { method: "POST" });
+});
+
+function rename(name: string) {
+  fireEvent.doubleClick(screen.getByRole("button", { name }));
+  return screen.getByRole("textbox", { name: "Folder name" }) as HTMLInputElement;
+}
+
+test("renames a folder after a double click", () => {
+  render(<App />);
+  receive({});
+  const input = rename("Docs");
+  expect(input.value).toBe("Docs");
+  expect(document.activeElement).toBe(input);
+  fireEvent.change(input, { target: { value: " Café/2 " } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(fetch).toHaveBeenLastCalledWith("/command/rename/6/Caf%C3%A9%2F2", { method: "POST" });
+  expect(screen.queryByRole("textbox")).toBeNull();
+});
+
+test("keeps the title on Escape or when it is blank", () => {
+  render(<App />);
+  receive({});
+  fetch.mockClear();
+  let input = rename("Docs");
+  fireEvent.change(input, { target: { value: "Other" } });
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.queryByRole("textbox")).toBeNull();
+  input = rename("Docs");
+  fireEvent.change(input, { target: { value: "  " } });
+  fireEvent.blur(input);
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Docs" })).toBeDefined();
+});
+
+test("saves the title when the field loses the focus", () => {
+  render(<App />);
+  receive({});
+  const input = rename("Archive");
+  fireEvent.change(input, { target: { value: "Old things" } });
+  fireEvent.blur(input);
+  expect(fetch).toHaveBeenLastCalledWith("/command/rename/8/Old%20things", { method: "POST" });
+});
+
+test("renames the folder the app has just created", () => {
+  render(<App />);
+  receive({});
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalette:rename", { detail: 8 }));
+  });
+  const input = screen.getByRole("textbox", { name: "Folder name" }) as HTMLInputElement;
+  expect(input.value).toBe("Archive");
+  expect(document.activeElement).toBe(input);
+});

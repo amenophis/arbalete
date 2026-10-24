@@ -48,3 +48,15 @@ export function useAppState(): State | undefined {
   }, []);
   return state;
 }
+
+// The folder whose title is edited: one the app asks to rename once it creates it, or any the
+// user picks.
+export function useRenaming() {
+  const [renaming, setRenaming] = useState<number | null>(null);
+  useEffect(() => {
+    const listener = (event: Event) => setRenaming((event as CustomEvent<number>).detail);
+    addEventListener("arbalette:rename", listener);
+    return () => removeEventListener("arbalette:rename", listener);
+  }, []);
+  return [renaming, setRenaming] as const;
+}

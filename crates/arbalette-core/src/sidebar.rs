@@ -74,6 +74,9 @@ pub enum Error {
     /// Only containers and folders hold other nodes.
     NotAContainer,
     NotATab,
+    NotAFolder,
+    /// Folders keep a title to be told apart.
+    EmptyTitle,
     /// A folder cannot move inside itself or one of its descendants.
     MoveIntoItself,
     /// Root containers cannot be moved or removed.
@@ -188,6 +191,22 @@ impl Sidebar {
             expanded: true,
         };
         Ok(self.insert(Some(parent), folder))
+    }
+
+    pub fn rename_folder(&mut self, id: NodeId, new_title: &str) -> Result<(), Error> {
+        if new_title.trim().is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        let (title, _) = self.folder_mut(id)?;
+        *title = new_title.to_string();
+        Ok(())
+    }
+
+    /// Collapses an expanded folder, or expands a collapsed one.
+    pub fn toggle_folder(&mut self, id: NodeId) -> Result<(), Error> {
+        let (_, expanded) = self.folder_mut(id)?;
+        *expanded = !*expanded;
+        Ok(())
     }
 
     /// Moves a tab or a folder, with its content, to `index` among `parent`'s children.
@@ -320,6 +339,13 @@ impl Sidebar {
         match &self.nodes.get(&tab)?.kind {
             NodeKind::Tab(Tab { opener, .. }) => opener.filter(|&id| self.is_tab(id)),
             _ => None,
+        }
+    }
+
+    fn folder_mut(&mut self, id: NodeId) -> Result<(&mut String, &mut bool), Error> {
+        match &mut self.nodes.get_mut(&id).ok_or(Error::UnknownNode)?.kind {
+            NodeKind::Folder { title, expanded } => Ok((title, expanded)),
+            _ => Err(Error::NotAFolder),
         }
     }
 
@@ -688,6 +714,54 @@ mod tests {
             sidebar.move_node(home.today, outer, 0),
             Err(Error::RootNode)
         );
+    }
+
+    fn folder_title(sidebar: &Sidebar, id: NodeId) -> String {
+        match &sidebar.node(id).unwrap().kind {
+            NodeKind::Folder { title, .. } => title.clone(),
+            _ => panic!("not a folder"),
+        }
+    }
+
+    fn folder_expanded(sidebar: &Sidebar, id: NodeId) -> bool {
+        matches!(
+            sidebar.node(id).unwrap().kind,
+            NodeKind::Folder { expanded: true, .. }
+        )
+    }
+
+    #[test]
+    fn renames_a_folder_to_a_title_that_is_not_blank() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_folder(home.pinned, "New Folder").unwrap();
+        sidebar.rename_folder(folder, "Reading").unwrap();
+        assert_eq!(sidebar.rename_folder(folder, " "), Err(Error::EmptyTitle));
+        assert_eq!(folder_title(&sidebar, folder), "Reading");
+        let tab = sidebar.open_tab(home.id, "a").unwrap();
+        assert_eq!(sidebar.rename_folder(tab, "b"), Err(Error::NotAFolder));
+        assert_eq!(
+            sidebar.rename_folder(home.pinned, "b"),
+            Err(Error::NotAFolder)
+        );
+        assert_eq!(
+            sidebar.rename_folder(NodeId(999), "b"),
+            Err(Error::UnknownNode)
+        );
+    }
+
+    #[test]
+    fn collapses_and_expands_a_folder() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_folder(home.pinned, "Docs").unwrap();
+        assert!(folder_expanded(&sidebar, folder));
+        sidebar.toggle_folder(folder).unwrap();
+        assert!(!folder_expanded(&sidebar, folder));
+        sidebar.toggle_folder(folder).unwrap();
+        assert!(folder_expanded(&sidebar, folder));
+        let tab = sidebar.open_tab(home.id, "a").unwrap();
+        assert_eq!(sidebar.toggle_folder(tab), Err(Error::NotAFolder));
     }
 
     #[test]

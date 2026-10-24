@@ -59,6 +59,11 @@ define_class!(
             crate::shell::run(Command::Pin(None));
         }
 
+        #[unsafe(method(arbaletteNewFolder:))]
+        fn new_folder(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::NewFolder);
+        }
+
         #[unsafe(method(arbaletteBack:))]
         fn back(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Back);
@@ -146,6 +151,12 @@ pub fn setup_menu() {
                     ns_string!("Pin or Unpin Tab"),
                     sel!(arbaletteTogglePin:),
                     ns_string!("d"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("New Folder"),
+                    sel!(arbaletteNewFolder:),
+                    ns_string!("N"),
                 ),
             ],
         ),
