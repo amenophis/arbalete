@@ -253,6 +253,8 @@ impl UiState {
                 "title": s.title,
                 "emoji": s.emoji,
                 "color": s.color,
+                "profile": s.profile,
+                "pinned": self.overview(s.pinned, s.profile),
             })).collect::<Vec<_>>(),
             "pages": spaces
                 .iter()
@@ -306,6 +308,23 @@ impl UiState {
             .filter_map(|&id| match &self.sidebar.node(id)?.kind {
                 NodeKind::Tab(tab) => Some(tab_json(id, tab, profile)),
                 _ => None,
+            })
+            .collect()
+    }
+
+    /// The library's glance at a Space's pinned tabs: its tabs and its folders, without their
+    /// content, so that every Space may be sent on each update.
+    fn overview(&self, parent: NodeId, profile: ProfileId) -> Vec<serde_json::Value> {
+        let node = self.sidebar.node(parent).expect("a known container");
+        node.children
+            .iter()
+            .flat_map(|&id| match &self.sidebar.node(id).map(|node| &node.kind) {
+                Some(NodeKind::Tab(tab)) => vec![tab_json(id, tab, profile)],
+                Some(NodeKind::Folder { title, .. }) => {
+                    vec![json!({ "id": id, "title": title, "folder": true })]
+                }
+                Some(NodeKind::Split) => self.tabs(id, profile),
+                _ => Vec::new(),
             })
             .collect()
     }
@@ -1577,6 +1596,9 @@ pub fn run(command: Command) {
         }
         (Command::NewSpaceProfile(id), _) => new_space_profile(id),
         (Command::DeleteSpace(id), _) => update_spaces(id, |sidebar| sidebar.delete_space(id)),
+        (Command::MoveSpace(id, index), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.move_space(id, index));
+        }
         (Command::ShowImport, _) => show_import(),
         (Command::ImportReady, _) => send_sources(),
         (Command::CloseImport, _) => close_import(),
@@ -2559,11 +2581,25 @@ mod tests {
             .sidebar
             .set_space_color(work, arbalette_core::sidebar::Color::Blue)
             .unwrap();
+        // The library glances at every Space's pinned tabs, folders closed.
+        let pinned = state.sidebar.spaces()[1].pinned;
+        let folder = state.sidebar.add_folder(pinned, "Docs").unwrap();
+        state
+            .sidebar
+            .add_tab(folder, "https://a.test/", "A")
+            .unwrap();
+        let docs = state
+            .sidebar
+            .add_tab(pinned, "https://b.test/", "B")
+            .unwrap();
         let json = state.to_json();
         assert_eq!(json["space"], serde_json::json!(work));
         let spaces = serde_json::json!([
-            { "id": home, "title": "Home", "emoji": null, "color": "purple" },
-            { "id": work, "title": "Work", "emoji": "💼", "color": "blue" },
+            { "id": home, "title": "Home", "emoji": null, "color": "purple", "profile": profile, "pinned": [] },
+            { "id": work, "title": "Work", "emoji": "💼", "color": "blue", "profile": profile, "pinned": [
+                { "id": folder, "title": "Docs", "folder": true },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null },
+            ] },
         ]);
         assert_eq!(json["spaces"], spaces);
         let page = &json["pages"][1];
