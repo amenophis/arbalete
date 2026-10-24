@@ -251,6 +251,39 @@ impl Sidebar {
             .copied()
     }
 
+    /// The tab after the Space's selected one, or before it, in the order the sidebar shows tabs:
+    /// pinned tabs, those of expanded folders included, then "Today" tabs, wrapping around at the
+    /// ends. Favorites and tabs hidden in collapsed folders are left out; from one of them, or
+    /// from no selection, the first tab, or the last.
+    pub fn next_tab(&self, space: SpaceId, forward: bool) -> Option<NodeId> {
+        let space = self.space(space).ok()?;
+        let mut tabs = Vec::new();
+        self.push_visible_tabs(space.pinned, &mut tabs);
+        self.push_visible_tabs(space.today, &mut tabs);
+        if !forward {
+            tabs.reverse();
+        }
+        let selected = space.selected;
+        let next = tabs
+            .iter()
+            .position(|&id| Some(id) == selected)
+            .map_or(0, |i| i + 1);
+        tabs.get(next).or(tabs.first()).copied()
+    }
+
+    /// The favorite at `number`, counted from 1, of the Space's profile; 9 is the last one, as
+    /// ⌘9 is in browsers.
+    pub fn favorite(&self, space: SpaceId, number: usize) -> Option<NodeId> {
+        let profile = self.space(space).ok()?.profile;
+        let profile = self.profiles.iter().find(|p| p.id == profile)?;
+        let favorites = &self.nodes[&profile.favorites].children;
+        if number == 9 {
+            favorites.last().copied()
+        } else {
+            favorites.get(number.checked_sub(1)?).copied()
+        }
+    }
+
     pub fn is_favorite(&self, id: NodeId) -> bool {
         let parent = self.nodes.get(&id).and_then(|node| node.parent);
         self.profiles.iter().any(|p| Some(p.favorites) == parent)
@@ -351,6 +384,17 @@ impl Sidebar {
                 tab.saved_url = save.then(|| tab.url.clone());
             }
             pending.extend(node.children.iter().copied());
+        }
+    }
+
+    /// Appends the tabs inside `parent` the sidebar shows, depth first.
+    fn push_visible_tabs(&self, parent: NodeId, tabs: &mut Vec<NodeId>) {
+        for &id in &self.nodes[&parent].children {
+            match &self.nodes[&id].kind {
+                NodeKind::Tab(_) => tabs.push(id),
+                NodeKind::Folder { expanded: true, .. } => self.push_visible_tabs(id, tabs),
+                _ => {}
+            }
         }
     }
 
@@ -845,5 +889,65 @@ mod tests {
         assert_eq!(sidebar.node(folder), None);
         assert_eq!(sidebar.node(tab), None);
         assert_eq!(sidebar.remove(home.pinned), Err(Error::RootNode));
+    }
+
+    #[test]
+    fn moves_between_the_tabs_the_sidebar_shows_and_wraps_around() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let open = folder_with_tab(&mut sidebar, &home, "open");
+        let shut = folder_with_tab(&mut sidebar, &home, "shut");
+        sidebar.toggle_folder(shut.0).unwrap();
+        let pinned = sidebar.open_tab(home.id, "pinned").unwrap();
+        sidebar.move_node(pinned, home.pinned, usize::MAX).unwrap();
+        let today = sidebar.open_tab(home.id, "today").unwrap();
+        let favorite = sidebar.open_tab(home.id, "favorite").unwrap();
+        sidebar.move_node(favorite, favorites, 0).unwrap();
+        assert_eq!(sidebar.next_tab(home.id, true), Some(open.1));
+        assert_eq!(sidebar.next_tab(home.id, false), Some(today));
+        sidebar.select(home.id, open.1).unwrap();
+        assert_eq!(sidebar.next_tab(home.id, true), Some(pinned));
+        assert_eq!(sidebar.next_tab(home.id, false), Some(today));
+        sidebar.select(home.id, today).unwrap();
+        assert_eq!(sidebar.next_tab(home.id, true), Some(open.1));
+        assert_eq!(sidebar.next_tab(home.id, false), Some(pinned));
+        sidebar.select(home.id, favorite).unwrap();
+        assert_eq!(sidebar.next_tab(home.id, true), Some(open.1));
+    }
+
+    #[test]
+    fn moves_nowhere_without_tabs() {
+        let sidebar = Sidebar::default();
+        assert_eq!(sidebar.next_tab(home(&sidebar).id, true), None);
+        assert_eq!(sidebar.next_tab(SpaceId(999), true), None);
+    }
+
+    /// A pinned folder holding one tab: (folder, tab).
+    fn folder_with_tab(sidebar: &mut Sidebar, space: &Space, title: &str) -> (NodeId, NodeId) {
+        let folder = sidebar.add_folder(space.pinned, title).unwrap();
+        let tab = sidebar.open_tab(space.id, title).unwrap();
+        sidebar.move_node(tab, folder, 0).unwrap();
+        (folder, tab)
+    }
+
+    #[test]
+    fn finds_a_favorite_by_number_and_the_last_one_with_9() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        assert_eq!(sidebar.favorite(home.id, 1), None);
+        assert_eq!(sidebar.favorite(home.id, 9), None);
+        let tabs: Vec<_> = (0..3)
+            .map(|i| sidebar.open_tab(home.id, &i.to_string()).unwrap())
+            .collect();
+        for &tab in &tabs {
+            sidebar.move_node(tab, favorites, usize::MAX).unwrap();
+        }
+        assert_eq!(sidebar.favorite(home.id, 1), Some(tabs[0]));
+        assert_eq!(sidebar.favorite(home.id, 3), Some(tabs[2]));
+        assert_eq!(sidebar.favorite(home.id, 4), None);
+        assert_eq!(sidebar.favorite(home.id, 9), Some(tabs[2]));
+        assert_eq!(sidebar.favorite(home.id, 0), None);
     }
 }

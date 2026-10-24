@@ -11,6 +11,11 @@ pub enum Command {
     Reload,
     /// Shows a tab in the content view: `select/<tab id>`.
     Select(NodeId),
+    /// Shows the next tab in the sidebar, `next`, or the previous one, `previous`.
+    NextTab,
+    PreviousTab,
+    /// Shows a favorite by its number, from 1 to 9: `favorite/<n>`.
+    Favorite(usize),
     ShowOverlay,
     HideOverlay,
     /// Opens a tab: `open/<percent-encoded url>`.
@@ -45,7 +50,13 @@ impl Command {
             "reopen" => Some(Self::Reopen),
             "pin" => Some(Self::Pin(None)),
             "folder/new" => Some(Self::NewFolder),
+            "next" => Some(Self::NextTab),
+            "previous" => Some(Self::PreviousTab),
             _ => {
+                if let Some(number) = path.strip_prefix("favorite/") {
+                    let number = number.parse().ok().filter(|n| (1..=9).contains(n));
+                    return number.map(Self::Favorite);
+                }
                 if let Some(id) = path.strip_prefix("select/") {
                     return serde_json::from_str(id).ok().map(Self::Select);
                 }
@@ -127,6 +138,17 @@ mod tests {
             Command::parse("pin/3"),
             Some(Command::Pin(Some(_)))
         ));
+    }
+
+    #[test]
+    fn parses_tab_shortcuts() {
+        assert_eq!(Command::parse("next"), Some(Command::NextTab));
+        assert_eq!(Command::parse("previous"), Some(Command::PreviousTab));
+        assert_eq!(Command::parse("favorite/1"), Some(Command::Favorite(1)));
+        assert_eq!(Command::parse("favorite/9"), Some(Command::Favorite(9)));
+        assert_eq!(Command::parse("favorite/0"), None);
+        assert_eq!(Command::parse("favorite/10"), None);
+        assert_eq!(Command::parse("favorite/x"), None);
     }
 
     #[test]
