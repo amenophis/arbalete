@@ -3,7 +3,7 @@
 //! The `cef` crate's default callbacks return 0, which means "no" or "cancel": every callback the app
 //! relies on is implemented explicitly.
 
-use crate::command::{Command, Target};
+use crate::command::{Command, HitTarget, Target};
 use crate::menu::{self, Action};
 use arbalette_core::history::{self, History};
 use arbalette_core::import::browsers::{self, Family};
@@ -128,6 +128,8 @@ thread_local! {
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
     #[cfg(target_os = "macos")]
     static SWIPE: RefCell<crate::swipe::Tracker> = RefCell::default();
+    /// Where the docked sidebar's rows and Space header are, then the revealed one's.
+    static MENU_TARGETS: RefCell<[Vec<HitTarget>; 2]> = RefCell::default();
 }
 
 /// The sidebar sits beside the page, or is hidden: then a strip at the window's left edge
@@ -1430,6 +1432,9 @@ pub fn run(command: Command) {
         (Command::RemoveFavorite(tab), _) => remove_favorite(tab),
         (Command::MoveToSpace(tab, space), _) => move_to_space(tab, space),
         (Command::Menu(target), _) => show_menu(target),
+        (Command::MenuTargets { revealed, targets }, _) => {
+            MENU_TARGETS.with_borrow_mut(|all| all[usize::from(revealed)] = targets);
+        }
         (Command::ChooseMenu(target, item), _) => choose_menu(target, &item),
         // Like a selection, an unknown folder or a blank title from the UI is ignored.
         (Command::ToggleFolder(id), _) => {
@@ -1746,6 +1751,68 @@ wrap_client! {
             Some(UiDragHandler::new())
         }
     }
+}
+
+/// The sidebar views a right-click may land on.
+#[derive(Debug, PartialEq)]
+enum SidebarView {
+    Docked,
+    /// Above the page, or the strip at the window's edge that reveals it.
+    Revealed,
+}
+
+/// The sidebar view under a point of a window of `size`, in points from its top left corner,
+/// with the point in the view's coordinates.
+fn sidebar_point(
+    mode: SidebarMode,
+    size: &Size,
+    x: f64,
+    y: f64,
+) -> Option<(SidebarView, f64, f64)> {
+    let (view, rect) = match mode {
+        SidebarMode::Shown => {
+            let rect = Rect {
+                x: 0,
+                y: 0,
+                width: docked_width(),
+                height: size.height,
+            };
+            (SidebarView::Docked, rect)
+        }
+        _ => (SidebarView::Revealed, mode.layout(size).reveal),
+    };
+    let (left, top) = (f64::from(rect.x), f64::from(rect.y));
+    let inside = (left..left + f64::from(rect.width)).contains(&x)
+        && (top..top + f64::from(rect.height)).contains(&y);
+    inside.then_some((view, x - left, y - top))
+}
+
+/// The target under a point of a sidebar view, if any.
+fn target_at(targets: &[HitTarget], x: f64, y: f64) -> Option<Target> {
+    let target = targets.iter().find(|target| target.contains(x, y));
+    target.map(|target| target.target)
+}
+
+/// Shows the native menu of what is under a point of the window, in points from its top left
+/// corner, at once like a native view, and returns whether a sidebar is there. Real right-clicks
+/// reach neither the UI's `contextmenu` listener on macOS nor CEF's context menu handler, and
+/// would show Chromium's page menu: the sidebars send where their rows are instead
+/// (Command::MenuTargets).
+#[cfg(target_os = "macos")]
+pub fn menu_at(x: f64, y: f64) -> bool {
+    let Some(size) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
+        return false;
+    };
+    let Some((view, x, y)) = sidebar_point(SIDEBAR_MODE.get(), &size, x, y) else {
+        return false;
+    };
+    let revealed = view == SidebarView::Revealed;
+    let target =
+        MENU_TARGETS.with_borrow(|targets| target_at(&targets[usize::from(revealed)], x, y));
+    if let Some(target) = target {
+        show_menu(target);
+    }
+    true
 }
 
 // Lets the UI's `-webkit-app-region: drag` areas move the window.
@@ -2314,6 +2381,51 @@ mod tests {
             { "id": work, "name": "Work", "color": "blue" },
         ]);
         assert_eq!(json["profiles"], profiles);
+    }
+
+    #[test]
+    fn finds_the_sidebar_under_a_point_in_its_own_coordinates() {
+        use super::{SidebarView, sidebar_point};
+        let at = |mode, x, y| sidebar_point(mode, &SIZE, x, y);
+        assert_eq!(
+            at(SidebarMode::Shown, 10.0, 300.0),
+            Some((SidebarView::Docked, 10.0, 300.0))
+        );
+        assert_eq!(at(SidebarMode::Shown, 270.0, 300.0), None);
+        let inset = f64::from(FLOAT_INSET);
+        for mode in [SidebarMode::Revealed, SidebarMode::Floating] {
+            assert_eq!(
+                at(mode, 10.0, 300.0),
+                Some((SidebarView::Revealed, 10.0 - inset, 300.0 - inset))
+            );
+            assert_eq!(at(mode, 2.0, 300.0), None);
+            assert_eq!(at(mode, 270.0, 300.0), None);
+        }
+        assert_eq!(
+            at(SidebarMode::Hidden, 2.0, 300.0),
+            Some((SidebarView::Revealed, 2.0, 300.0))
+        );
+        assert_eq!(at(SidebarMode::Hidden, 10.0, 300.0), None);
+        LIBRARY.set(true);
+        assert_eq!(
+            at(SidebarMode::Shown, 400.0, 300.0),
+            Some((SidebarView::Docked, 400.0, 300.0))
+        );
+        LIBRARY.set(false);
+    }
+
+    #[test]
+    fn finds_the_target_under_a_point() {
+        let targets: Vec<super::HitTarget> = serde_json::from_str(
+            r#"[{"target":{"space":4},"x":7,"y":100,"width":250,"height":32},
+                {"target":{"node":12},"x":7,"y":140,"width":250,"height":41}]"#,
+        )
+        .unwrap();
+        let at = |y| super::target_at(&targets, 20.0, y).map(|t| format!("{t:?}"));
+        assert_eq!(at(110.0), Some(format!("{:?}", targets[0].target)));
+        assert_eq!(at(180.0), Some(format!("{:?}", targets[1].target)));
+        assert_eq!(at(135.0), None);
+        assert_eq!(at(181.0), None);
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 use arbalette_core::import::Choice;
 use arbalette_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
+use serde::Deserialize;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -52,6 +53,13 @@ pub enum Command {
     /// Opens the native menu of a sidebar row at the pointer: `menu/node/<tab or folder id>`, or
     /// of a Space's header, `menu/space/<space id>`.
     Menu(Target),
+    /// The rows and Space header a sidebar shows, where a right-click opens their menu:
+    /// `menu/targets/<docked or revealed>/<percent-encoded JSON array of targets>`, like
+    /// `[{"target":{"node":12},"x":7,"y":180,"width":250,"height":41}]`.
+    MenuTargets {
+        revealed: bool,
+        targets: Vec<HitTarget>,
+    },
     /// Runs an item of a menu without showing it, by the item's id (app/src/menu.rs), as the
     /// end-to-end checks cannot pick in native menus: `menu/choose/<node or space>/<id>/<item id>`.
     ChooseMenu(Target, String),
@@ -119,12 +127,29 @@ pub enum Command {
 }
 
 /// What a menu is about.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Target {
     /// A tab, a folder or a favorite.
     Node(NodeId),
     /// A Space, from its header.
     Space(SpaceId),
+}
+
+/// Where a menu's target shows in a sidebar, in CSS pixels from the view's top left corner.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct HitTarget {
+    pub target: Target,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl HitTarget {
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        (self.x..self.x + self.width).contains(&x) && (self.y..self.y + self.height).contains(&y)
+    }
 }
 
 impl Target {
@@ -210,6 +235,18 @@ impl Command {
                         color: parse_color(color)?,
                         tab,
                     });
+                }
+                if let Some((view, targets)) = path
+                    .strip_prefix("menu/targets/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let revealed = match view {
+                        "docked" => false,
+                        "revealed" => true,
+                        _ => return None,
+                    };
+                    let targets = serde_json::from_str(&percent_decode(targets)?).ok()?;
+                    return Some(Self::MenuTargets { revealed, targets });
                 }
                 if let Some(args) = path.strip_prefix("menu/choose/") {
                     // The target's kind and id, then the item's id, which may hold slashes.
@@ -622,6 +659,30 @@ mod tests {
             (serde_json::to_string(&id).unwrap(), item.as_str()),
             ("4".into(), "profile/1")
         );
+        // encodeURIComponent('[{"target":{"space":4},"x":7,"y":180.5,"width":250,"height":32}]')
+        let encoded = "%5B%7B%22target%22%3A%7B%22space%22%3A4%7D%2C%22x%22%3A7%2C%22y%22%3A180.5\
+                       %2C%22width%22%3A250%2C%22height%22%3A32%7D%5D";
+        let Some(Command::MenuTargets { revealed, targets }) =
+            Command::parse(&format!("menu/targets/revealed/{encoded}"))
+        else {
+            panic!("not menu targets")
+        };
+        assert!(revealed);
+        let Target::Space(id) = targets[0].target else {
+            panic!("not a Space")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        assert!(targets[0].contains(7.0, 180.5) && targets[0].contains(256.9, 212.4));
+        assert!(!targets[0].contains(257.0, 200.0) && !targets[0].contains(10.0, 212.5));
+        assert!(matches!(
+            Command::parse("menu/targets/docked/%5B%5D"),
+            Some(Command::MenuTargets {
+                revealed: false,
+                ..
+            })
+        ));
+        assert_eq!(Command::parse("menu/targets/floating/%5B%5D"), None);
+        assert_eq!(Command::parse("menu/targets/docked/%5B"), None);
         assert_eq!(Command::parse("menu/space/x"), None);
         assert_eq!(Command::parse("menu/node/x"), None);
         assert_eq!(Command::parse("menu/tab/12"), None);

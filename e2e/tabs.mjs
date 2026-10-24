@@ -956,6 +956,23 @@ try {
     `e2e.prevented && e2e.sent.length === e2e.sentCount`,
   );
   await check(
+    "the sidebar tells the app where its rows and Space header are, for real right-clicks",
+    ``,
+    `(() => {
+      const url = e2e.sent.filter((url) => url.includes("/menu/targets/docked/")).at(-1);
+      const targets = JSON.parse(decodeURIComponent(url.split("/menu/targets/docked/")[1]));
+      const at = (element, target) => {
+        const rect = element.getBoundingClientRect();
+        return targets.some((t) => JSON.stringify(t.target) === JSON.stringify(target)
+          && Math.abs(t.y - rect.top) < 1 && Math.abs(t.height - rect.height) < 1);
+      };
+      const folder = e2e.page().querySelector(".pinned > .folder-item");
+      return at(e2e.page().querySelector(".space-header"), { space: e2e.spaces[0] })
+        && at(folder.querySelector(":scope > .folder"), { node: Number(folder.dataset.id) })
+        && at(e2e.tiles()[0], { node: Number(e2e.tiles()[0].closest("li").dataset.id) });
+    })()`,
+  );
+  await check(
     "the tab menu's Pin Tab pins it",
     `e2e.choose(e2e.menuTab, "pin")`,
     `e2e.row(e2e.menuTab)?.closest(".pinned") && e2e.above(e2e.row(e2e.menuTab))`,

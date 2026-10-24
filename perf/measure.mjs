@@ -24,6 +24,7 @@ try {
     ["Cold start to a usable sidebar", [startup]],
     ["Switch tab, UI part (click → active tab painted)", await repeat(() => sidebar.eval(switchTab))],
     ["State update rendered (one title changed)", await repeat(() => sidebar.eval(stateUpdate))],
+    ["Menu targets sent (one folder fewer → app told)", await repeat(() => sidebar.eval(menuTargetsUpdate))],
     ["Open the overlay (command → field focused, painted)", await repeat(() => openOverlay(sidebar, overlay))],
   ];
   console.log("| Measure | Median | p95 |\n|---|---|---|");
@@ -84,6 +85,35 @@ async function stateUpdate() {
   }
   // Forces style and layout; waiting for the next frame would measure the display's refresh rate.
   tabs.getBoundingClientRect();
+  return performance.now() - start;
+}
+
+// Replays the last state without the first pinned folder, which moves the rows below it, and times
+// the update until the sidebar tells the app where its rows now are (ui/src/menuTargets.ts).
+async function menuTargetsUpdate() {
+  const state = await new Promise((resolve) => {
+    addEventListener("arbalette:state", (event) => resolve(event.detail), { once: true });
+    fetch("/command/ready", { method: "POST" });
+  });
+  // The state brings the folder back: its targets go first.
+  for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame);
+  // A new state, as the sidebar already shows this one.
+  const update = structuredClone(state);
+  const page = update.pages.find((page) => page.space === update.space);
+  page.pinned = page.pinned.slice(1);
+  const fetchCommand = window.fetch;
+  const sent = new Promise((resolve) => {
+    window.fetch = (url, init) => {
+      if (String(url).includes("/command/menu/targets/")) {
+        window.fetch = fetchCommand;
+        resolve();
+      }
+      return fetchCommand(url, init);
+    };
+  });
+  const start = performance.now();
+  dispatchEvent(new CustomEvent("arbalette:state", { detail: update }));
+  await sent;
   return performance.now() - start;
 }
 
