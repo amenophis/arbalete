@@ -50,6 +50,8 @@ thread_local! {
 struct UiState {
     page: Page,
     sidebar: Sidebar,
+    /// Closed tabs, the last one at the end, until the app quits.
+    closed: Vec<Tab>,
 }
 
 impl UiState {
@@ -193,6 +195,10 @@ fn close_tab(tab: Option<NodeId>) {
         )
     });
     let Some((tab, next)) = next else { return };
+    STATE.with_borrow_mut(|state| {
+        let closed = state.sidebar.tab_mut(tab).expect("an open tab").clone();
+        state.closed.push(closed);
+    });
     update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
     if selected == Some(tab) {
         match next {
@@ -203,6 +209,19 @@ fn close_tab(tab: Option<NodeId>) {
             }
         }
     }
+}
+
+fn reopen_tab() {
+    let Some(closed) = STATE.with_borrow_mut(|state| state.closed.pop()) else {
+        return;
+    };
+    open_tab(&closed.url);
+    update_sidebar(|sidebar| {
+        if let Some(tab) = active_tab(sidebar) {
+            tab.title = closed.title;
+            tab.favicon = closed.favicon;
+        }
+    });
 }
 
 fn load(url: &str) {
@@ -224,6 +243,7 @@ pub fn run(command: Command) {
             open_tab(&url);
         }
         (Command::Close(tab), _) => close_tab(tab),
+        (Command::Reopen, _) => reopen_tab(),
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),

@@ -49,6 +49,11 @@ define_class!(
             crate::shell::run(Command::Close(None));
         }
 
+        #[unsafe(method(arbaletteReopenTab:))]
+        fn reopen_tab(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Reopen);
+        }
+
         #[unsafe(method(arbaletteBack:))]
         fn back(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Back);
@@ -123,6 +128,13 @@ pub fn setup_menu() {
                     ns_string!("Close Tab"),
                     sel!(arbaletteCloseTab:),
                     ns_string!("w"),
+                ),
+                // An uppercase key equivalent adds ⇧.
+                item(
+                    mtm,
+                    ns_string!("Reopen Closed Tab"),
+                    sel!(arbaletteReopenTab:),
+                    ns_string!("T"),
                 ),
             ],
         ),

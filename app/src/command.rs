@@ -17,6 +17,8 @@ pub enum Command {
     Open(String),
     /// Closes a tab, `close/<tab id>`, or the selected one, `close`.
     Close(Option<NodeId>),
+    /// Reopens the last closed tab.
+    Reopen,
 }
 
 impl Command {
@@ -29,6 +31,7 @@ impl Command {
             "overlay/show" => Some(Self::ShowOverlay),
             "overlay/hide" => Some(Self::HideOverlay),
             "close" => Some(Self::Close(None)),
+            "reopen" => Some(Self::Reopen),
             _ => {
                 if let Some(id) = path.strip_prefix("select/") {
                     return serde_json::from_str(id).ok().map(Self::Select);
@@ -74,6 +77,7 @@ mod tests {
         assert_eq!(Command::parse("overlay/show"), Some(Command::ShowOverlay));
         assert_eq!(Command::parse("overlay/hide"), Some(Command::HideOverlay));
         assert_eq!(Command::parse("close"), Some(Command::Close(None)));
+        assert_eq!(Command::parse("reopen"), Some(Command::Reopen));
         assert!(matches!(
             Command::parse("close/3"),
             Some(Command::Close(Some(_)))
