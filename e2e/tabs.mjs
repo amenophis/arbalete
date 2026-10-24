@@ -402,14 +402,25 @@ try {
         && !document.querySelector(".split-preview, .split-target");
     })()`,
   );
+  await check(
+    "the split row's two tab pills keep their fill after the drop",
+    ``,
+    `[...e2e.page().querySelectorAll(".split-row .half")]
+      .every((half) => getComputedStyle(half).backgroundColor !== "rgba(0, 0, 0, 0)")`,
+  );
   const pair = (await sidebar.eval(`e2e.pair`)).map(Number);
   await checkSession("the session saves the split", (saved) =>
     Object.values(saved.nodes).some((node) => node.kind === "Split" && node.children.join() === pair.join()),
   );
   await check(
-    "clicking a half of the split selects its tab",
+    "clicking a half of the split selects its tab, the row lit and that half the brighter",
     `e2e.page().querySelector(".split-row .half:last-child").click()`,
-    `e2e.page().querySelector(".split-row .half:last-child").getAttribute("aria-current") === "page"`,
+    `(() => {
+      const [first, last] = e2e.page().querySelectorAll(".split-row .half");
+      const fill = (element) => getComputedStyle(element).backgroundColor;
+      return last.getAttribute("aria-current") === "page" && fill(first) !== fill(last)
+        && fill(e2e.page().querySelector(".split-row .split")) !== "rgba(0, 0, 0, 0)";
+    })()`,
   );
   await check(
     "closing a half leaves the other tab as a normal row",

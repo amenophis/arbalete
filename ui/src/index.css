@@ -18,6 +18,11 @@
   --menu-border: #0000001a;
   --ghost: #ffffffcc;
   --drop-line: #1f1d2b;
+  /* The pills of a split's tabs: at rest, hovered, beside the shown tab, and the shown tab. */
+  --half: #ffffff73;
+  --half-hover: #ffffffa6;
+  --half-dim: #ffffff59;
+  --half-current: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -34,6 +39,10 @@
     --menu-border: #ffffff1a;
     --ghost: #ffffff33;
     --drop-line: #ffffff;
+    --half: #ffffff12;
+    --half-hover: #ffffff1f;
+    --half-dim: #ffffff1a;
+    --half-current: #ffffff3d;
   }
 }
 
@@ -458,7 +467,9 @@ button.folder:hover {
   background: var(--active);
 }
 
-/* A split's row is a 36 px pill, like a tab's, holding a 28 px pill per tab. */
+/* A split's row is a 36 px pill, like a tab's, holding a filled 28 px pill per tab, as its preview
+   shows it while a tab is dragged over a row (splitPreview in drag.ts). Selected, the row lights up
+   and the tab shown is the brighter pill. */
 .split {
   display: flex;
   gap: 6px;
@@ -467,31 +478,47 @@ button.folder:hover {
   padding: 4px;
   border-block: 2.5px solid transparent;
   border-radius: 8px / 10.5px;
-  background: var(--hover);
   background-clip: padding-box;
+}
+
+.split:hover {
+  background-color: var(--hover);
+}
+
+.split:has(.half[aria-current]) {
+  background-color: var(--active);
 }
 
 .half {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 9px;
   border: 0;
   border-radius: 8px;
-  background: none;
+  background: var(--half);
   color: inherit;
   font: inherit;
   text-align: left;
 }
 
-.half:hover {
-  background: var(--hover);
+.half .title {
+  flex: 1;
+  min-width: 0;
 }
 
-.half[aria-current] {
-  background: var(--active);
+.half:hover {
+  background: var(--half-hover);
+}
+
+.split:has(.half[aria-current]) .half:not([aria-current]) {
+  background: var(--half-dim);
+}
+
+.split .half[aria-current] {
+  background: var(--half-current);
 }
 
 /* Drawn over the url pill's bottom edge, inside its rounded corners, so that loading moves nothing. */
@@ -632,10 +659,6 @@ button.folder:hover {
   z-index: 10;
   color: var(--text);
   pointer-events: none;
-}
-
-.split-preview .half {
-  background: var(--active);
 }
 
 /* Hidden yet under the pointer, so the preview stays while the pointer is over it. */
