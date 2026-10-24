@@ -27,6 +27,9 @@ pub enum Command {
     ToggleFolder(NodeId),
     /// Renames a folder: `rename/<folder id>/<percent-encoded title>`.
     RenameFolder(NodeId, String),
+    /// Moves a tab or a folder to an index among a container's or a folder's children, as the
+    /// app counts them once the node has left: `move/<id>/<parent id>/<index>`.
+    Move(NodeId, NodeId, usize),
 }
 
 impl Command {
@@ -62,6 +65,21 @@ impl Command {
                 {
                     let id = serde_json::from_str(id).ok()?;
                     return percent_decode(title).map(|title| Self::RenameFolder(id, title));
+                }
+                if let Some(args) = path.strip_prefix("move/") {
+                    let mut args = args.split('/');
+                    let (id, parent, index) = (args.next()?, args.next()?, args.next()?);
+                    if args.next().is_some() {
+                        return None;
+                    }
+                    let (id, parent) = (
+                        serde_json::from_str(id).ok()?,
+                        serde_json::from_str(parent).ok()?,
+                    );
+                    return index
+                        .parse()
+                        .ok()
+                        .map(|index| Self::Move(id, parent, index));
                 }
                 percent_decode(path.strip_prefix("open/")?).map(Self::Open)
             }
@@ -137,6 +155,19 @@ mod tests {
         assert_eq!(Command::parse("rename/6"), None);
         assert_eq!(Command::parse("rename/x/a"), None);
         assert_eq!(Command::parse("toggle/x"), None);
+    }
+
+    #[test]
+    fn parses_a_move() {
+        let Some(Command::Move(id, parent, index)) = Command::parse("move/12/6/3") else {
+            panic!("not a move")
+        };
+        assert_eq!(serde_json::to_string(&(id, parent)).unwrap(), "[12,6]");
+        assert_eq!(index, 3);
+        assert_eq!(Command::parse("move/12/6"), None);
+        assert_eq!(Command::parse("move/12/6/3/1"), None);
+        assert_eq!(Command::parse("move/12/6/-1"), None);
+        assert_eq!(Command::parse("move/x/6/3"), None);
     }
 
     #[test]

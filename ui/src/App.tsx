@@ -1,9 +1,11 @@
 import { type KeyboardEvent, memo, useRef } from "react";
 import { type Item, send, type Tab, useAppState, useRenaming } from "./bridge";
+import { useDrag } from "./drag";
 
 export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming();
+  const { dragging, indicator, onPointerDown } = useDrag();
   const page = state?.page;
   const active =
     state &&
@@ -11,7 +13,7 @@ export function App() {
       (tab) => tab.id === state.active,
     );
   return (
-    <nav className="sidebar">
+    <nav className="sidebar" onPointerDown={onPointerDown}>
       <div className="toolbar">
         <button
           type="button"
@@ -37,8 +39,9 @@ export function App() {
       {page?.loading && (
         <progress className="progress" aria-label="Loading" value={page.progress} />
       )}
-      {state && state.favorites.length > 0 && (
-        <ul className="favorites" aria-label="Favorites">
+      {/* An empty grid shows only while a tab is dragged, to drop it there. */}
+      {state && (state.favorites.length > 0 || dragging === "tab") && (
+        <ul className="favorites" aria-label="Favorites" data-parent={state.roots.favorites}>
           {state.favorites.map((tab) => (
             <Favorite
               key={tab.id}
@@ -51,7 +54,7 @@ export function App() {
         </ul>
       )}
       <div className="scroll">
-        <ul className="tabs pinned">
+        <ul className="tabs pinned" data-parent={state?.roots.pinned}>
           <Items
             items={state?.pinned ?? []}
             active={state?.active}
@@ -59,7 +62,7 @@ export function App() {
             onRename={setRenaming}
           />
         </ul>
-        <div className="divider-row">
+        <div className="divider-row" data-parent={state?.roots.pinned}>
           <hr className="divider" />
           <button
             type="button"
@@ -75,7 +78,7 @@ export function App() {
           <span className="favicon">+</span>
           <span className="title">New tab</span>
         </button>
-        <ul className="tabs today">
+        <ul className="tabs today" data-parent={state?.roots.today}>
           <Items
             items={state?.today ?? []}
             active={state?.active}
@@ -84,6 +87,7 @@ export function App() {
           />
         </ul>
       </div>
+      <div className="drop-indicator" ref={indicator} />
     </nav>
   );
 }
@@ -107,7 +111,7 @@ function Items({
 }) {
   return items.map((item) =>
     "children" in item ? (
-      <li key={item.id}>
+      <li key={item.id} data-id={item.id}>
         <FolderRow
           id={item.id}
           title={item.title}
@@ -116,7 +120,7 @@ function Items({
           onRename={onRename}
         />
         {item.expanded && (
-          <ul className="folder-tabs">
+          <ul className="folder-tabs" data-parent={item.id}>
             <Items items={item.children} active={active} renaming={renaming} onRename={onRename} />
           </ul>
         )}
@@ -220,7 +224,7 @@ const TabItem = memo(function TabItem({
   active: boolean;
 }) {
   return (
-    <li className="tab-row">
+    <li className="tab-row" data-id={id}>
       <button
         type="button"
         className="tab"
@@ -255,7 +259,7 @@ const Favorite = memo(function Favorite({
   active: boolean;
 }) {
   return (
-    <li>
+    <li data-id={id}>
       <button
         type="button"
         className="favorite"

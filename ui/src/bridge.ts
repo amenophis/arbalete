@@ -8,6 +8,8 @@ export function send(command: string) {
 // Sent whole by the app on every change (UiState in app/src/shell.rs).
 export type State = {
   page: Page;
+  // The containers of the sections, to move tabs and folders into.
+  roots: { favorites: number; pinned: number; today: number };
   // The favorites of the displayed Space's profile.
   favorites: Tab[];
   pinned: Item[];

@@ -1,5 +1,5 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, and
-// creating, renaming and collapsing folders, in the real app.
+// creating, renaming and collapsing folders, and dragging tabs between sections, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -17,6 +17,18 @@ try {
     current: () => document.querySelector(".tab[aria-current]")?.closest(".tab-row"),
     above: (element) => !!(element.compareDocumentPosition(document.querySelector(".divider")) & Node.DOCUMENT_POSITION_FOLLOWING),
     send: (command) => fetch("/command/" + command, { method: "POST" }).then(() => {}),
+    // Drags with pointer events, at a fraction of the target's width and height.
+    pointer: (type, element, fx, fy) => {
+      const rect = element.getBoundingClientRect();
+      const init = { bubbles: true, button: 0, pointerId: 1, isPrimary: true, pointerType: "mouse",
+        clientX: rect.left + rect.width * fx, clientY: rect.top + rect.height * fy };
+      element.dispatchEvent(new PointerEvent(type, init));
+    },
+    press: (row) => { e2e.pointer("pointerdown", row, 0.5, 0.5); e2e.pointer("pointermove", row, 0.5, 0.9); },
+    moveTo: (target, fx, fy) => e2e.pointer("pointermove", target, fx, fy),
+    drag: (row, target, fx, fy) => { e2e.press(row); e2e.moveTo(target, fx, fy); e2e.pointer("pointerup", target, fx, fy); },
+    indicator: () => document.querySelector(".drop-indicator"),
+    has: (list, id) => [...list].some((element) => element.closest("li").dataset.id === id),
   }`);
 
   async function check(description, action, condition) {
@@ -141,6 +153,36 @@ try {
     `e2e.folder.click()`,
     `e2e.folder.getAttribute("aria-expanded") === "true"
       && e2e.folder.parentElement.querySelectorAll(".folder-tabs .tab-row").length === 10`,
+  );
+  await check(
+    "dragging a tab dims it and shows a line where it would land",
+    `e2e.rows()[0].scrollIntoView({ block: "center" }); e2e.dragged = e2e.rows()[3];
+     e2e.press(e2e.dragged); e2e.moveTo(e2e.rows()[0], 0.5, 0.2)`,
+    `e2e.dragged.classList.contains("dragged") && getComputedStyle(e2e.indicator()).display === "block"
+      && Math.abs(e2e.indicator().getBoundingClientRect().top - e2e.rows()[0].getBoundingClientRect().top) <= 2`,
+  );
+  await check(
+    "dropping a tab on the top of another moves it before that one",
+    `e2e.pointer("pointerup", e2e.rows()[0], 0.5, 0.2)`,
+    `e2e.rows()[0] === e2e.dragged && !e2e.dragged.classList.contains("dragged")
+      && getComputedStyle(e2e.indicator()).display === "none"`,
+  );
+  await check(
+    "dropping a tab of today on a pinned folder moves it into the folder",
+    `e2e.reading = e2e.folders()[5]; e2e.reading.scrollIntoView({ block: "center" });
+     e2e.moved = e2e.rows()[0].dataset.id; e2e.drag(e2e.rows()[0], e2e.reading, 0.5, 0.6)`,
+    `e2e.has(e2e.reading.parentElement.querySelectorAll(".folder-tabs > li"), e2e.moved)
+      && !e2e.has(e2e.rows(), e2e.moved) && e2e.above(e2e.reading.parentElement.querySelector(".folder-tabs > li"))`,
+  );
+  await check(
+    "dropping a pinned tab on today's tabs moves it back to today",
+    `e2e.drag(e2e.reading.parentElement.querySelector(".folder-tabs > li"), e2e.rows()[0], 0.5, 0.2)`,
+    `e2e.rows()[0].dataset.id === e2e.moved && !e2e.reading.parentElement.querySelector(".folder-tabs > li")`,
+  );
+  await check(
+    "dropping a tab after the last favorite makes it a favorite",
+    `e2e.rows()[0].scrollIntoView({ block: "nearest" }); e2e.drag(e2e.rows()[0], e2e.tiles()[5], 0.8, 0.5)`,
+    `e2e.tiles().length === 7 && e2e.tiles()[6].closest("li").dataset.id === e2e.moved && !e2e.has(e2e.rows(), e2e.moved)`,
   );
   await check(
     "scrolling the tabs keeps the url bar in place",
