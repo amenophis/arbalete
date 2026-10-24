@@ -25,6 +25,12 @@ pub enum Command {
     /// `sidebar/conceal`.
     RevealSidebar,
     ConcealSidebar,
+    /// Moves the page's card right of where it rests beside the sidebar, by a number of points,
+    /// as the sidebar pages towards the library: `card/offset/<points>`.
+    CardOffset(u32),
+    /// Widens the sidebar for the library, the card resting beside it: `library/show`. Any card
+    /// offset gives the sidebar its own width back.
+    ShowLibrary,
     /// Opens a tab: `open/<percent-encoded url>`.
     Open(String),
     /// Closes a tab, `close/<tab id>`, or the selected one, `close`.
@@ -102,6 +108,7 @@ impl Command {
             "sidebar/toggle" => Some(Self::ToggleSidebar),
             "sidebar/reveal" => Some(Self::RevealSidebar),
             "sidebar/conceal" => Some(Self::ConcealSidebar),
+            "library/show" => Some(Self::ShowLibrary),
             "close" => Some(Self::Close(None)),
             "reopen" => Some(Self::Reopen(0)),
             "pin" => Some(Self::Pin(None)),
@@ -124,6 +131,9 @@ impl Command {
                         window: parse_rgb(window)?,
                         card: parse_rgb(card)?,
                     });
+                }
+                if let Some(offset) = path.strip_prefix("card/offset/") {
+                    return offset.parse().ok().map(Self::CardOffset);
                 }
                 if let Some(choices) = path.strip_prefix("import/run/") {
                     let choices = serde_json::from_str(&percent_decode(choices)?).ok();
@@ -301,6 +311,21 @@ mod tests {
         assert_eq!(Command::parse("window/colors/1b0e1/f8f6fb"), None);
         assert_eq!(Command::parse("window/colors/+b0e1f/f8f6fb"), None);
         assert_eq!(Command::parse("window/colors/1b0e1fff/f8f6fb"), None);
+    }
+
+    #[test]
+    fn parses_library_commands() {
+        assert_eq!(Command::parse("library/show"), Some(Command::ShowLibrary));
+        assert_eq!(
+            Command::parse("card/offset/180"),
+            Some(Command::CardOffset(180))
+        );
+        assert_eq!(
+            Command::parse("card/offset/0"),
+            Some(Command::CardOffset(0))
+        );
+        assert_eq!(Command::parse("card/offset/-3"), None);
+        assert_eq!(Command::parse("card/offset/1.5"), None);
     }
 
     #[test]

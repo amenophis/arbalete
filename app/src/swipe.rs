@@ -31,6 +31,8 @@ pub struct Scroll {
     /// the user's scrolling direction.
     pub dx: f64,
     pub dy: f64,
+    /// Where the pointer is, in points from the main window's top.
+    pub y: f64,
     /// In seconds.
     pub time: f64,
     /// Over the sidebar, where swipes page between Spaces.
@@ -52,6 +54,8 @@ pub struct Gesture {
     pub phase: GesturePhase,
     /// In points, like `Scroll::dx`.
     pub dx: f64,
+    /// Like `Scroll::y`.
+    pub y: f64,
     /// In milliseconds.
     pub time: f64,
 }
@@ -90,6 +94,7 @@ impl Tracker {
             Swipe::Gesture(Gesture {
                 phase,
                 dx: scroll.dx,
+                y: scroll.y,
                 time: scroll.time * 1000.0,
             })
         };
@@ -156,6 +161,7 @@ mod tests {
             momentum: false,
             dx,
             dy,
+            y: 100.0,
             time,
             inside: true,
         }
@@ -165,6 +171,7 @@ mod tests {
         Some(Swipe::Gesture(Gesture {
             phase,
             dx,
+            y: 100.0,
             time: time * 1000.0,
         }))
     }
