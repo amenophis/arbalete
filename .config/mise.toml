@@ -63,3 +63,12 @@ run = [
   "cargo run -q -p arbalette-core --example bench-session -- target/bench",
   "node perf/measure.mjs target/bench",
 ]
+
+[tasks.e2e]
+description = "Check the app end to end through DevTools (opens a window)"
+depends = ["app"]
+run = [
+  "rm -rf target/e2e",
+  "cargo run -q -p arbalette-core --example bench-session -- target/e2e",
+  "node e2e/tabs.mjs target/e2e",
+]

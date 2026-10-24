@@ -1,24 +1,18 @@
 // Measures the performance prototype (docs/PLAN.md, phase 0) through the DevTools protocol.
 // Usage: `mise run bench`, which bundles the app and writes the benchmark session first.
-// Needs Node.js 22 or later (global WebSocket). Prints a Markdown table.
+// Prints a Markdown table.
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { connect, launch, OVERLAY, SIDEBAR, waitFor } from "../e2e/devtools.mjs";
 
-const APP = "target/bundle/arbalette.app/Contents/MacOS/arbalette";
-const PORT = 9333;
-const SIDEBAR = "https://arbalette.ui/index.html";
-const OVERLAY = `${SIDEBAR}#overlay`;
 const RUNS = 20;
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error("usage: node perf/measure.mjs <data dir>");
 
 const started = performance.now();
-const app = spawn(APP, [], {
-  env: { ...process.env, ARBALETTE_DATA_DIR: dataDir, ARBALETTE_DEBUG_PORT: String(PORT) },
-  stdio: "ignore",
-});
+const app = launch(dataDir);
 try {
   const sidebar = await connect(SIDEBAR);
   await sidebar.eval(waitFor(`!!document.querySelector(".tabs .tab")`));
@@ -91,58 +85,6 @@ async function openOverlay(sidebar, overlay) {
   await sidebar.eval(`fetch("/command/overlay/hide", { method: "POST" })`);
   await sleep(100);
   return shown - start;
-}
-
-// Connects to the page at `url` once the app has opened it.
-async function connect(url) {
-  let target;
-  while (!target) {
-    const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then(
-      (response) => response.json(),
-      () => [],
-    );
-    target = list.find((page) => page.url === url);
-    if (!target) await sleep(20);
-  }
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve) => socket.addEventListener("open", resolve, { once: true }));
-  const pending = new Map();
-  let id = 0;
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
-    pending.get(message.id)?.(message);
-    pending.delete(message.id);
-  });
-  const call = (method, params) =>
-    new Promise((resolve, reject) => {
-      pending.set(++id, (message) =>
-        message.error ? reject(new Error(message.error.message)) : resolve(message.result),
-      );
-      socket.send(JSON.stringify({ id, method, params }));
-    });
-  return {
-    // Evaluates an expression, or calls a function, in the page and returns its value.
-    async eval(code) {
-      const expression = typeof code === "function" ? `(${code})()` : code;
-      const params = { expression, awaitPromise: true, returnByValue: true };
-      const result = await call("Runtime.evaluate", params);
-      if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
-      return result.result.value;
-    },
-    // The page's JavaScript heap in use, in MB.
-    async heap() {
-      const { usedSize } = await call("Runtime.getHeapUsage");
-      return Math.round(usedSize / 1024 / 1024);
-    },
-  };
-}
-
-// An expression that resolves once `condition` is truthy, checked on every frame.
-function waitFor(condition) {
-  return `new Promise((resolve) => {
-    const check = () => (${condition}) ? resolve(${condition}) : requestAnimationFrame(check);
-    check();
-  })`;
 }
 
 async function repeat(measure) {
