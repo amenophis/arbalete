@@ -664,19 +664,27 @@ button.folder:hover {
   flex: 1;
 }
 
-.new-folder {
-  width: 20px;
+.clear-today {
+  flex: none;
   height: 20px;
+  padding: 0 4px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 5px;
   background: none;
   color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+}
+
+.divider-row:hover .clear-today,
+.clear-today:focus-visible {
   opacity: 0.5;
 }
 
-.new-folder:hover {
-  background: var(--hover);
-  opacity: 1;
+.clear-today:hover {
+  opacity: 0.9;
 }
 
 .folder input {

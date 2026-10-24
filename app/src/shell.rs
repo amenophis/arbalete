@@ -978,9 +978,15 @@ fn show_found_space(find: impl FnOnce(&Sidebar) -> Option<SpaceId>) {
 }
 
 /// Closes a tab; closing the selected one shows the next tab, or the overlay when none is left.
-/// Favorites and pinned tabs stay where they are: closing one deselects it and takes it back to
-/// its saved url, and it cannot be reopened since it was never removed.
+/// Favorites and open pinned tabs stay where they are: closing one deselects it and takes it back
+/// to its saved url, and it cannot be reopened since it was never removed. A pinned tab already
+/// closed, which its Space does not show, is removed, and may be reopened.
 fn close_tab(tab: Option<NodeId>) {
+    close_keeping(tab, false);
+}
+
+/// Closes a tab as close_tab does; with `keep_pinned`, a closed pinned tab stays too.
+fn close_keeping(tab: Option<NodeId>, keep_pinned: bool) {
     let (selected, tab) = STATE.with_borrow_mut(|state| {
         let selected = state.sidebar.displayed().selected;
         let tab = tab
@@ -989,8 +995,12 @@ fn close_tab(tab: Option<NodeId>) {
         (selected, tab)
     });
     let Some(tab) = tab else { return };
-    let stays =
-        STATE.with_borrow(|state| state.sidebar.is_favorite(tab) || state.sidebar.is_pinned(tab));
+    let stays = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        // The content view shows a pinned tab only while it is its Space's selected one.
+        let open = sidebar.spaces().iter().any(|s| s.selected == Some(tab));
+        sidebar.is_favorite(tab) || (sidebar.is_pinned(tab) && (open || keep_pinned))
+    });
     let next = if stays {
         update_sidebar(|sidebar| {
             let space = sidebar.displayed().id;
@@ -1038,7 +1048,34 @@ fn close_folder_tabs(folder: NodeId) {
         Some(tabs)
     });
     for tab in tabs.unwrap_or_default() {
-        close_tab(Some(tab));
+        close_keeping(Some(tab), true);
+    }
+}
+
+/// Closes every "Today" tab of the displayed Space, which may be reopened; when the selected tab
+/// was one of them, shows the tab closing it would have shown, if it is left, or the overlay.
+fn clear_today() {
+    let next = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let selected = sidebar.displayed().selected?;
+        let today = !sidebar.is_pinned(selected) && !sidebar.is_favorite(selected);
+        today.then(|| sidebar.next_after_close(selected))
+    });
+    let now = SystemTime::now();
+    let removed = update_sidebar(|sidebar| {
+        let space = sidebar.displayed().id;
+        sidebar.clear_today(space).expect("the displayed Space")
+    });
+    STATE.with_borrow_mut(|state| {
+        state
+            .closed
+            .extend(removed.into_iter().map(|tab| (tab, now)))
+    });
+    send_state();
+    if let Some(next) = next {
+        let next =
+            next.filter(|&id| STATE.with_borrow_mut(|state| state.sidebar.tab_mut(id).is_some()));
+        show_next(next);
     }
 }
 
@@ -1444,6 +1481,7 @@ pub fn run(command: Command) {
         (Command::HideFavoritesHint(space), _) => {
             let _ = update_sidebar(|sidebar| sidebar.hide_favorites_hint(space));
         }
+        (Command::ClearToday, _) => clear_today(),
         (Command::CopyLink, _) => {
             let url = STATE
                 .with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()));
