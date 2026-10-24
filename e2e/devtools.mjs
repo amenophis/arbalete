@@ -3,9 +3,11 @@
 // Needs Node.js 22 or later (global WebSocket).
 
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const APP = "target/bundle/arbalette.app/Contents/MacOS/arbalette";
+const APP = resolve("target/bundle/arbalette.app/Contents/MacOS/arbalette");
 const PORT = 9333;
 const TIMEOUT = 10_000;
 
@@ -17,6 +19,8 @@ export function launch(dataDir) {
   return spawn(APP, [], {
     env: { ...process.env, ARBALETTE_DATA_DIR: dataDir, ARBALETTE_DEBUG_PORT: String(PORT) },
     stdio: "ignore",
+    // Not the repository, which may sit in Documents: macOS asks before an app reads it.
+    cwd: tmpdir(),
   });
 }
 
