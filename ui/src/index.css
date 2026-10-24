@@ -8,6 +8,9 @@
   --hover: #0000000f;
   --active: #ffffffb3;
   --accent: #6e56cf;
+  /* The window's diagonal gradient, nearly flat in light mode. */
+  --window-start: #efebf6;
+  --window-end: #e7e2f1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -16,6 +19,8 @@
     --hover: #ffffff14;
     --active: #ffffff24;
     --accent: #9e8cfc;
+    --window-start: #110f1d;
+    --window-end: #1b0e1f;
   }
 }
 
@@ -43,7 +48,19 @@ body {
   padding: 0 8px 8px;
   user-select: none;
   --tint: color-mix(in srgb, var(--space, var(--background)) 12%, var(--background));
-  background: var(--tint);
+}
+
+/* The window around the page's card, behind the sidebar, tinted by the displayed Space. */
+.sidebar::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    to bottom right,
+    color-mix(in srgb, var(--space, var(--window-start)) 14%, var(--window-start)),
+    color-mix(in srgb, var(--space, var(--window-end)) 14%, var(--window-end))
+  );
 }
 
 /* The Spaces' pages side by side, edge to edge, the displayed one in view (ui/src/pager.ts). */

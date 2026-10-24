@@ -278,9 +278,15 @@ try {
     content,
   );
   await check(
-    "the sidebar's view fills the window, to paint the window around the card",
+    "the sidebar's view fills the window and paints the window around the card",
     ``,
-    `innerWidth === outerWidth && innerHeight === outerHeight`,
+    `(() => {
+      const window = getComputedStyle(document.querySelector(".sidebar"), "::before");
+      return innerWidth === outerWidth && innerHeight === outerHeight
+        && parseFloat(window.width) === innerWidth && parseFloat(window.height) === innerHeight
+        && window.backgroundImage.startsWith("linear-gradient")
+        && document.querySelector(".sidebar").getBoundingClientRect().width === 260;
+    })()`,
   );
   await check(
     "the sidebar toggle command hides the sidebar",
@@ -528,7 +534,8 @@ try {
      e2e.newPage = () => document.querySelector(".new-space-page:not([inert])");
      e2e.last = () => e2e.spaceIcons().at(-1);
      e2e.tint = () => getComputedStyle(document.querySelector(".sidebar"));
-     e2e.background = e2e.tint().backgroundColor;
+     e2e.window = () => getComputedStyle(document.querySelector(".sidebar"), "::before").backgroundImage;
+     e2e.background = e2e.window();
      document.querySelector(".new-space").click()`,
     `e2e.newPage() && document.activeElement === e2e.newField("name")
       && document.querySelector(".pages").style.transform === "translateX(-${spaceCount * 100}%)"
@@ -568,9 +575,10 @@ try {
     `e2e.last().textContent === "📚" && e2e.spaceField("emoji").value === "📚"`,
   );
   await check(
-    "picking a color tints the sidebar",
+    "picking a color tints the window around the page, behind the sidebar",
     `document.querySelector('[aria-label="Color of Reading"] [aria-label="orange"]').click()`,
-    `e2e.tint().getPropertyValue("--space") === "#f76b15" && e2e.tint().backgroundColor !== e2e.background`,
+    `e2e.tint().getPropertyValue("--space") === "#f76b15" && e2e.window().startsWith("linear-gradient")
+      && e2e.window() !== e2e.background && e2e.tint().backgroundColor === "rgba(0, 0, 0, 0)"`,
   );
   await checkSession("the session saves the new Space, its name, emoji and color", (saved) => {
     const space = saved.spaces.at(-1);
