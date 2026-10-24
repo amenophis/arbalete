@@ -160,35 +160,7 @@ fn firefox_profiles(dir: &Path) -> Vec<Profile> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A home directory under the system's temporary one, removed when dropped.
-    struct Home(PathBuf);
-
-    impl Home {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir()
-                .join(format!("arbalette-browsers-{name}-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-
-        fn write(&self, path: &str, content: &str) {
-            let path = self.0.join(path);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, content).unwrap();
-        }
-
-        fn dir(&self, path: &str) {
-            fs::create_dir_all(self.0.join(path)).unwrap();
-        }
-    }
-
-    impl Drop for Home {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::import::TestDir as Home;
 
     fn summary(browsers: &[Browser]) -> Vec<(&str, Family, Vec<&str>)> {
         browsers
@@ -204,13 +176,13 @@ mod tests {
 
     #[test]
     fn finds_nothing_in_an_empty_home() {
-        let home = Home::new("empty");
+        let home = Home::new("browsers-empty");
         assert!(detect(&home.0).is_empty());
     }
 
     #[test]
     fn finds_chromium_profiles_in_local_state() {
-        let home = Home::new("chromium");
+        let home = Home::new("browsers-chromium");
         let local_state = r#"{ "profile": { "info_cache": {
             "Default": { "name": "Personal" },
             "Profile 1": { "name": "Work" },
@@ -241,7 +213,7 @@ mod tests {
 
     #[test]
     fn finds_opera_s_single_profile_in_its_data_directory() {
-        let home = Home::new("opera");
+        let home = Home::new("browsers-opera");
         home.write(
             &format!("{SUPPORT}/com.operasoftware.Opera/Local State"),
             r#"{ "browser": {} }"#,
@@ -257,7 +229,7 @@ mod tests {
 
     #[test]
     fn finds_firefox_profiles_in_profiles_ini() {
-        let home = Home::new("firefox");
+        let home = Home::new("browsers-firefox");
         let elsewhere = home.0.join("elsewhere");
         let ini = format!(
             "[General]\nStartWithLastProfile=1\n\n\
@@ -283,7 +255,7 @@ mod tests {
 
     #[test]
     fn finds_safari_when_its_data_directory_exists() {
-        let home = Home::new("safari");
+        let home = Home::new("browsers-safari");
         home.dir("Library/Safari");
         let browsers = detect(&home.0);
         assert_eq!(
