@@ -50,7 +50,8 @@ async function switchTab() {
   return performance.now() - start;
 }
 
-// Replays the last state with one tab renamed, as the app does when a page changes its title.
+// Replays the last state with one tab renamed, as the app does when a page changes its title, and
+// times the update until the sidebar is laid out again.
 async function stateUpdate() {
   const state = await new Promise((resolve) => {
     addEventListener("arbalette:state", (event) => resolve(event.detail), { once: true });
@@ -61,12 +62,16 @@ async function stateUpdate() {
   const start = performance.now();
   dispatchEvent(new CustomEvent("arbalette:state", { detail: state }));
   const tabs = document.querySelector(".tabs");
-  await new Promise((resolve) => {
-    new MutationObserver((_, observer) => {
-      if (tabs.textContent.includes(title)) resolve(observer.disconnect());
-    }).observe(tabs, { subtree: true, childList: true, characterData: true });
-  });
-  await new Promise(requestAnimationFrame);
+  // React may render during the dispatch, before an observer could see the change.
+  if (!tabs.textContent.includes(title)) {
+    await new Promise((resolve) => {
+      new MutationObserver((_, observer) => {
+        if (tabs.textContent.includes(title)) resolve(observer.disconnect());
+      }).observe(tabs, { subtree: true, childList: true, characterData: true });
+    });
+  }
+  // Forces style and layout; waiting for the next frame would measure the display's refresh rate.
+  tabs.getBoundingClientRect();
   return performance.now() - start;
 }
 
