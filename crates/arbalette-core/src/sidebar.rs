@@ -57,6 +57,8 @@ pub struct Tab {
     pub url: String,
     pub title: String,
     pub favicon: Option<String>,
+    /// The tab selected when this one opened: closing this one returns to it.
+    pub opener: Option<NodeId>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -146,13 +148,15 @@ impl Sidebar {
         Ok(id)
     }
 
-    /// Opens a tab at the end of the Space's "Today" tabs.
+    /// Opens a tab at the end of the Space's "Today" tabs, from the Space's selected tab.
     pub fn open_tab(&mut self, space: SpaceId, url: &str) -> Result<NodeId, Error> {
-        let today = self.space(space)?.today;
+        let space = self.space(space)?;
+        let today = space.today;
         let tab = Tab {
             url: url.to_string(),
             title: url.to_string(),
             favicon: None,
+            opener: space.selected,
         };
         Ok(self.insert(Some(today), NodeKind::Tab(tab)))
     }
@@ -191,13 +195,21 @@ impl Sidebar {
         Ok(())
     }
 
-    /// The tab to show once `tab` is closed: the next tab in its container, else the previous one.
+    /// The tab to show once `tab` is closed: the tab it was opened from if still open, else the
+    /// next tab in its container, else the previous one.
     pub fn next_after_close(&self, tab: NodeId) -> Option<NodeId> {
+        let opener = match &self.nodes.get(&tab)?.kind {
+            NodeKind::Tab(Tab { opener, .. }) => *opener,
+            _ => None,
+        };
+        if let Some(opener) = opener.filter(|&id| self.is_tab(id)) {
+            return Some(opener);
+        }
         let siblings = &self.nodes.get(&self.nodes.get(&tab)?.parent?)?.children;
         let tabs: Vec<_> = siblings
             .iter()
             .copied()
-            .filter(|&id| id == tab || matches!(self.nodes[&id].kind, NodeKind::Tab(_)))
+            .filter(|&id| id == tab || self.is_tab(id))
             .collect();
         let index = tabs.iter().position(|&id| id == tab)?;
         tabs.get(index + 1)
@@ -245,6 +257,10 @@ impl Sidebar {
             self.children_mut(parent).push(id);
         }
         id
+    }
+
+    fn is_tab(&self, id: NodeId) -> bool {
+        matches!(self.nodes.get(&id).map(|n| &n.kind), Some(NodeKind::Tab(_)))
     }
 
     fn space(&self, id: SpaceId) -> Result<&Space, Error> {
@@ -379,6 +395,20 @@ mod tests {
         sidebar.remove(b).unwrap();
         sidebar.remove(c).unwrap();
         assert_eq!(sidebar.next_after_close(a), None);
+    }
+
+    #[test]
+    fn returns_to_the_opener_while_it_is_open() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let first = sidebar.open_tab(home.id, "first").unwrap();
+        let opener = sidebar.open_tab(home.id, "opener").unwrap();
+        sidebar.select(home.id, opener).unwrap();
+        let opened = sidebar.open_tab(home.id, "opened").unwrap();
+        sidebar.move_node(opened, home.today, 0).unwrap();
+        assert_eq!(sidebar.next_after_close(opened), Some(opener));
+        sidebar.remove(opener).unwrap();
+        assert_eq!(sidebar.next_after_close(opened), Some(first));
     }
 
     #[test]
