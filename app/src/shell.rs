@@ -81,8 +81,9 @@ struct UiState {
 }
 
 impl UiState {
-    /// Sent whole to the UI on every change. Only the first Space is shown for now. `roots` names
-    /// the sections' containers, which the UI moves nodes into.
+    /// Sent whole to the UI on every change: the displayed Space's tabs, and the favorites of the
+    /// first Space's profile for now. `roots` names the sections' containers, which the UI moves
+    /// nodes into.
     fn to_json(&self) -> serde_json::Value {
         let home = &self.sidebar.spaces()[0];
         let profile = self
@@ -91,13 +92,19 @@ impl UiState {
             .iter()
             .find(|p| p.id == home.profile);
         let favorites = profile.expect("a known profile").favorites;
+        let space = self.sidebar.displayed();
         json!({
             "page": self.page,
-            "roots": { "favorites": favorites, "pinned": home.pinned, "today": home.today },
+            "roots": { "favorites": favorites, "pinned": space.pinned, "today": space.today },
             "favorites": self.tabs(favorites),
-            "pinned": self.items(home.pinned),
-            "today": self.items(home.today),
-            "active": home.selected,
+            "pinned": self.items(space.pinned),
+            "today": self.items(space.today),
+            "active": space.selected,
+            "space": space.id,
+            "spaces": self.sidebar.spaces().iter().map(|s| json!({
+                "id": s.id,
+                "title": s.title,
+            })).collect::<Vec<_>>(),
             "profiles": self.sidebar.profiles().iter().map(|p| json!({
                 "id": p.id,
                 "name": p.name,
@@ -263,35 +270,45 @@ fn restore(path: PathBuf) {
 }
 
 fn active_tab(sidebar: &mut Sidebar) -> Option<&mut Tab> {
-    let id = sidebar.spaces()[0].selected?;
+    let id = sidebar.displayed().selected?;
     sidebar.tab_mut(id)
 }
 
-/// Opens a tab in the first Space and shows it.
+/// Opens a tab in the displayed Space and shows it.
 fn open_tab(url: &str) {
     update_sidebar(|sidebar| {
-        let home = sidebar.spaces()[0].id;
-        let tab = sidebar.open_tab(home, url).expect("the first Space");
-        sidebar.select(home, tab).expect("a new tab");
+        let space = sidebar.displayed().id;
+        let tab = sidebar.open_tab(space, url).expect("the displayed Space");
+        sidebar.select(space, tab).expect("a new tab");
     });
     show_selected();
 }
 
+/// Shows a tab, with its Space; a favorite is shown in the displayed Space.
 fn select_tab(id: NodeId) {
     let selected = update_sidebar(|sidebar| {
-        let home = sidebar.spaces()[0].id;
-        sidebar.select(home, id).is_ok()
+        let space = sidebar.space_of(id).unwrap_or(sidebar.displayed().id);
+        sidebar
+            .select(space, id)
+            .and_then(|()| sidebar.display(space))
     });
-    if selected {
+    if selected.is_ok() {
         show_selected();
     }
 }
 
-/// Shows the tab `find` picks in the first Space, if any.
-fn select_found(find: impl FnOnce(&Sidebar, SpaceId) -> Option<NodeId>) {
-    let tab = STATE.with_borrow(|state| find(&state.sidebar, state.sidebar.spaces()[0].id));
-    if let Some(tab) = tab {
+/// Shows the tab `find` picks, if any.
+fn select_found(find: impl FnOnce(&Sidebar) -> Option<NodeId>) {
+    if let Some(tab) = STATE.with_borrow(|state| find(&state.sidebar)) {
         select_tab(tab);
+    }
+}
+
+/// Shows a Space in the sidebar and its selected tab; like a selection, an unknown Space from the
+/// UI is ignored.
+fn show_space(id: SpaceId) {
+    if update_sidebar(|sidebar| sidebar.display(id)).is_ok() {
+        show_selected();
     }
 }
 
@@ -300,7 +317,7 @@ fn select_found(find: impl FnOnce(&Sidebar, SpaceId) -> Option<NodeId>) {
 /// its saved url, and it cannot be reopened since it was never removed.
 fn close_tab(tab: Option<NodeId>) {
     let (selected, tab) = STATE.with_borrow_mut(|state| {
-        let selected = state.sidebar.spaces()[0].selected;
+        let selected = state.sidebar.displayed().selected;
         let tab = tab
             .or(selected)
             .filter(|&id| state.sidebar.tab_mut(id).is_some());
@@ -311,8 +328,10 @@ fn close_tab(tab: Option<NodeId>) {
         STATE.with_borrow(|state| state.sidebar.is_favorite(tab) || state.sidebar.is_pinned(tab));
     let next = if stays {
         update_sidebar(|sidebar| {
-            let home = sidebar.spaces()[0].id;
-            sidebar.close_in_place(home, tab).expect("the first Space")
+            let space = sidebar.displayed().id;
+            sidebar
+                .close_in_place(space, tab)
+                .expect("the displayed Space")
         })
     } else {
         let next = STATE.with_borrow_mut(|state| {
@@ -338,11 +357,11 @@ fn close_tab(tab: Option<NodeId>) {
 /// Pins or unpins a tab, or the selected one.
 fn toggle_pin(tab: Option<NodeId>) {
     update_sidebar(|sidebar| {
-        let home = &sidebar.spaces()[0];
-        let (home, tab) = (home.id, tab.or(home.selected));
+        let space = sidebar.displayed();
+        let (space, tab) = (space.id, tab.or(space.selected));
         if let Some(tab) = tab {
             // Like a selection, an unknown tab from the UI is ignored.
-            let _ = sidebar.toggle_pin(home, tab);
+            let _ = sidebar.toggle_pin(space, tab);
         }
     });
 }
@@ -351,7 +370,7 @@ fn toggle_pin(tab: Option<NodeId>) {
 /// keyboard focus even when the menu was used from the page.
 fn new_folder() {
     let folder = update_sidebar(|sidebar| {
-        let pinned = sidebar.spaces()[0].pinned;
+        let pinned = sidebar.displayed().pinned;
         sidebar
             .add_folder(pinned, "New Folder")
             .expect("the pinned tabs")
@@ -419,15 +438,17 @@ fn is_shown(browser: Option<&mut Browser>) -> bool {
 /// The selected tab's profile and url.
 fn selected() -> Option<(ProfileId, String)> {
     STATE.with_borrow_mut(|state| {
-        let tab = state.sidebar.spaces()[0].selected?;
+        let tab = state.sidebar.displayed().selected?;
         let profile = state.sidebar.profile_of(tab)?;
         Some((profile, state.sidebar.tab_mut(tab)?.url.clone()))
     })
 }
 
-/// Shows the selected tab in its profile's content view, which is created the first time.
+/// Shows the selected tab in its profile's content view, which is created the first time, or a
+/// blank page when the displayed Space has none.
 fn show_selected() {
     let Some((profile, url)) = selected() else {
+        load("about:blank");
         return;
     };
     match CONTENTS.with_borrow(|contents| contents.get(&profile).cloned()) {
@@ -512,11 +533,13 @@ pub fn run(command: Command) {
     match (command, browser) {
         (Command::Ready, _) => send_state(),
         (Command::Select(id), _) => select_tab(id),
-        (Command::NextTab, _) => select_found(|sidebar, home| sidebar.next_tab(home, true)),
-        (Command::PreviousTab, _) => select_found(|sidebar, home| sidebar.next_tab(home, false)),
+        (Command::NextTab, _) => select_found(|s| s.next_tab(s.displayed().id, true)),
+        (Command::PreviousTab, _) => select_found(|s| s.next_tab(s.displayed().id, false)),
+        // The sidebar shows the favorites of the first Space's profile.
         (Command::Favorite(number), _) => {
-            select_found(|sidebar, home| sidebar.favorite(home, number));
+            select_found(|s| s.favorite(s.spaces()[0].id, number));
         }
+        (Command::ShowSpace(id), _) => show_space(id),
         (Command::ShowOverlay, _) => show_overlay(true),
         (Command::HideOverlay, _) => show_overlay(false),
         (Command::ToggleSidebar, _) => set_sidebar(match SIDEBAR_MODE.get() {
@@ -1067,6 +1090,38 @@ mod tests {
         assert_eq!(json["favorites"][0]["url"], "https://example.com/");
         assert_eq!(json["favorites"][0]["id"], serde_json::json!(tab));
         assert_eq!(json["today"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn sends_the_displayed_space_and_every_space() {
+        let mut state = UiState::default();
+        let home = state.sidebar.spaces()[0].id;
+        let profile = state.sidebar.profiles()[0].id;
+        let work = state.sidebar.add_space("Work", profile).unwrap();
+        state
+            .sidebar
+            .open_tab(home, "https://example.com/")
+            .unwrap();
+        let tab = state
+            .sidebar
+            .open_tab(work, "https://example.org/")
+            .unwrap();
+        state.sidebar.select(work, tab).unwrap();
+        state.sidebar.display(work).unwrap();
+        let json = state.to_json();
+        assert_eq!(json["space"], serde_json::json!(work));
+        let spaces = serde_json::json!([
+            { "id": home, "title": "Home" },
+            { "id": work, "title": "Work" },
+        ]);
+        assert_eq!(json["spaces"], spaces);
+        assert_eq!(json["today"][0]["url"], "https://example.org/");
+        assert_eq!(json["today"].as_array().unwrap().len(), 1);
+        assert_eq!(json["active"], serde_json::json!(tab));
+        assert_eq!(
+            json["roots"]["today"],
+            serde_json::json!(state.sidebar.spaces()[1].today)
+        );
     }
 
     #[test]

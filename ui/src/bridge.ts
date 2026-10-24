@@ -10,12 +10,20 @@ export type State = {
   page: Page;
   // The containers of the sections, to move tabs and folders into.
   roots: { favorites: number; pinned: number; today: number };
-  // The favorites of the displayed Space's profile.
+  // The favorites of the first Space's profile, for now.
   favorites: Tab[];
   pinned: Item[];
   today: Item[];
   active: number | null;
+  // The displayed Space, among every Space in sidebar order.
+  space: number;
+  spaces: Space[];
   profiles: Profile[];
+};
+
+export type Space = {
+  id: number;
+  title: string;
 };
 
 export type Profile = {

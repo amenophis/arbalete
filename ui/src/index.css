@@ -321,15 +321,64 @@ button.folder:hover {
   background: none;
 }
 
-.profiles {
+/* One icon per Space, then the profiles button at the end of the row. */
+.switcher {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex: none;
   padding-top: 8px;
 }
 
-.profiles ul {
-  margin: 0 0 8px;
+.spaces {
+  display: flex;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.space {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.5;
+}
+
+.space:hover {
+  background: var(--hover);
+  opacity: 1;
+}
+
+.space[aria-current] {
+  background: var(--active);
+  opacity: 1;
+}
+
+.profiles {
+  flex: none;
+}
+
+/* Opens above the switcher, over the tabs. */
+.profiles ul {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  margin: 0;
+  padding: 8px 0;
+  list-style: none;
+  background: var(--background);
 }
 
 .profile {
@@ -386,6 +435,10 @@ button.folder:hover {
   font: inherit;
   text-align: left;
   opacity: 0.7;
+}
+
+.profiles-toggle {
+  width: auto;
 }
 
 .new-profile:hover,

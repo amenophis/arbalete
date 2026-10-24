@@ -72,6 +72,8 @@ mod tests {
         let folder = sidebar.add_folder(home.pinned, "Docs").unwrap();
         let tab = sidebar.open_tab(home.id, "https://example.com/").unwrap();
         sidebar.move_node(tab, folder, 0).unwrap();
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        sidebar.display(work).unwrap();
 
         save(&sidebar, &path).unwrap();
         assert_eq!(load(&path).unwrap(), Some(sidebar));

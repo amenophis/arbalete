@@ -51,6 +51,11 @@ function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites) {
     pinned,
     today,
     active,
+    space: 13,
+    spaces: [
+      { id: 13, title: "Home" },
+      { id: 14, title: "work" },
+    ],
     profiles: [{ id: 1, name: "Default", color: "purple" }],
   };
   act(() => {
@@ -251,4 +256,20 @@ test("shows the profiles control at the bottom of the sidebar", () => {
   receive({});
   fireEvent.click(screen.getByRole("button", { name: "Profiles" }));
   expect(screen.getByRole("textbox", { name: "Profile name" })).toHaveProperty("value", "Default");
+});
+
+test("shows one icon per Space at the bottom, the displayed one marked", () => {
+  render(<App />);
+  receive({});
+  const spaces = within(screen.getByRole("list", { name: "Spaces" })).getAllByRole("button");
+  expect(spaces.map((space) => space.textContent)).toEqual(["H", "W"]);
+  expect(spaces[0].getAttribute("aria-current")).toBe("true");
+  expect(spaces[1].hasAttribute("aria-current")).toBe(false);
+});
+
+test("switches to a Space when its icon is clicked", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "work" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/space/14", { method: "POST" });
 });

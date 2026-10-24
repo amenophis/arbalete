@@ -1,6 +1,6 @@
 //! Commands the UI sends to the app, as `https://arbalette.ui/command/<name>` requests.
 
-use arbalette_core::sidebar::{Color, NodeId, ProfileId};
+use arbalette_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -47,6 +47,8 @@ pub enum Command {
     RenameProfile(ProfileId, String),
     /// Changes a profile's color: `profile/color/<profile id>/<color>`, like `blue`.
     ColorProfile(ProfileId, Color),
+    /// Shows a Space in the sidebar, and its selected tab in the content view: `space/<space id>`.
+    ShowSpace(SpaceId),
 }
 
 impl Command {
@@ -89,6 +91,9 @@ impl Command {
                 if let Some(number) = path.strip_prefix("favorite/") {
                     let number = number.parse().ok().filter(|n| (1..=9).contains(n));
                     return number.map(Self::Favorite);
+                }
+                if let Some(id) = path.strip_prefix("space/") {
+                    return serde_json::from_str(id).ok().map(Self::ShowSpace);
                 }
                 if let Some(id) = path.strip_prefix("select/") {
                     return serde_json::from_str(id).ok().map(Self::Select);
@@ -271,6 +276,16 @@ mod tests {
             panic!("not a selection")
         };
         assert_eq!(serde_json::to_string(&id).unwrap(), "12");
+    }
+
+    #[test]
+    fn parses_a_space_to_show() {
+        let Some(Command::ShowSpace(id)) = Command::parse("space/4") else {
+            panic!("not a Space")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        assert_eq!(Command::parse("space/x"), None);
+        assert_eq!(Command::parse("space"), None);
     }
 
     #[test]
