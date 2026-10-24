@@ -128,6 +128,7 @@ export type Gesture = { phase: "begin" | "move" | "end"; dx: number; y: number; 
 class Pager {
   spaces: Space[] = [];
   displayed = 0;
+  private displayedId?: number;
   sidebar: HTMLElement | null = null;
   track: HTMLElement | null = null;
   bubble: HTMLElement | null = null;
@@ -151,8 +152,17 @@ class Pager {
   show(displayed: number) {
     // Before the app's first state, there is nothing to show.
     if (this.spaces.length === 0) return;
-    const moved = displayed !== this.displayed;
+    // Spaces reordered from the library move the displayed one's page, without displaying
+    // another Space: the pages stay where they rest.
+    const id = this.spaces[displayed]?.id;
+    const moved = id !== this.displayedId;
+    if (!moved && displayed !== this.displayed && this.page === this.displayed) {
+      this.page = displayed;
+      this.position = displayed;
+      this.onSettle(displayed);
+    }
     this.displayed = displayed;
+    this.displayedId = id;
     if (!this.started) {
       this.started = true;
       this.page = displayed;

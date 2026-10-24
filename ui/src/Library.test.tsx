@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { ClosedTab, Space } from "./bridge";
 import { ago, Library, LibraryButton, POPOVER_DELAY_MS } from "./Library";
 
 const fetch = vi.fn();
@@ -14,22 +15,135 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const spaces: Space[] = [
+  { id: 13, title: "Home", emoji: "🏠", color: "blue", profile: 1, pinned: [] },
+  {
+    id: 14,
+    title: "Work",
+    emoji: null,
+    color: "green",
+    profile: 1,
+    pinned: [{ id: 3, url: "https://mail.test/", title: "Mail", favicon: null }],
+  },
+];
+
+function renderLibrary(closed: ClosedTab[] = [], onBack = () => {}) {
+  return render(
+    <Library
+      closed={closed}
+      spaces={spaces}
+      profiles={[{ id: 1, name: "Default", color: "purple" }]}
+      shown
+      onBack={onBack}
+      onShow={() => {}}
+      onNewSpace={() => {}}
+    />,
+  );
+}
+
+const section = (name: string) => screen.getByRole("tab", { name });
+const search = () => screen.getByRole("searchbox");
+
+test("a rail of sections opens on the Spaces, and the one picked shows under its search field", () => {
+  renderLibrary();
+  const tabs = screen.getAllByRole("tab");
+  expect(tabs.map((tab) => tab.textContent)).toEqual(["Spaces", "Recently Closed"]);
+  expect(section("Spaces").getAttribute("aria-selected")).toBe("true");
+  expect(search().getAttribute("placeholder")).toBe("Search Spaces…");
+  expect(
+    screen.getAllByRole("listitem").filter((item) => item.matches(".space-card")),
+  ).toHaveLength(2);
+  fireEvent.click(section("Recently Closed"));
+  expect(section("Recently Closed").getAttribute("aria-selected")).toBe("true");
+  expect(section("Spaces").getAttribute("aria-selected")).toBe("false");
+  expect(search().getAttribute("placeholder")).toBe("Search Recently Closed…");
+  expect(screen.getByRole("tabpanel").getAttribute("aria-label")).toBe("Recently Closed");
+  expect(document.querySelector(".space-card")).toBeNull();
+});
+
+test("the section picked stays picked until the Space menu's Manage Spaces asks for the Spaces", () => {
+  const { rerender } = renderLibrary();
+  fireEvent.click(section("Recently Closed"));
+  rerender(
+    <Library
+      closed={[]}
+      spaces={spaces}
+      profiles={[]}
+      shown={false}
+      onBack={() => {}}
+      onShow={() => {}}
+      onNewSpace={() => {}}
+    />,
+  );
+  expect(section("Recently Closed").getAttribute("aria-selected")).toBe("true");
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalette:library", { detail: null }));
+  });
+  expect(section("Spaces").getAttribute("aria-selected")).toBe("true");
+});
+
 test("lists the tabs closed since launch, the last closed first, and reopens one by rank", () => {
-  const onReopen = vi.fn();
+  vi.useFakeTimers();
+  vi.setSystemTime(3 * 60_000);
+  const onBack = vi.fn();
   const closed = [
-    { url: "https://example.com/last", title: "Last", favicon: null, closedAt: 0 },
+    { url: "https://example.com/last", title: "Last", favicon: null, closedAt: 60_000 },
     { url: "https://example.com/untitled", title: "", favicon: null, closedAt: 0 },
   ];
-  render(<Library closed={closed} shown onReopen={onReopen} />);
-  const rows = screen.getAllByRole("button");
-  expect(rows.map((row) => row.textContent)).toEqual(["Last", "https://example.com/untitled"]);
+  renderLibrary(closed, onBack);
+  fireEvent.click(section("Recently Closed"));
+  const rows = within(screen.getByRole("tabpanel")).getAllByRole("button");
+  expect(rows.map((row) => row.textContent)).toEqual([
+    "Last2 min ago",
+    "https://example.com/untitled3 min ago",
+  ]);
   fireEvent.click(rows[1]);
   expect(fetch).toHaveBeenLastCalledWith("/command/reopen/1", { method: "POST" });
-  expect(onReopen).toHaveBeenCalledOnce();
+  expect(onBack).toHaveBeenCalledOnce();
+});
+
+test("searching the closed tabs keeps those whose title or url holds the text, whatever its case", () => {
+  const closed = [
+    { url: "https://news.test/", title: "Morning News", favicon: null, closedAt: 0 },
+    { url: "https://docs.test/guide", title: "Guide", favicon: null, closedAt: 0 },
+  ];
+  renderLibrary(closed);
+  fireEvent.click(section("Recently Closed"));
+  const titles = () =>
+    [...document.querySelectorAll(".closed-tab .title")].map((t) => t.textContent);
+  fireEvent.change(search(), { target: { value: "news" } });
+  expect(titles()).toEqual(["Morning News"]);
+  fireEvent.change(search(), { target: { value: "DOCS" } });
+  expect(titles()).toEqual(["Guide"]);
+  // It still reopens the tab by its rank among all the closed tabs.
+  fireEvent.click(screen.getByRole("button", { name: /Guide/ }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/reopen/1", { method: "POST" });
+  fireEvent.change(search(), { target: { value: "nothing" } });
+  expect(screen.getByText("No closed tab matches")).toBeDefined();
+  // Another section starts with an empty field.
+  fireEvent.click(section("Spaces"));
+  expect((search() as HTMLInputElement).value).toBe("");
+});
+
+test("searching the Spaces keeps those whose name or a pinned tab's title holds the text", () => {
+  renderLibrary();
+  const cards = () => [...document.querySelectorAll(".space-card-name")].map((c) => c.textContent);
+  fireEvent.change(search(), { target: { value: "home" } });
+  expect(cards()).toEqual(["Home"]);
+  fireEvent.change(search(), { target: { value: "mail" } });
+  expect(cards()).toEqual(["Work"]);
+});
+
+test("the rail's arrow goes back to the Space", () => {
+  const onBack = vi.fn();
+  renderLibrary([], onBack);
+  fireEvent.click(screen.getByRole("button", { name: "Back to the Space" }));
+  expect(onBack).toHaveBeenCalledOnce();
 });
 
 test("says when no tab has been closed", () => {
-  render(<Library closed={[]} shown onReopen={() => {}} />);
+  renderLibrary();
+  fireEvent.click(section("Recently Closed"));
   expect(screen.getByText("No tab closed yet")).toBeDefined();
 });
 

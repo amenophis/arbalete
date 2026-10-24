@@ -802,12 +802,64 @@ test("the library reopens a closed tab in the displayed Space and slides back to
   receive({});
   swipe(10, 20, 50);
   await frame();
-  fireEvent.click(within(library() as HTMLElement).getByRole("button", { name: "Gone" }));
+  const shownLibrary = within(library() as HTMLElement);
+  fireEvent.click(shownLibrary.getByRole("tab", { name: "Recently Closed" }));
+  fireEvent.click(shownLibrary.getByRole("button", { name: /^Gone/ }));
   expect(fetch).toHaveBeenCalledWith("/command/reopen/0", { method: "POST" });
   await frame();
   expect(position()).toBe("translateX(0%)");
   expect(library()?.hasAttribute("inert")).toBe(true);
   expect(commands().at(-1)).toBe("/command/card/offset/0");
+});
+
+test("the library's Space cards show a Space, create one, or go back to the displayed one", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  const shownLibrary = () => within(library() as HTMLElement);
+  const open = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Library" }));
+    await frame();
+    expect(position()).toBe("translateX(100%)");
+  };
+  await open();
+  fireEvent.click(shownLibrary().getByRole("button", { name: "Show Travel" }), { detail: 0 });
+  expect(spaceCommands().at(-1)?.[0]).toBe("/command/space/15");
+  await open();
+  fireEvent.click(shownLibrary().getByRole("button", { name: "New Space" }));
+  await frame();
+  expect(position()).toBe("translateX(-400%)");
+  await open();
+  fireEvent.click(shownLibrary().getByRole("button", { name: "Back to the Space" }));
+  await frame();
+  expect(position()).toBe("translateX(0%)");
+});
+
+test("Spaces reordered from the library leave it in view, the displayed Space unchanged", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "Library" }));
+  await frame();
+  const home = spaces.shift() as Space;
+  spaces.push(home);
+  try {
+    receive({});
+    await frame();
+    expect(position()).toBe("translateX(100%)");
+    expect(library()?.hasAttribute("inert")).toBe(false);
+    expect(
+      [...document.querySelectorAll(".space-card-name")].map((name) => name.textContent),
+    ).toEqual(["work", "Travel", "Books", "Home"]);
+    // Back on the displayed Space, its page is now the last one.
+    fireEvent.click(
+      within(library() as HTMLElement).getByRole("button", { name: "Back to the Space" }),
+    );
+    await frame();
+    expect(position()).toBe("translateX(-300%)");
+  } finally {
+    spaces.unshift(spaces.pop() as Space);
+  }
 });
 
 test("asks the app to paint the window with the displayed Space's color, blending on the way", async () => {
