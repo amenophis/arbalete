@@ -543,6 +543,27 @@ try {
     `!document.documentElement.hasAttribute("data-undocked")
       && getComputedStyle(document.querySelector(".toolbar")).transform === "none"`,
   );
+  // The pointer rests on the toggle, which then hides and shows the sidebar under it.
+  const toggle = await point(`document.querySelector('[aria-label="Toggle sidebar"]')`, 0.5, 0.5);
+  await sidebar.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...toggle });
+  await check(
+    "the hovered toolbar button takes a fill",
+    ``,
+    `getComputedStyle(document.querySelector('[aria-label="Toggle sidebar"]')).backgroundColor !== "rgba(0, 0, 0, 0)"`,
+  );
+  await check(
+    "hidden and shown again under a resting pointer, the toggle shows no stale fill",
+    `e2e.send("sidebar/toggle").then(() => e2e.send("sidebar/toggle"))`,
+    `!document.documentElement.hasAttribute("data-undocked") && document.documentElement.hasAttribute("data-stale-hover")
+      && getComputedStyle(document.querySelector('[aria-label="Toggle sidebar"]')).backgroundColor === "rgba(0, 0, 0, 0)"`,
+  );
+  await sidebar.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: toggle.x + 1, y: toggle.y });
+  await check(
+    "the pointer moving again shows the hover",
+    ``,
+    `!document.documentElement.hasAttribute("data-stale-hover")
+      && getComputedStyle(document.querySelector('[aria-label="Toggle sidebar"]')).backgroundColor !== "rgba(0, 0, 0, 0)"`,
+  );
   await check("the sidebar toggle command hides the sidebar once more", `e2e.send("sidebar/toggle")`, `true`);
   await check("the strip lines the window's edge again", ``, `innerWidth === 4`, reveal);
   await mouse(2);

@@ -53,3 +53,18 @@ test("tints the window with a tint and an empty Space's card with the Space's co
   const half = { color: "#000000", strength: 0.5 };
   expect(windowColors(half, "#000000", "#ffffff", "#ffffff")).toBe("window/colors/ededed/ebebeb");
 });
+
+test("forgets the hover kept from before the sidebar hid or moved, until the pointer moves", () => {
+  const root = document.createElement("div");
+  followDocking(root);
+  dispatchEvent(new CustomEvent("arbalette:docked", { detail: { docked: false, slide: true } }));
+  expect(root.hasAttribute("data-stale-hover")).toBe(true);
+  dispatchEvent(new PointerEvent("pointermove"));
+  expect(root.hasAttribute("data-stale-hover")).toBe(false);
+  const revealed = document.createElement("div");
+  revealOnHover(revealed);
+  revealed.dispatchEvent(new MouseEvent("mouseleave", { clientX: 300 }));
+  expect(revealed.hasAttribute("data-stale-hover")).toBe(true);
+  dispatchEvent(new PointerEvent("pointerdown"));
+  expect(revealed.hasAttribute("data-stale-hover")).toBe(false);
+});
