@@ -2,7 +2,7 @@
 //! (app/src/mac.rs) and runs the item picked (shell::perform).
 
 use crate::command::{Command, Target};
-use arbalette_core::sidebar::{NodeId, NodeKind, Sidebar, Space};
+use arbalete_core::sidebar::{NodeId, NodeKind, Sidebar, Space};
 use serde_json::json;
 
 pub enum Entry {
@@ -94,7 +94,7 @@ fn tab_menu(sidebar: &Sidebar, tab: NodeId, url: &str) -> Vec<Entry> {
         item(
             "new-space",
             "New Space…",
-            Action::Ask("arbalette:new-space", json!(tab)),
+            Action::Ask("arbalete:new-space", json!(tab)),
         ),
     ]);
     vec![
@@ -110,7 +110,7 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
     let id = space.id;
     let edit = |field| {
         Action::Ask(
-            "arbalette:edit-space",
+            "arbalete:edit-space",
             json!({ "space": id, "field": field }),
         )
     };
@@ -135,7 +135,7 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
         item(
             "manage",
             "Manage Spaces…",
-            Action::Ask("arbalette:library", json!(null)),
+            Action::Ask("arbalete:library", json!(null)),
         ),
         Entry::Separator,
         Entry::Item(Item {
@@ -181,7 +181,7 @@ fn folder(folder: NodeId) -> Vec<Entry> {
         item(
             "rename",
             "Rename Folder",
-            Action::Ask("arbalette:rename", json!(folder)),
+            Action::Ask("arbalete:rename", json!(folder)),
         ),
         item(
             "new-folder",
@@ -290,7 +290,7 @@ mod tests {
         );
         assert_eq!(
             choose(&sidebar, tab, "new-space"),
-            Some(Action::Ask("arbalette:new-space", json!(tab)))
+            Some(Action::Ask("arbalete:new-space", json!(tab)))
         );
         assert_eq!(
             choose(&sidebar, tab, "close"),
@@ -324,7 +324,7 @@ mod tests {
         );
         assert_eq!(
             choose(&sidebar, folder, "rename"),
-            Some(Action::Ask("arbalette:rename", json!(folder)))
+            Some(Action::Ask("arbalete:rename", json!(folder)))
         );
         assert_eq!(
             choose(&sidebar, folder, "new-folder"),
@@ -378,7 +378,7 @@ mod tests {
         let choose = |item: &str| find(build(&sidebar, target).unwrap(), item);
         let edit = |field| {
             Action::Ask(
-                "arbalette:edit-space",
+                "arbalete:edit-space",
                 json!({ "space": home.id, "field": field }),
             )
         };
@@ -400,7 +400,7 @@ mod tests {
         );
         assert_eq!(
             choose("manage"),
-            Some(Action::Ask("arbalette:library", json!(null)))
+            Some(Action::Ask("arbalete:library", json!(null)))
         );
         assert_eq!(
             choose("delete"),

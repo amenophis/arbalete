@@ -21,7 +21,7 @@ type Bar = "favorites" | "pinnedFolder";
 type Choice = { checked: boolean; into: number | null; bar: Bar };
 
 // Shown above the page by the app on the first launch and from the menu (show_import in
-// app/src/shell.rs), to import other browsers' data. Arc is picked by default: Arbalette users
+// app/src/shell.rs), to import other browsers' data. Arc is picked by default: Arbalete users
 // most likely come from it. While the app reads the browsers' data, which takes a while for a
 // large history, it shows the import running; the app hides it once done.
 export function Import() {
@@ -37,11 +37,11 @@ export function Import() {
     };
     // Wherever the focus is, even on none of the fields.
     const keyDown = (event: KeyboardEvent) => event.key === "Escape" && send("import/close");
-    addEventListener("arbalette:sources", listener);
+    addEventListener("arbalete:sources", listener);
     addEventListener("keydown", keyDown);
     send("import/ready");
     return () => {
-      removeEventListener("arbalette:sources", listener);
+      removeEventListener("arbalete:sources", listener);
       removeEventListener("keydown", keyDown);
     };
   }, []);
@@ -151,8 +151,8 @@ function FullDiskAccess({ browser }: { browser: string }) {
   return (
     <div className="import-access">
       <p>
-        macOS keeps {browser}'s data private. To import it, give Arbalette Full Disk Access in
-        System Settings, then open the import again.
+        macOS keeps {browser}'s data private. To import it, give Arbalete Full Disk Access in System
+        Settings, then open the import again.
       </p>
       <button type="button" onClick={() => send("import/full-disk-access")}>
         Open System Settings

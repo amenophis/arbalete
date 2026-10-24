@@ -33,7 +33,7 @@ function unlessTabbed(event: { target: EventTarget }) {
 
 export function App() {
   const state = useAppState();
-  const [renaming, setRenaming] = useRenaming("arbalette:rename");
+  const [renaming, setRenaming] = useRenaming("arbalete:rename");
   const { indicator, preview, full, onPointerDown } = useDrag(state);
   const [profiles, setProfiles] = useState(false);
   const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
@@ -44,9 +44,9 @@ export function App() {
   // The pages may rest on one that is not a Space's, while the app still displays a Space.
   const onSpace = pager.settled >= 0 && pager.settled < count;
   // A tab's menu moves it into a new Space from the page creating one.
-  useAppEvent("arbalette:new-space", () => pager.go(count));
+  useAppEvent("arbalete:new-space", () => pager.go(count));
   // Spaces are managed from the library, for now.
-  useAppEvent("arbalette:library", () => pager.go(-1));
+  useAppEvent("arbalete:library", () => pager.go(-1));
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =

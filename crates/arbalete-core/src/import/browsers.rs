@@ -29,7 +29,7 @@ pub struct Profile {
     pub path: PathBuf,
 }
 
-/// Where each browser keeps its data, relative to the home directory. Arc comes first: Arbalette
+/// Where each browser keeps its data, relative to the home directory. Arc comes first: Arbalete
 /// users most likely come from it.
 const BROWSERS: [(&str, Family, &str); 11] = [
     (

@@ -48,7 +48,7 @@ pub enum Swipe {
     Step(bool),
 }
 
-/// Sent to the sidebar as the detail of an `arbalette:swipe` event.
+/// Sent to the sidebar as the detail of an `arbalete:swipe` event.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Gesture {
     pub phase: GesturePhase,

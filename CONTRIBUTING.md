@@ -1,4 +1,4 @@
-# Contributing to Arbalette
+# Contributing to Arbalete
 
 ## Doctrine: the simplest possible code
 
@@ -29,13 +29,13 @@ Simple code reads quickly, is easy to test and can be deleted without fear.
 
 The repository is meant to be public. Everything committed must be publishable.
 
-- **License**: Arbalette is under the [Mozilla Public License 2.0](LICENSE). By contributing, you agree that your
+- **License**: Arbalete is under the [Mozilla Public License 2.0](LICENSE). By contributing, you agree that your
   contribution is licensed under the same terms.
 - **Dependencies**: only licenses compatible with MPL-2.0 (MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0…). No GPL or
   AGPL dependency. `cargo-deny` checks this in CI.
 - **No third-party proprietary material**: no code, assets, icons or text copied from Arc or any other proprietary
   product. Other browsers' file formats are documented only as far as needed to import users' own data.
-- **Own names**: features use Arbalette's names, not another product's brand names.
+- **Own names**: features use Arbalete's names, not another product's brand names.
 - **No secrets or personal data**: no keys, tokens, local paths or personal data in code, tests or history.
   Test data is generated.
 

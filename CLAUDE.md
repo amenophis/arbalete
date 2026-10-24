@@ -1,4 +1,4 @@
-# Arbalette
+# Arbalete
 
 Cross-platform browser inspired by Arc: Rust + React/TypeScript on Chromium (CEF). Plan: [docs/PLAN.md](docs/PLAN.md).
 

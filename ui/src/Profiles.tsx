@@ -14,7 +14,7 @@ export function Profiles({
   open: boolean;
   onOpen: (open: boolean) => void;
 }) {
-  const [renaming, setRenaming] = useRenaming("arbalette:rename-profile");
+  const [renaming, setRenaming] = useRenaming("arbalete:rename-profile");
   const list = useRef<HTMLUListElement>(null);
   const shown = open || renaming !== null;
   useDismiss(list, shown, () => {

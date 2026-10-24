@@ -2,10 +2,10 @@
 //! favorites. The last 2 Spaces belong to a second profile with 2 favorites of its own, to check
 //! that profiles keep their web data and their favorites apart.
 //!
-//! Usage: `cargo run -p arbalette-core --example bench-session -- <data dir>`, then run the app with
-//! `ARBALETTE_DATA_DIR=<data dir>`.
+//! Usage: `cargo run -p arbalete-core --example bench-session -- <data dir>`, then run the app with
+//! `ARBALETE_DATA_DIR=<data dir>`.
 
-use arbalette_core::{sidebar::Sidebar, store};
+use arbalete_core::{sidebar::Sidebar, store};
 use std::path::PathBuf;
 
 const FAVORITES: usize = 6;

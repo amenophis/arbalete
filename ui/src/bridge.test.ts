@@ -28,7 +28,7 @@ test("slides the sidebar's content out as it hides, and back at once as it docks
   const root = document.createElement("div");
   followDocking(root);
   const docked = (docked: boolean, slide: boolean) =>
-    dispatchEvent(new CustomEvent("arbalette:docked", { detail: { docked, slide } }));
+    dispatchEvent(new CustomEvent("arbalete:docked", { detail: { docked, slide } }));
   docked(false, true);
   expect(root.hasAttribute("data-undocked")).toBe(true);
   expect(root.hasAttribute("data-instant")).toBe(false);
@@ -57,7 +57,7 @@ test("tints the window with a tint and an empty Space's card with the Space's co
 test("forgets the hover kept from before the sidebar hid or moved, until the pointer moves", () => {
   const root = document.createElement("div");
   followDocking(root);
-  dispatchEvent(new CustomEvent("arbalette:docked", { detail: { docked: false, slide: true } }));
+  dispatchEvent(new CustomEvent("arbalete:docked", { detail: { docked: false, slide: true } }));
   expect(root.hasAttribute("data-stale-hover")).toBe(true);
   dispatchEvent(new PointerEvent("pointermove"));
   expect(root.hasAttribute("data-stale-hover")).toBe(false);

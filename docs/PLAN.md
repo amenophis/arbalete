@@ -1,11 +1,11 @@
-# Arbalette — implementation plan
+# Arbalete — implementation plan
 
 Goal: a browser that brings back the ideas that made Arc popular (vertical sidebar, Spaces, profiles, link
 routing…), **cross-platform (macOS, Linux, Windows)**, starting with macOS.
 Stack: **Rust + React/TypeScript on Chromium, through CEF in Alloy style** (see
 [decision 0001](decisions/0001-web-engine.md)).
 
-Arbalette is an independent project, not affiliated with The Browser Company. Arc is mentioned only to describe
+Arbalete is an independent project, not affiliated with The Browser Company. Arc is mentioned only to describe
 the features we take inspiration from and to import user data.
 
 ## 1. Features we take inspiration from
@@ -47,7 +47,7 @@ Decided in [0001 — Web engine](decisions/0001-web-engine.md), after a spike on
   gives every OS the same engine.
 - **Alloy-style browsers in CEF Views windows**: one window holds the sidebar, the tabs, Split View and overlays.
   CEF's Chrome style supports extensions fully but allows only one page per window.
-- **An extension compatibility layer** fills what Alloy style lacks: Arbalette hosts extension popups and answers
+- **An extension compatibility layer** fills what Alloy style lacks: Arbalete hosts extension popups and answers
   `tabs.query`, `windows.*`, `tabs.create` and `tabs.update` through a shim injected with the DevTools protocol.
 - **Fallback**: a maintained CEF patch allowing several Chrome-style pages per window.
 
@@ -81,7 +81,7 @@ The UI is HTML/TS, but it must behave like a native UI. These rules apply from p
 
 Arc manages each tab's page through four states — alive, frozen, discarded, closed — with a per-tab timer, a
 reaction to memory pressure and to macOS Low Power Mode, a list of URL patterns that are never suspended, and
-an optional state indicator in the sidebar. Arbalette follows the same model, implemented in the `engine` module:
+an optional state indicator in the sidebar. Arbalete follows the same model, implemented in the `engine` module:
 
 | State | What it means | How (CEF) |
 |---|---|---|
@@ -108,11 +108,11 @@ Start with the minimum and split when the code calls for it (doctrine, rule 10):
 
 ```text
 app/                           desktop app: windows, commands, engine module
-crates/arbalette-core/         model (profiles, Spaces, node tree, Favorites) and pure logic, no engine
+crates/arbalete-core/         model (profiles, Spaces, node tree, Favorites) and pure logic, no engine
 ui/                            React + TypeScript (Vite)
 ```
 
-`arbalette-core` is separate from the start for one reason only: the logic must be testable without launching
+`arbalete-core` is separate from the start for one reason only: the logic must be testable without launching
 the app or the engine. Persistence, auto-archive, link routing and imports start as modules of these two crates; a module becomes
 a crate only if it grows enough to hurt readability or build times.
 
@@ -120,7 +120,7 @@ Tooling: pnpm, Vite, Vitest + Testing Library, `cargo test` / `clippy` / `rustfm
 licenses and advisories, GitHub Actions CI (macOS first, then Linux and Windows), installers (dmg, AppImage/deb, msi),
 macOS signing and notarization.
 
-## 3. Arbalette data model (Rust)
+## 3. Arbalete data model (Rust)
 
 ```rust
 struct Profile    { id: ProfileId, name: String, color: Color, data_store: Uuid }  // isolated web data
@@ -155,9 +155,9 @@ Windows):
 | Data | Source | Conversion |
 |---|---|---|
 | Sidebar: Spaces, Favorites, pinned and today's tabs, folders | `StorableSidebar.json`, `sidebar.containers`: the entry with `items`, `spaces` and `topAppsContainerIDs`, each a flat array alternating keys (ids) and values. Items are linked by `parentID` / `childrenIds` and hold one kind in `data`: `tab` (`savedURL`, `savedTitle`; the item's `title` when renamed), `list` (a folder), `splitView` (its tabs as children), `itemContainer` (a root). A Space's `containerIDs` alternates `pinned` / `unpinned` and their root; its `customInfo` holds `iconType` (`emoji_v2`, or a named `icon`) and `windowTheme`. `topAppsContainerIDs` alternates a profile and its Favorites root. `spaces` is read in its own order; `sidebarSyncState` and `firebaseSyncState` are sync copies | Profiles, Spaces and node tree; split views become separate tabs at first |
-| Profiles | Each Space's `profile` is `{"default": true}` or `{"custom": {"_0": {"directoryBasename": …}}}`; names in `User Data/Local State` (`profile.info_cache.<directory>.name`), no colors there | One Arbalette profile per Arc profile |
-| Archive | `StorableArchive.json` | Arbalette archive |
-| Link routing rules | `StorableLinkRouting.json` | Rules; destinations that do not exist in Arbalette fall back to the profile's most recent Space |
+| Profiles | Each Space's `profile` is `{"default": true}` or `{"custom": {"_0": {"directoryBasename": …}}}`; names in `User Data/Local State` (`profile.info_cache.<directory>.name`), no colors there | One Arbalete profile per Arc profile |
+| Archive | `StorableArchive.json` | Arbalete archive |
+| Link routing rules | `StorableLinkRouting.json` | Rules; destinations that do not exist in Arbalete fall back to the profile's most recent Space |
 | History, bookmarks | `User Data/<directoryBasename>/History`, `Bookmarks` | Same as any Chromium browser (below) |
 
 The sidebar format was checked against a real Arc file; custom profiles, Space titles, the order of several Spaces
@@ -175,9 +175,9 @@ to be checked.
 Rules:
 - Automatic detection of installed browsers and profiles, with OS-specific paths.
 - SQLite databases are **copied before reading**: they are locked while the browser is open.
-- Target choice: each source profile becomes an Arbalette profile or is merged into an existing one.
+- Target choice: each source profile becomes an Arbalete profile or is merged into an existing one.
   The bookmarks bar can become the Favorites or a pinned folder.
-- **Safari** requires **Full Disk Access** for Arbalette (macOS blocks even reading `~/Library/Safari` without it):
+- **Safari** requires **Full Disk Access** for Arbalete (macOS blocks even reading `~/Library/Safari` without it):
   the import assistant explains this and opens the right System Settings pane.
 - **Out of scope at first**: passwords and cookies. They are encrypted with the system keychain and are sensitive
   data; they may come later, for example through the browsers' CSV export.
@@ -241,7 +241,7 @@ Rules in [CONTRIBUTING.md](../CONTRIBUTING.md#commits). Every commit builds and 
 | 1 | `main` | `docs: initialize repository with license, readme and project plan` |
 | 2 | `docs/engine-decision` | `docs: record the web engine decision` |
 | 3 | `build/scaffold` | `build(app): scaffold the app with a react and typescript ui` |
-| 4 | | `build: add cargo workspace with arbalette-core crate` |
+| 4 | | `build: add cargo workspace with arbalete-core crate` |
 | 5 | | `build(ui): add lint, format and test tooling` |
 | 6 | | `ci: build and test on macos` |
 | 7 | | `ci: check dependency licenses and advisories with cargo-deny` |
@@ -308,9 +308,9 @@ Commit sequence:
 - Import assistant on first launch and from the menu (there are no Settings yet).
 - Chromium browsers, Firefox, Safari: profiles, bookmarks, history.
 - Arc: profiles, Spaces, Favorites, pinned tabs, folders. Its archive and link routing rules are imported in
-  phases 6 and 8, once Arbalette has an archive and rules to put them in.
+  phases 6 and 8, once Arbalete has an archive and rules to put them in.
 
-Commit sequence (Arc first, the browser Arbalette users are most likely to come from):
+Commit sequence (Arc first, the browser Arbalete users are most likely to come from):
 
 | # | Branch | Commit |
 |---|---|---|
@@ -326,7 +326,7 @@ Commit sequence (Arc first, the browser Arbalette users are most likely to come 
 
 ### Phase 4 — Chrome extensions
 - First, answer the open questions of [decision 0001](decisions/0001-web-engine.md).
-- Compatibility layer: popups hosted by Arbalette; shim in popups and service workers for `tabs.query`, `windows.*`,
+- Compatibility layer: popups hosted by Arbalete; shim in popups and service workers for `tabs.query`, `windows.*`,
   `tabs.create` and `tabs.update`; extension actions shown in the sidebar.
 - Install from the Chrome Web Store and from a local folder (developer mode), update, enable, disable, remove.
 - Extensions are installed **per profile**, like their data.
@@ -386,12 +386,12 @@ Commit sequence (Arc first, the browser Arbalette users are most likely to come 
   everywhere, several windows and profiles).
 - Start from an empty Arc to audit the onboarding: move the user's Arc data folder and preferences aside, and put
   them back afterwards: first launch, sign-in or skip, import offer, theme and Space setup, default Favorites, tips and
-  every screen until the first browsing session. Arbalette's first launch is then designed from it.
-- Record each finding with what Arc does and whether Arbalette has it; turn the missing ones into plan entries,
+  every screen until the first browsing session. Arbalete's first launch is then designed from it.
+- Record each finding with what Arc does and whether Arbalete has it; turn the missing ones into plan entries,
   ranked by how much users coming from Arc rely on them.
 - The audit is also the design reference, the goal being pixel perfect: for every screen, state and motion,
   record measurements (sizes, spacing, radii, colors, type, timings and easing) from screenshots and screen
-  recordings, compare Arbalette side by side at the same window size, and fix every difference. Arbalette draws
+  recordings, compare Arbalete side by side at the same window size, and fix every difference. Arbalete draws
   its own icons and copies no asset.
 
 ### Later

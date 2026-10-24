@@ -1,6 +1,6 @@
 //! Saves the sidebar as a JSON file and loads it back.
 //!
-//! The file carries a format version, so a later version of Arbalette can migrate older files.
+//! The file carries a format version, so a later version of Arbalete can migrate older files.
 
 use crate::sidebar::Sidebar;
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ mod tests {
     /// A fresh directory per test, so tests can run in parallel.
     fn directory(test: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("arbalette-store-{}-{test}", std::process::id()));
+            std::env::temp_dir().join(format!("arbalete-store-{}-{test}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

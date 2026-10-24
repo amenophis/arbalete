@@ -112,7 +112,7 @@ try {
     return `/command/window/colors/${mix(color, end, 14)}/${mix(color, panel, 8)}`;
   };
 
-  // The benchmark session pins 5 folders of 10 tabs (crates/arbalette-core/examples/bench-session.rs).
+  // The benchmark session pins 5 folders of 10 tabs (crates/arbalete-core/examples/bench-session.rs).
   await check(
     "the pinned section shows its folders and their tabs above the divider",
     ``,
@@ -908,11 +908,11 @@ try {
     `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"
       && document.querySelector(".pages").style.transform === "translateX(-100%)"`,
   );
-  // The app sends a trackpad swipe, from touch to lift, as arbalette:swipe events: `dx` is how
+  // The app sends a trackpad swipe, from touch to lift, as arbalete:swipe events: `dx` is how
   // far the content would scroll, in points, `time` when, in milliseconds (app/src/swipe.rs).
   await sidebar.eval(`Object.assign(e2e, {
     gesture: (phase, dx, time, y = 300) =>
-      dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, y, time } })),
+      dispatchEvent(new CustomEvent("arbalete:swipe", { detail: { phase, dx, y, time } })),
     // Touch, move \`events\` times \`interval\` ms apart, and lift unless \`hold\`.
     swipe: (dx, events, interval, hold) => {
       e2e.gesture("begin", dx, 0);
@@ -926,7 +926,7 @@ try {
     settled: (index) => e2e.displayed(index) && e2e.offset() === -index * 100,
   })`);
   await sidebar.eval(`e2e.spaces = [];
-    addEventListener("arbalette:state", (event) => { e2e.state = event.detail; e2e.spaces = event.detail.spaces.map((space) => space.id) });
+    addEventListener("arbalete:state", (event) => { e2e.state = event.detail; e2e.spaces = event.detail.spaces.map((space) => space.id) });
     e2e.send("ready")`);
   await check(
     "a Space next to the displayed one gets a color of its own",
