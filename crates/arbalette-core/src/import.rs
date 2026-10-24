@@ -302,7 +302,7 @@ mod tests {
             .map(|kind| match kind {
                 NodeKind::Tab(tab) => tab.url.clone(),
                 NodeKind::Folder { title, .. } => title.clone(),
-                NodeKind::Container => panic!("a container inside a container"),
+                NodeKind::Container | NodeKind::Split => panic!("no container or split imported"),
             })
             .collect()
     }

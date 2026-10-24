@@ -151,7 +151,7 @@ mod tests {
                 NodeKind::Folder { title, .. } => {
                     format!("{title}[{}]", content(sidebar, child).join(", "))
                 }
-                NodeKind::Container => panic!("a container inside a container"),
+                NodeKind::Container | NodeKind::Split => panic!("no container or split imported"),
             })
             .collect()
     }

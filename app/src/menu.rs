@@ -42,7 +42,8 @@ pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
             NodeKind::Tab(tab) if sidebar.is_favorite(id) => Some(favorite(id, &tab.url)),
             NodeKind::Tab(tab) => Some(tab_menu(sidebar, id, &tab.url)),
             NodeKind::Folder { .. } => Some(folder(id)),
-            NodeKind::Container => None,
+            // A split's menus are its tabs', from each half of its row.
+            NodeKind::Container | NodeKind::Split => None,
         },
         Target::Space(id) => {
             let space = sidebar.spaces().iter().find(|space| space.id == id)?;
