@@ -46,7 +46,7 @@ depends = ["ui"]
 run = [
   # Bundling in place over a previous build invalidates its code signature on macOS.
   "rm -rf target/bundle",
-  "bundle-cef-app arbalete -o target/bundle -i net.leherpeur.arbalete -d Arbalete",
+  "bundle-cef-app arbalete -o target/bundle -i io.github.amenophis.arbalete -d Arbalete",
   # Ad hoc signatures change on every build, so macOS asks again for each permission. A stable
   # identity, set in .config/mise.local.toml (not committed), keeps permissions across builds.
   # The framework and the helpers, which read and write the data, are signed one by one: --deep
