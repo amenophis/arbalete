@@ -456,10 +456,11 @@ try {
   const favoritesOf = (space) => session.profiles.find((profile) => profile.id === space.profile).favorites;
   const otherFavorites = session.nodes[favoritesOf(otherProfileSpace)].children;
   const tileIds = `e2e.tiles().map((tile) => tile.closest("li").dataset.id).join()`;
+  // The page must have settled in place for the drop below to land on its tiles.
   await check(
     "the favorites grid shows the favorites of the displayed Space's profile",
     ``,
-    `${tileIds} === "${otherFavorites.join()}"`,
+    `${tileIds} === "${otherFavorites.join()}" && e2e.page().getBoundingClientRect().left === 0`,
   );
   await check(
     "the favorite/1 command selects that profile's first favorite",

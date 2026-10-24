@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useRef } from "react";
 import { send } from "./bridge";
 
 // Where a dragged node lands: an index among a container's or a folder's children.
@@ -25,13 +25,12 @@ export function moveCommand(id: number, from: Place, to: Place): string | null {
   return `move/${id}/${to.parent}/${index}`;
 }
 
-export type Dragging = "tab" | "folder" | null;
+type Kind = "tab" | "folder";
 
 // Rows are `li[data-id]` in lists with `data-parent`. A press on a row that moves a few pixels
 // drags it: the row dims and `indicator`, a fixed element, shows where it would land. The drop
 // sends one move command; the app answers with the new state.
 export function useDrag() {
-  const [dragging, setDragging] = useState<Dragging>(null);
   const indicator = useRef<HTMLDivElement>(null);
   const onPointerDown = (event: ReactPointerEvent) => {
     const target = event.target as Element;
@@ -51,7 +50,6 @@ export function useDrag() {
         if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < THRESHOLD) return;
         started = true;
         item.classList.add("dragged");
-        setDragging(kind);
       }
       to = locate(event.clientX, event.clientY, item, kind, indicator.current);
     };
@@ -62,7 +60,6 @@ export function useDrag() {
       if (!started) return;
       item.classList.remove("dragged");
       indicator.current?.removeAttribute("style");
-      setDragging(null);
       swallowClick();
       const command = event.type === "pointerup" && to && moveCommand(id, from, to);
       if (command) send(command);
@@ -71,7 +68,7 @@ export function useDrag() {
     addEventListener("pointerup", end);
     addEventListener("pointercancel", end);
   };
-  return { dragging, indicator, onPointerDown };
+  return { indicator, onPointerDown };
 }
 
 function placeOf(item: HTMLElement): Place {
@@ -92,7 +89,7 @@ function locate(
   x: number,
   y: number,
   dragged: HTMLElement,
-  kind: Dragging,
+  kind: Kind,
   indicator: HTMLDivElement | null,
 ): Place | null {
   const target = document.elementFromPoint(x, y);

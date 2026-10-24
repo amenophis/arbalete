@@ -204,7 +204,7 @@ test("selects and closes a tab inside a folder", () => {
 test("shows the favorites as a grid of tiles named by their titles", () => {
   render(<App />);
   receive({}, 10);
-  const grid = screen.getByRole("list", { name: "Favorites" });
+  const grid = shown().getByRole("list", { name: "Favorites" });
   expect(within(grid).getAllByRole("button")).toHaveLength(2);
   const mail = screen.getByRole("button", { name: "Mail" });
   expect(mail.getAttribute("title")).toBe("Mail");
@@ -223,10 +223,26 @@ test("selects a favorite", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/select/10", { method: "POST" });
 });
 
-test("hides the favorites when there are none", () => {
+test("shows a placeholder to drop tabs on when there are no favorites", () => {
   render(<App />);
   receive({}, 3, []);
-  expect(screen.queryByRole("list", { name: "Favorites" })).toBeNull();
+  const grid = shown().getByRole("list", { name: "Favorites" });
+  expect(grid.dataset.parent).toBe("1");
+  expect(within(grid).getByText("Drag tabs here to keep them close")).toBeDefined();
+  expect(within(grid).queryAllByRole("button")).toHaveLength(0);
+});
+
+test("shares the favorites' rows in up to 4 columns", () => {
+  render(<App />);
+  const columns = () =>
+    shown().getByRole("list", { name: "Favorites" }).style.getPropertyValue("--columns");
+  receive({}, 3, favorites.slice(0, 1));
+  expect(columns()).toBe("1");
+  receive({}, 3, favorites);
+  expect(columns()).toBe("2");
+  const many = Array.from({ length: 6 }, (_, index) => ({ ...favorites[1], id: 20 + index }));
+  receive({}, 3, many);
+  expect(columns()).toBe("4");
 });
 
 test("collapses and expands a folder with a click", () => {

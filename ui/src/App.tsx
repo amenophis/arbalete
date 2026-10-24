@@ -1,4 +1,4 @@
-import { type KeyboardEvent, memo, useRef } from "react";
+import { type CSSProperties, type KeyboardEvent, memo, useRef } from "react";
 import {
   type Item,
   type Space,
@@ -8,7 +8,7 @@ import {
   useAppState,
   useRenaming,
 } from "./bridge";
-import { type Dragging, useDrag } from "./drag";
+import { useDrag } from "./drag";
 import { Library } from "./Library";
 import { Profiles } from "./Profiles";
 import { usePager } from "./pager";
@@ -17,7 +17,7 @@ import { NewSpace, Spaces } from "./Spaces";
 export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalette:rename");
-  const { dragging, indicator, onPointerDown } = useDrag();
+  const { indicator, onPointerDown } = useDrag();
   const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
   // The displayed Space's color tints the sidebar, and blends into the next one's on the way.
   const pager = usePager(state?.spaces ?? [], displayed);
@@ -82,7 +82,6 @@ export function App() {
                 space={state.spaces[index]}
                 index={index}
                 displayed={onSpace && index === displayed}
-                dragging={dragging}
                 renaming={renaming}
                 onRename={setRenaming}
               />
@@ -125,7 +124,6 @@ function Sections({
   space,
   index,
   displayed,
-  dragging,
   renaming,
   onRename,
 }: {
@@ -133,7 +131,6 @@ function Sections({
   space: Space;
   index: number;
   displayed: boolean;
-  dragging: Dragging;
   renaming: number | null;
   onRename: Rename;
 }) {
@@ -145,20 +142,26 @@ function Sections({
       inert={!displayed}
       style={{ left: `${index * 100}%` }}
     >
-      {/* An empty grid shows only while a tab is dragged, to drop it there. */}
-      {(favorites.length > 0 || dragging === "tab") && (
-        <ul className="favorites" aria-label="Favorites" data-parent={roots.favorites}>
-          {favorites.map((tab) => (
-            <Favorite
-              key={tab.id}
-              id={tab.id}
-              title={tab.title || tab.url}
-              favicon={tab.favicon}
-              active={tab.id === selected}
-            />
-          ))}
-        </ul>
-      )}
+      {/* Without favorites, a placeholder takes their place and receives the dropped tab. */}
+      <ul
+        className="favorites"
+        aria-label="Favorites"
+        data-parent={roots.favorites}
+        style={{ "--columns": Math.min(Math.max(favorites.length, 1), 4) } as CSSProperties}
+      >
+        {favorites.length === 0 && (
+          <li className="favorites-empty">Drag tabs here to keep them close</li>
+        )}
+        {favorites.map((tab) => (
+          <Favorite
+            key={tab.id}
+            id={tab.id}
+            title={tab.title || tab.url}
+            favicon={tab.favicon}
+            active={tab.id === selected}
+          />
+        ))}
+      </ul>
       <div className="scroll">
         <h2 className="space-header">
           <span className="favicon" aria-hidden="true">
