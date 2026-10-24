@@ -60,7 +60,7 @@ export type Profile = {
   color: Color;
 };
 
-// The palette of profiles and Spaces (Color in crates/arbalette-core/src/sidebar.rs).
+// The palette of profiles and Spaces (Color in crates/arbalete-core/src/sidebar.rs).
 export const COLORS = {
   purple: "#6e56cf",
   blue: "#3e7bfa",
@@ -175,16 +175,16 @@ export function useAppState(): State | undefined {
   const [state, setState] = useState<State>();
   useEffect(() => {
     const listener = (event: Event) => setState((event as CustomEvent<State>).detail);
-    addEventListener("arbalette:state", listener);
+    addEventListener("arbalete:state", listener);
     send("ready");
-    return () => removeEventListener("arbalette:state", listener);
+    return () => removeEventListener("arbalete:state", listener);
   }, []);
   return state;
 }
 
 // The folder or profile whose name is edited: one the app asks to rename, with `event`, once it
 // creates it, or any the user picks.
-export function useRenaming(event: "arbalette:rename" | "arbalette:rename-profile") {
+export function useRenaming(event: "arbalete:rename" | "arbalete:rename-profile") {
   const [renaming, setRenaming] = useState<number | null>(null);
   useEffect(() => {
     const listener = (event: Event) => setRenaming((event as CustomEvent<number>).detail);
@@ -255,7 +255,7 @@ function forgetHoverOnMove(root: HTMLElement) {
 // again, over its own background (index.css); it moves at once when it docks from above the page.
 export function followDocking(root: HTMLElement) {
   forgetHoverOnMove(root);
-  addEventListener("arbalette:docked", (event) => {
+  addEventListener("arbalete:docked", (event) => {
     const { docked, slide } = (event as CustomEvent<{ docked: boolean; slide: boolean }>).detail;
     root.toggleAttribute("data-instant", !slide);
     root.toggleAttribute("data-undocked", !docked);

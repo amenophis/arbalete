@@ -1,6 +1,6 @@
 # How the icon was chosen
 
-The proposals behind [the Arbalette icon](../icon.svg), kept to show how it was chosen. They are not used by the
+The proposals behind [the Arbalete icon](../icon.svg), kept to show how it was chosen. They are not used by the
 app. All of them are original drawings: the brief was Arc's playful spirit, without its looping-A mark, around
 the idea of a crossbow ("arbalète") bolt.
 

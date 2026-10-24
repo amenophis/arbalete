@@ -55,7 +55,7 @@ pub fn read_bookmarks(dir: &Path) -> Result<Bookmarks, Error> {
     }
 }
 
-/// Whether macOS keeps Arbalette from reading Safari's data until the user grants it Full Disk
+/// Whether macOS keeps Arbalete from reading Safari's data until the user grants it Full Disk
 /// Access.
 pub fn needs_full_disk_access(dir: &Path) -> bool {
     matches!(read_bookmarks(dir), Err(Error::NeedsFullDiskAccess))

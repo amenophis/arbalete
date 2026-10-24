@@ -113,7 +113,7 @@ export function tint(spaces: Space[], position: number): Tint | undefined {
   };
 }
 
-// A trackpad swipe, from touch to lift, sent by the app as `arbalette:swipe` events (Gesture in
+// A trackpad swipe, from touch to lift, sent by the app as `arbalete:swipe` events (Gesture in
 // app/src/swipe.rs): `dx` is how far the content would scroll, in points.
 // `y` is where the pointer is, in points from the window's top.
 export type Gesture = { phase: "begin" | "move" | "end"; dx: number; y: number; time: number };
@@ -327,10 +327,10 @@ export function usePager(spaces: Space[], displayed: number) {
   });
   useEffect(() => {
     const listener = (event: Event) => pager.gesture((event as CustomEvent<Gesture>).detail);
-    addEventListener("arbalette:swipe", listener);
+    addEventListener("arbalete:swipe", listener);
     pager.start();
     return () => {
-      removeEventListener("arbalette:swipe", listener);
+      removeEventListener("arbalete:swipe", listener);
       pager.stop();
     };
   }, [pager]);

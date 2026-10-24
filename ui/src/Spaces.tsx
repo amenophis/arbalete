@@ -19,7 +19,7 @@ export function Spaces({
   const [focus, setFocus] = useState<{ field: Field }>();
   const current = spaces.find((space) => space.id === displayed);
   const editing = current !== undefined && open;
-  useAppEvent<{ space: number; field: Field }>("arbalette:edit-space", (detail) => {
+  useAppEvent<{ space: number; field: Field }>("arbalete:edit-space", (detail) => {
     if (detail.space !== displayed) return;
     setOpen(true);
     setFocus({ field: detail.field });
@@ -117,7 +117,7 @@ export function NewSpace({ index, shown }: { index: number; shown: boolean }) {
   const [emoji, setEmoji] = useState("");
   const [color, setColor] = useState<Color>("purple");
   const [tab, setTab] = useState<number | null>(null);
-  useAppEvent("arbalette:new-space", setTab);
+  useAppEvent("arbalete:new-space", setTab);
   const name = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (shown) {

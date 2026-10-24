@@ -10,8 +10,8 @@ export function Overlay() {
       input.current.value = "";
       input.current.focus();
     };
-    addEventListener("arbalette:show", show);
-    return () => removeEventListener("arbalette:show", show);
+    addEventListener("arbalete:show", show);
+    return () => removeEventListener("arbalete:show", show);
   }, []);
   return (
     <form

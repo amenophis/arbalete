@@ -94,7 +94,7 @@ test("the Space's menu opens its editor on the field it edits", () => {
   render(<Spaces spaces={spaces} displayed={14} onPage={onPage} />);
   const ask = (space: number, field: string) =>
     act(() => {
-      dispatchEvent(new CustomEvent("arbalette:edit-space", { detail: { space, field } }));
+      dispatchEvent(new CustomEvent("arbalete:edit-space", { detail: { space, field } }));
     });
   ask(13, "emoji");
   expect(screen.queryByRole("textbox", { name: "Space emoji" })).toBeNull();

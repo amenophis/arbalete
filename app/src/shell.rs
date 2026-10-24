@@ -5,11 +5,11 @@
 
 use crate::command::{Command, HitTarget, Target};
 use crate::menu::{self, Action};
-use arbalette_core::history::{self, History};
-use arbalette_core::import::browsers::{self, Family};
-use arbalette_core::import::{self, Choice, safari};
-use arbalette_core::sidebar::{Color, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab};
-use arbalette_core::{favicon, store};
+use arbalete_core::history::{self, History};
+use arbalete_core::import::browsers::{self, Family};
+use arbalete_core::import::{self, Choice, safari};
+use arbalete_core::sidebar::{Color, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab};
+use arbalete_core::{favicon, store};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
 use serde::Serialize;
@@ -23,7 +23,7 @@ use std::thread::{self, LocalKey};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The UI is served by the app itself under this origin.
-const UI_ORIGIN: &str = "https://arbalette.ui/";
+const UI_ORIGIN: &str = "https://arbalete.ui/";
 
 /// CEF's root cache path, which holds every profile's web data. Read from the IO thread too,
 /// which serves the favicons.
@@ -400,7 +400,7 @@ fn update_sidebar<R>(change: impl FnOnce(&mut Sidebar) -> R) -> R {
 
 fn send_state() {
     let json = STATE.with_borrow(UiState::to_json);
-    let event = format!(r#"new CustomEvent("arbalette:state", {{ detail: {json} }})"#);
+    let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
 }
@@ -426,7 +426,7 @@ fn show_overlay(visible: bool) {
             width: OVERLAY_SIZE.width,
             height: OVERLAY_SIZE.height,
         }));
-        dispatch(&OVERLAY_VIEW, r#"new Event("arbalette:show")"#);
+        dispatch(&OVERLAY_VIEW, r#"new Event("arbalete:show")"#);
     }
     overlay.set_visible(visible.into());
     if visible && let Some(view) = overlay.contents_view() {
@@ -463,7 +463,7 @@ fn set_sidebar(mode: SidebarMode) {
         let detail = json!({ "docked": docked, "slide": slide });
         dispatch(
             &SIDEBAR,
-            &format!(r#"new CustomEvent("arbalette:docked", {{ detail: {detail} }})"#),
+            &format!(r#"new CustomEvent("arbalete:docked", {{ detail: {detail} }})"#),
         );
     }
     let floating = |mode| matches!(mode, SidebarMode::Revealed | SidebarMode::Floating);
@@ -845,7 +845,7 @@ fn send_sources() {
         browsers.collect::<Vec<_>>()
     });
     let detail = json!({ "browsers": browsers, "profiles": profiles });
-    let event = format!(r#"new CustomEvent("arbalette:sources", {{ detail: {detail} }})"#);
+    let event = format!(r#"new CustomEvent("arbalete:sources", {{ detail: {detail} }})"#);
     dispatch(&IMPORT_VIEW, &event);
 }
 
@@ -1221,7 +1221,7 @@ fn new_folder(parent: Option<NodeId>) {
         sidebar.add_folder(parent, "New Folder")
     });
     if let Ok(folder) = folder {
-        ask("arbalette:rename", &json!(folder));
+        ask("arbalete:rename", &json!(folder));
     }
 }
 
@@ -1242,7 +1242,7 @@ fn new_profile() {
             .create_profile("New Profile")
             .expect("a name that is not blank")
     });
-    ask("arbalette:rename-profile", &json!(profile));
+    ask("arbalete:rename-profile", &json!(profile));
 }
 
 /// Creates a Space in the displayed Space's profile and shows it, with `tab` moved into it and
@@ -1259,7 +1259,7 @@ fn create_space(title: &str, emoji: &str, color: Color, tab: Option<NodeId>) {
         {
             sidebar.select(space, tab)?;
         }
-        Ok::<_, arbalette_core::sidebar::Error>(())
+        Ok::<_, arbalete_core::sidebar::Error>(())
     });
     if created.is_ok() {
         show_selected();
@@ -1271,7 +1271,7 @@ fn create_space(title: &str, emoji: &str, color: Color, tab: Option<NodeId>) {
 /// profile from the UI or a menu is ignored.
 fn update_spaces(
     space: SpaceId,
-    change: impl FnOnce(&mut Sidebar) -> Result<(), arbalette_core::sidebar::Error>,
+    change: impl FnOnce(&mut Sidebar) -> Result<(), arbalete_core::sidebar::Error>,
 ) {
     let displayed = STATE.with_borrow(|state| state.sidebar.displayed().id);
     let changed = update_sidebar(change).is_ok();
@@ -1291,7 +1291,7 @@ fn new_space_profile(space: SpaceId) {
         if STATE.with_borrow(|state| state.sidebar.displayed().id == space) {
             show_selected();
         }
-        ask("arbalette:rename-profile", &json!(profile));
+        ask("arbalete:rename-profile", &json!(profile));
     }
 }
 
@@ -1633,7 +1633,7 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
             let detail = serde_json::to_string(&gesture).expect("a gesture");
             dispatch(
                 view,
-                &format!(r#"new CustomEvent("arbalette:swipe", {{ detail: {detail} }})"#),
+                &format!(r#"new CustomEvent("arbalete:swipe", {{ detail: {detail} }})"#),
             );
         }
         Some(Swipe::Step(next)) => show_found_space(|s| s.next_space(next)),
@@ -1650,7 +1650,7 @@ pub fn close() {
 }
 
 wrap_app! {
-    pub struct ArbaletteApp {
+    pub struct ArbaleteApp {
         data_dir: PathBuf,
     }
 
@@ -1662,7 +1662,7 @@ wrap_app! {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
             }
             // Lets the end-to-end check and the benchmark (e2e/devtools.mjs) drive the UI through DevTools.
-            if let Ok(port) = std::env::var("ARBALETTE_DEBUG_PORT") {
+            if let Ok(port) = std::env::var("ARBALETE_DEBUG_PORT") {
                 command_line.append_switch_with_value(
                     Some(&CefString::from("remote-debugging-port")),
                     Some(&CefString::from(port.as_str())),
@@ -1671,13 +1671,13 @@ wrap_app! {
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
-            Some(ArbaletteBrowserProcessHandler::new(self.data_dir.clone()))
+            Some(ArbaleteBrowserProcessHandler::new(self.data_dir.clone()))
         }
     }
 }
 
 wrap_browser_process_handler! {
-    struct ArbaletteBrowserProcessHandler {
+    struct ArbaleteBrowserProcessHandler {
         data_dir: PathBuf,
     }
 
@@ -1714,7 +1714,7 @@ wrap_window_delegate! {
     impl WindowDelegate {
         fn on_window_created(&self, window: Option<&mut Window>) {
             let window = window.expect("window").clone();
-            window.set_title(Some(&CefString::from("Arbalette")));
+            window.set_title(Some(&CefString::from("Arbalete")));
             // The sidebar at the left edge, the rest of the window its own background, below the
             // card and the other overlays.
             window.set_background_color(WINDOW_COLOR);
@@ -2541,7 +2541,7 @@ mod tests {
     fn sends_the_closed_tabs_with_when_they_closed_and_their_cached_icon() {
         let mut state = UiState::default();
         let profile = state.sidebar.profiles()[0].id;
-        let tab = arbalette_core::sidebar::Tab {
+        let tab = arbalete_core::sidebar::Tab {
             url: "https://example.com/".into(),
             title: "Example".into(),
             favicon: Some(String::new()),
@@ -2554,7 +2554,7 @@ mod tests {
         assert_eq!(closed["url"], "https://example.com/");
         assert_eq!(closed["closedAt"], 60_000);
         let favicon = format!(
-            "https://arbalette.ui/favicon/{}/d41d8cd98f00b204e9800998ecf8427e.png",
+            "https://arbalete.ui/favicon/{}/d41d8cd98f00b204e9800998ecf8427e.png",
             serde_json::json!(profile)
         );
         assert_eq!(closed["favicon"], favicon);
@@ -2579,7 +2579,7 @@ mod tests {
         state.sidebar.set_space_emoji(work, "💼").unwrap();
         state
             .sidebar
-            .set_space_color(work, arbalette_core::sidebar::Color::Blue)
+            .set_space_color(work, arbalete_core::sidebar::Color::Blue)
             .unwrap();
         // The library glances at every Space's pinned tabs, folders closed.
         let pinned = state.sidebar.spaces()[1].pinned;
@@ -2644,7 +2644,7 @@ mod tests {
         let work = state.sidebar.create_profile("Work").unwrap();
         state
             .sidebar
-            .set_profile_color(work, arbalette_core::sidebar::Color::Blue)
+            .set_profile_color(work, arbalete_core::sidebar::Color::Blue)
             .unwrap();
         let json = state.to_json();
         let default = state.sidebar.profiles()[0].id;
@@ -2717,11 +2717,11 @@ mod tests {
     #[test]
     fn ignores_the_fragment() {
         assert_eq!(
-            ui_path("https://arbalette.ui/index.html#overlay"),
+            ui_path("https://arbalete.ui/index.html#overlay"),
             "index.html"
         );
         assert_eq!(
-            ui_path("https://arbalette.ui/command/open/a%23b"),
+            ui_path("https://arbalete.ui/command/open/a%23b"),
             "command/open/a%23b"
         );
     }

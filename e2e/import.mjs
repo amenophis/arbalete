@@ -1,5 +1,5 @@
 // Checks the import assistant in the real app: shown on the first launch with the browsers of a
-// fictitious home (Arc's fixture from crates/arbalette-core/tests/fixtures/arc, a Chrome profile
+// fictitious home (Arc's fixture from crates/arbalete-core/tests/fixtures/arc, a Chrome profile
 // and a Safari that needs Full Disk Access), importing Arc and Chrome, reopening it from the
 // "Import…" command to merge into an existing profile, skipping it, and later launches keeping
 // the session. Chrome's history is large, to check that the window keeps answering while it is
@@ -23,7 +23,7 @@ if (!dir) throw new Error("usage: node e2e/import.mjs <empty dir>");
 const home = join(dir, "home");
 const support = join(home, "Library/Application Support");
 const arc = join(support, "Arc");
-cpSync(resolve("crates/arbalette-core/tests/fixtures/arc"), arc, { recursive: true });
+cpSync(resolve("crates/arbalete-core/tests/fixtures/arc"), arc, { recursive: true });
 for (const profile of ["Default", "Profile 1"]) mkdirSync(join(arc, "User Data", profile));
 // Arc's icons: the one it cached for the sidebar item "doc-guide", named after the md5 of its id
 // in uppercase, and the one Chromium's database of the profile has for the news page.
@@ -121,7 +121,7 @@ const helpers = `window.e2e = {
   // How long the app takes to answer a command with its state, in ms: the UI thread is free.
   roundTrip: () => new Promise((resolve) => {
     const start = performance.now();
-    addEventListener("arbalette:state", () => resolve(performance.now() - start), { once: true });
+    addEventListener("arbalete:state", () => resolve(performance.now() - start), { once: true });
     e2e.send("ready");
   }),
 }`;
@@ -219,7 +219,7 @@ try {
     `(() => {
       const icons = [...e2e.page().querySelectorAll(".pinned .tab-row")].map((row) => {
         const img = row.querySelector("img.favicon");
-        return img?.src.startsWith("https://arbalette.ui/favicon/") && img.complete && img.naturalWidth > 0;
+        return img?.src.startsWith("https://arbalete.ui/favicon/") && img.complete && img.naturalWidth > 0;
       });
       return icons.filter(Boolean).length === 2 && icons.length === 3;
     })()`,
