@@ -132,6 +132,16 @@ test("closes a tab", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/close/4", { method: "POST" });
 });
 
+test("marks the selected tab's close button as a dash, the others as a cross", () => {
+  render(<App />);
+  receive({});
+  const close = (name: string) => screen.getByRole("button", { name: `Close ${name}` });
+  expect(close("Example").textContent).toBe("—");
+  expect(close("Other").textContent).toBe("×");
+  fireEvent.click(close("Example"));
+  expect(fetch).toHaveBeenLastCalledWith("/command/close/3", { method: "POST" });
+});
+
 test("shows pinned tabs and folders above the divider and today's tabs", () => {
   render(<App />);
   receive({});
