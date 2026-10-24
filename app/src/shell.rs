@@ -889,6 +889,14 @@ fn apply_import(sources: Vec<import::Source>) {
         };
         let before = new.spaces().len();
         let imported = import::apply(&mut new, sources);
+        // Before the sidebar shows them; a few kilobytes each.
+        for (profile, favicons) in &imported.favicons {
+            for (source, png) in favicons {
+                if let Err(error) = favicon::write(&profile_dir(*profile), source, png) {
+                    eprintln!("cannot cache the favicon: {error}");
+                }
+            }
+        }
         let shown = new.spaces().get(before).map(|space| space.id);
         if let Some(space) = shown {
             new.display(space).expect("an imported Space");
