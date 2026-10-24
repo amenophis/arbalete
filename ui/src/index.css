@@ -44,6 +44,33 @@ body {
   background: var(--tint);
 }
 
+/* The Spaces' pages side by side, edge to edge, the displayed one in view (ui/src/pager.ts). */
+.pager {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: 0 -8px;
+  overflow: hidden;
+}
+
+/* Moved by the compositor alone. */
+.pages {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.space-page {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 8px;
+}
+
 /* Today's tabs fill the rest of it: dropping below them moves a tab to their end. */
 .scroll {
   display: flex;

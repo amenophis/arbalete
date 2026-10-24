@@ -98,7 +98,9 @@ const helpers = `window.e2e = {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   },
   spaces: () => [...document.querySelectorAll(".spaces .space")].map((icon) => icon.getAttribute("aria-label")).join(),
-  tiles: () => [...document.querySelectorAll(".favorites .favorite")].map((tile) => tile.getAttribute("aria-label")).join(),
+  // The sidebar's displayed Space's page; its neighbors wait beside it for a swipe.
+  page: () => document.querySelector(".space-page:not([inert])"),
+  tiles: () => [...e2e.page().querySelectorAll(".favorites .favorite")].map((tile) => tile.getAttribute("aria-label")).join(),
   // How long the app takes to answer a command with its state, in ms: the UI thread is free.
   roundTrip: () => new Promise((resolve) => {
     const start = performance.now();
@@ -191,7 +193,7 @@ try {
     sidebar,
     "the first Space shows its imported pinned folder and the favorites of its profile",
     ``,
-    `document.querySelector(".pinned .folder")?.textContent.includes("Docs") && e2e.tiles().split(",").length === 2`,
+    `e2e.page().querySelector(".pinned .folder")?.textContent.includes("Docs") && e2e.tiles().split(",").length === 2`,
   );
   await sidebar.eval(`e2e.urlHeight = document.querySelector(".url").offsetHeight`);
   await check(

@@ -7,7 +7,7 @@ use crate::command::Command;
 use arbalette_core::history::{self, History};
 use arbalette_core::import::browsers::{self, Family};
 use arbalette_core::import::{self, Choice, safari};
-use arbalette_core::sidebar::{NodeId, NodeKind, ProfileId, Sidebar, SpaceId, Tab};
+use arbalette_core::sidebar::{NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab};
 use arbalette_core::store;
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
@@ -111,33 +111,53 @@ struct UiState {
 }
 
 impl UiState {
-    /// Sent whole to the UI on every change: the displayed Space's tabs and its profile's
-    /// favorites. `roots` names the sections' containers, which the UI moves nodes into.
+    /// Sent whole to the UI on every change: the displayed Space, and its page and its
+    /// neighbors', which the UI lays out side by side to swipe between them. The other pages are
+    /// left out, as they would weigh on every update.
     fn to_json(&self) -> serde_json::Value {
-        let space = self.sidebar.displayed();
-        let favorites = self
-            .sidebar
-            .favorites_of(space.id)
-            .expect("a known profile");
+        let spaces = self.sidebar.spaces();
+        let displayed = self.sidebar.displayed().id;
+        let index = spaces
+            .iter()
+            .position(|s| s.id == displayed)
+            .expect("a known Space");
         json!({
             "page": self.page,
-            "roots": { "favorites": favorites, "pinned": space.pinned, "today": space.today },
-            "favorites": self.tabs(favorites),
-            "pinned": self.items(space.pinned),
-            "today": self.items(space.today),
-            "active": space.selected,
-            "space": space.id,
-            "spaces": self.sidebar.spaces().iter().map(|s| json!({
+            "space": displayed,
+            "spaces": spaces.iter().map(|s| json!({
                 "id": s.id,
                 "title": s.title,
                 "emoji": s.emoji,
                 "color": s.color,
             })).collect::<Vec<_>>(),
+            "pages": spaces
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| i.abs_diff(index) <= 1)
+                .map(|(_, s)| self.page_json(s))
+                .collect::<Vec<_>>(),
             "profiles": self.sidebar.profiles().iter().map(|p| json!({
                 "id": p.id,
                 "name": p.name,
                 "color": p.color,
             })).collect::<Vec<_>>(),
+        })
+    }
+
+    /// A Space's tabs and its profile's favorites. `roots` names the sections' containers, which
+    /// the UI moves nodes into.
+    fn page_json(&self, space: &Space) -> serde_json::Value {
+        let favorites = self
+            .sidebar
+            .favorites_of(space.id)
+            .expect("a known profile");
+        json!({
+            "space": space.id,
+            "selected": space.selected,
+            "roots": { "favorites": favorites, "pinned": space.pinned, "today": space.today },
+            "favorites": self.tabs(favorites),
+            "pinned": self.items(space.pinned),
+            "today": self.items(space.today),
         })
     }
 
@@ -1398,14 +1418,16 @@ mod tests {
         state.sidebar.select(home, tab).unwrap();
         let json = state.to_json();
         assert_eq!(json["page"]["canGoBack"], false);
-        assert_eq!(json["today"][0]["url"], "https://example.com/");
-        assert_eq!(json["today"][0]["id"], json["active"]);
+        let page = &json["pages"][0];
+        assert_eq!(page["space"], serde_json::json!(home));
+        assert_eq!(page["today"][0]["url"], "https://example.com/");
+        assert_eq!(page["today"][0]["id"], page["selected"]);
         let roots = serde_json::json!({
             "favorites": state.sidebar.profiles()[0].favorites,
             "pinned": state.sidebar.spaces()[0].pinned,
             "today": state.sidebar.spaces()[0].today,
         });
-        assert_eq!(json["roots"], roots);
+        assert_eq!(page["roots"], roots);
     }
 
     #[test]
@@ -1418,18 +1440,18 @@ mod tests {
             .open_tab(home.id, "https://example.com/")
             .unwrap();
         state.sidebar.move_node(tab, folder, 0).unwrap();
-        let json = state.to_json();
-        assert_eq!(json["pinned"][0]["title"], "Docs");
-        assert_eq!(json["pinned"][0]["expanded"], true);
+        let page = &state.to_json()["pages"][0];
+        assert_eq!(page["pinned"][0]["title"], "Docs");
+        assert_eq!(page["pinned"][0]["expanded"], true);
         assert_eq!(
-            json["pinned"][0]["children"][0]["url"],
+            page["pinned"][0]["children"][0]["url"],
             "https://example.com/"
         );
-        assert_eq!(json["today"], serde_json::json!([]));
+        assert_eq!(page["today"], serde_json::json!([]));
     }
 
     #[test]
-    fn sends_the_favorites_of_the_displayed_space_s_profile() {
+    fn sends_each_space_with_the_favorites_of_its_profile() {
         let mut state = UiState::default();
         let home = state.sidebar.spaces()[0].id;
         let favorites = state.sidebar.profiles()[0].favorites;
@@ -1438,18 +1460,17 @@ mod tests {
             .open_tab(home, "https://example.com/")
             .unwrap();
         state.sidebar.move_node(tab, favorites, 0).unwrap();
-        let json = state.to_json();
-        assert_eq!(json["favorites"][0]["url"], "https://example.com/");
-        assert_eq!(json["favorites"][0]["id"], serde_json::json!(tab));
-        assert_eq!(json["today"], serde_json::json!([]));
         state.sidebar.create_profile("Work").unwrap();
-        let office = state.sidebar.spaces()[1].id;
-        state.sidebar.display(office).unwrap();
         let json = state.to_json();
-        assert_eq!(json["favorites"], serde_json::json!([]));
+        let page = &json["pages"][0];
+        assert_eq!(page["favorites"][0]["url"], "https://example.com/");
+        assert_eq!(page["favorites"][0]["id"], serde_json::json!(tab));
+        assert_eq!(page["today"], serde_json::json!([]));
+        let office = &json["pages"][1];
+        assert_eq!(office["favorites"], serde_json::json!([]));
         let work_favorites = state.sidebar.profiles()[1].favorites;
         assert_eq!(
-            json["roots"]["favorites"],
+            office["roots"]["favorites"],
             serde_json::json!(work_favorites)
         );
     }
@@ -1482,13 +1503,40 @@ mod tests {
             { "id": work, "title": "Work", "emoji": "💼", "color": "blue" },
         ]);
         assert_eq!(json["spaces"], spaces);
-        assert_eq!(json["today"][0]["url"], "https://example.org/");
-        assert_eq!(json["today"].as_array().unwrap().len(), 1);
-        assert_eq!(json["active"], serde_json::json!(tab));
-        assert_eq!(
-            json["roots"]["today"],
-            serde_json::json!(state.sidebar.spaces()[1].today)
-        );
+        let page = &json["pages"][1];
+        assert_eq!(page["space"], serde_json::json!(work));
+        assert_eq!(page["today"][0]["url"], "https://example.org/");
+        assert_eq!(page["today"].as_array().unwrap().len(), 1);
+        assert_eq!(page["selected"], serde_json::json!(tab));
+        assert_eq!(json["pages"][0]["today"][0]["url"], "https://example.com/");
+    }
+
+    #[test]
+    fn sends_only_the_pages_of_the_displayed_space_and_its_neighbors() {
+        let mut state = UiState::default();
+        let profile = state.sidebar.profiles()[0].id;
+        let ids: Vec<_> = (1..5)
+            .map(|n| {
+                state
+                    .sidebar
+                    .add_space(&format!("Space {n}"), profile)
+                    .unwrap()
+            })
+            .collect();
+        let pages = |state: &UiState| {
+            let json = state.to_json();
+            let pages = json["pages"].as_array().unwrap();
+            pages
+                .iter()
+                .map(|page| page["space"].clone())
+                .collect::<serde_json::Value>()
+        };
+        let home = state.sidebar.spaces()[0].id;
+        assert_eq!(pages(&state), serde_json::json!([home, ids[0]]));
+        state.sidebar.display(ids[1]).unwrap();
+        assert_eq!(pages(&state), serde_json::json!(ids[..3]));
+        state.sidebar.display(ids[3]).unwrap();
+        assert_eq!(pages(&state), serde_json::json!(ids[2..]));
     }
 
     #[test]

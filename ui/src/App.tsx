@@ -1,26 +1,26 @@
-import { type CSSProperties, type KeyboardEvent, memo, useEffect, useRef } from "react";
-import { COLORS, type Item, send, type Tab, useAppState, useRenaming } from "./bridge";
-import { useDrag } from "./drag";
+import { type KeyboardEvent, memo, useRef } from "react";
+import { type Item, type SpacePage, send, type Tab, useAppState, useRenaming } from "./bridge";
+import { type Dragging, useDrag } from "./drag";
 import { Profiles } from "./Profiles";
+import { usePager } from "./pager";
 import { Spaces } from "./Spaces";
-import { type Gesture, swipeTracker } from "./swipe";
 
 export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalette:rename");
   const { dragging, indicator, onPointerDown } = useDrag();
-  useSwipes();
+  const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
+  // The displayed Space's color tints the sidebar, and blends into the next one's on the way.
+  const pager = usePager(state?.spaces ?? [], displayed);
   const page = state?.page;
+  const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =
-    state &&
-    [...state.favorites, ...tabs([...state.pinned, ...state.today])].find(
-      (tab) => tab.id === state.active,
+    current &&
+    [...current.favorites, ...tabs([...current.pinned, ...current.today])].find(
+      (tab) => tab.id === current.selected,
     );
-  const space = state?.spaces.find((s) => s.id === state.space);
-  // The displayed Space's color tints the sidebar.
-  const tint = space && ({ "--space": COLORS[space.color] } as CSSProperties);
   return (
-    <nav className="sidebar" style={tint} onPointerDown={onPointerDown}>
+    <nav className="sidebar" ref={pager.sidebar} onPointerDown={onPointerDown}>
       <div className="toolbar">
         <button
           type="button"
@@ -49,30 +49,78 @@ export function App() {
           <progress className="progress" aria-label="Loading" value={page.progress} />
         )}
       </div>
+      {/* The app sends the displayed Space's page and its neighbors, the ones a swipe shows. */}
+      <div className="pager">
+        <div className="pages" ref={pager.track}>
+          {state?.pages.map((spacePage) => {
+            const index = state.spaces.findIndex((space) => space.id === spacePage.space);
+            return (
+              <Sections
+                key={spacePage.space}
+                page={spacePage}
+                index={index}
+                displayed={index === displayed}
+                dragging={dragging}
+                renaming={renaming}
+                onRename={setRenaming}
+              />
+            );
+          })}
+        </div>
+      </div>
+      <div className="switcher">
+        <Spaces spaces={state?.spaces ?? []} displayed={state?.space} />
+        <Profiles profiles={state?.profiles ?? []} />
+      </div>
+      <div className="drop-indicator" ref={indicator} />
+    </nav>
+  );
+}
+
+// A Space's page: its profile's favorites, then its pinned and today's tabs, which scroll. Pages
+// besides the displayed one stay out of reach of the keyboard and assistive technologies.
+function Sections({
+  page,
+  index,
+  displayed,
+  dragging,
+  renaming,
+  onRename,
+}: {
+  page: SpacePage;
+  index: number;
+  displayed: boolean;
+  dragging: Dragging;
+  renaming: number | null;
+  onRename: Rename;
+}) {
+  const { roots, favorites, selected } = page;
+  return (
+    <section
+      className="space-page"
+      data-space={page.space}
+      inert={!displayed}
+      style={{ left: `${index * 100}%` }}
+    >
       {/* An empty grid shows only while a tab is dragged, to drop it there. */}
-      {state && (state.favorites.length > 0 || dragging === "tab") && (
-        <ul className="favorites" aria-label="Favorites" data-parent={state.roots.favorites}>
-          {state.favorites.map((tab) => (
+      {(favorites.length > 0 || dragging === "tab") && (
+        <ul className="favorites" aria-label="Favorites" data-parent={roots.favorites}>
+          {favorites.map((tab) => (
             <Favorite
               key={tab.id}
               id={tab.id}
               title={tab.title || tab.url}
               favicon={tab.favicon}
-              active={tab.id === state.active}
+              active={tab.id === selected}
             />
           ))}
         </ul>
       )}
       <div className="scroll">
-        <ul className="tabs pinned" data-parent={state?.roots.pinned}>
-          <Items
-            items={state?.pinned ?? []}
-            active={state?.active}
-            renaming={renaming}
-            onRename={setRenaming}
-          />
+        <ul className="tabs pinned" data-parent={roots.pinned}>
+          <Items items={page.pinned} active={selected} renaming={renaming} onRename={onRename} />
         </ul>
-        <div className="divider-row" data-parent={state?.roots.pinned}>
+        <div className="divider-row" data-parent={roots.pinned}>
           <hr className="divider" />
           <button
             type="button"
@@ -88,34 +136,12 @@ export function App() {
           <span className="favicon">+</span>
           <span className="title">New tab</span>
         </button>
-        <ul className="tabs today" data-parent={state?.roots.today}>
-          <Items
-            items={state?.today ?? []}
-            active={state?.active}
-            renaming={renaming}
-            onRename={setRenaming}
-          />
+        <ul className="tabs today" data-parent={roots.today}>
+          <Items items={page.today} active={selected} renaming={renaming} onRename={onRename} />
         </ul>
       </div>
-      <div className="switcher">
-        <Spaces spaces={state?.spaces ?? []} displayed={state?.space} />
-        <Profiles profiles={state?.profiles ?? []} />
-      </div>
-      <div className="drop-indicator" ref={indicator} />
-    </nav>
+    </section>
   );
-}
-
-function useSwipes() {
-  useEffect(() => {
-    const track = swipeTracker();
-    const listener = (event: Event) => {
-      const command = track((event as CustomEvent<Gesture>).detail);
-      if (command) send(command);
-    };
-    addEventListener("arbalette:swipe", listener);
-    return () => removeEventListener("arbalette:swipe", listener);
-  }, []);
 }
 
 function tabs(items: Item[]): Tab[] {

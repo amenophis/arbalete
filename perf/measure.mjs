@@ -42,12 +42,13 @@ async function start() {
   const app = launch(dataDir);
   const sidebar = await connect(SIDEBAR);
   await sidebar.eval(waitFor(`!!document.querySelector(".tabs .tab")`));
+  await sidebar.eval(`window.shown = () => document.querySelector(".space-page:not([inert])")`);
   return { app, sidebar, startup: performance.now() - started };
 }
 
 // Clicks a random tab of the first Space, waits for it to be shown as active, then for a frame.
 async function switchTab() {
-  const tabs = [...document.querySelectorAll(".tabs .tab:not([aria-current])")];
+  const tabs = [...shown().querySelectorAll(".tabs .tab:not([aria-current])")];
   const tab = tabs[Math.floor(Math.random() * tabs.length)];
   const start = performance.now();
   tab.click();
@@ -68,10 +69,11 @@ async function stateUpdate() {
     fetch("/command/ready", { method: "POST" });
   });
   const title = `Renamed ${Math.random()}`;
-  state.today[0] = { ...state.today[0], title };
+  const page = state.pages.find((page) => page.space === state.space);
+  page.today[0] = { ...page.today[0], title };
   const start = performance.now();
   dispatchEvent(new CustomEvent("arbalette:state", { detail: state }));
-  const tabs = document.querySelector(".today");
+  const tabs = shown().querySelector(".today");
   // React may render during the dispatch, before an observer could see the change.
   if (!tabs.textContent.includes(title)) {
     await new Promise((resolve) => {

@@ -2,8 +2,8 @@
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
 // between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
 // Spaces, creating, renaming and coloring profiles, creating and editing Spaces, and switching
-// Spaces by number and with a horizontal swipe, showing the displayed profile's favorites, and
-// recording each profile's history, in the real app.
+// Spaces by number and by swiping between their pages, showing the displayed profile's favorites,
+// and recording each profile's history, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -29,9 +29,11 @@ try {
   const sidebar = await connect(SIDEBAR);
   await sidebar.eval(waitFor(`document.querySelectorAll(".today .tab-row").length >= 10`));
   await sidebar.eval(`window.e2e = {
-    rows: () => [...document.querySelectorAll(".today .tab-row")],
-    current: () => document.querySelector(".tab[aria-current]")?.closest(".tab-row"),
-    above: (element) => !!(element.compareDocumentPosition(document.querySelector(".divider")) & Node.DOCUMENT_POSITION_FOLLOWING),
+    // The displayed Space's page; its neighbors wait beside it for a swipe.
+    page: () => document.querySelector(".space-page:not([inert])"),
+    rows: () => [...e2e.page().querySelectorAll(".today .tab-row")],
+    current: () => e2e.page().querySelector(".tab[aria-current]")?.closest(".tab-row"),
+    above: (element) => !!(element.compareDocumentPosition(e2e.page().querySelector(".divider")) & Node.DOCUMENT_POSITION_FOLLOWING),
     send: (command) => fetch("/command/" + command, { method: "POST" }).then(() => {}),
     // Drags with pointer events, at a fraction of the target's width and height.
     pointer: (type, element, fx, fy) => {
@@ -46,7 +48,7 @@ try {
     indicator: () => document.querySelector(".drop-indicator"),
     // The tops of the favorites grid and the first pinned row, which must not move.
     tops: () => [".favorites", ".pinned .tab-row"]
-      .map((selector) => document.querySelector(selector).getBoundingClientRect().top).join(),
+      .map((selector) => e2e.page().querySelector(selector).getBoundingClientRect().top).join(),
     // Records the tops after every change of the sidebar, until the page has loaded.
     watchLayout: () => {
       const layout = { before: e2e.tops(), during: [], loading: false };
@@ -75,7 +77,7 @@ try {
     "the pinned section shows its folders and their tabs above the divider",
     ``,
     `(() => {
-      const folders = [...document.querySelectorAll(".pinned .folder")];
+      const folders = [...e2e.page().querySelectorAll(".pinned .folder")];
       const tabs = folders[0]?.parentElement.querySelectorAll(".folder-tabs .tab-row") ?? [];
       return folders.length === 5 && folders[0].textContent.includes("Folder 1") && tabs.length === 10
         && e2e.above(folders[0]) && e2e.above(tabs[9]) && !e2e.above(e2e.rows()[0]);
@@ -121,20 +123,20 @@ try {
   );
   await check(
     "selecting a pinned tab inside a folder marks it aria-current",
-    `e2e.picked = document.querySelectorAll(".pinned .folder-tabs .tab-row")[13]; e2e.picked.querySelector(".tab").click()`,
+    `e2e.picked = e2e.page().querySelectorAll(".pinned .folder-tabs .tab-row")[13]; e2e.picked.querySelector(".tab").click()`,
     `e2e.current() === e2e.picked`,
   );
   // The benchmark session has 6 favorites.
   await check(
     "the favorites show as a grid of 6 tiles above the pinned tabs",
-    `e2e.tiles = () => [...document.querySelectorAll(".favorites .favorite")]`,
+    `e2e.tiles = () => [...e2e.page().querySelectorAll(".favorites .favorite")]`,
     `e2e.tiles().length === 6 && e2e.tiles()[0].getAttribute("aria-label") === "Favorite 1"
-      && !!(e2e.tiles()[5].compareDocumentPosition(document.querySelector(".pinned")) & Node.DOCUMENT_POSITION_FOLLOWING)`,
+      && !!(e2e.tiles()[5].compareDocumentPosition(e2e.page().querySelector(".pinned")) & Node.DOCUMENT_POSITION_FOLLOWING)`,
   );
   await check(
     "the next command selects the next tab, inside the folder",
     `e2e.send("next")`,
-    `e2e.current() === document.querySelectorAll(".pinned .folder-tabs .tab-row")[14]`,
+    `e2e.current() === e2e.page().querySelectorAll(".pinned .folder-tabs .tab-row")[14]`,
   );
   await check(
     "the previous command selects the previous tab",
@@ -159,7 +161,7 @@ try {
   await check(
     "the next command wraps around to the first pinned tab",
     `e2e.send("next")`,
-    `e2e.current() === document.querySelector(".pinned .tab-row")`,
+    `e2e.current() === e2e.page().querySelector(".pinned .tab-row")`,
   );
   await check(
     "selecting a favorite marks its tile aria-current and shows its url",
@@ -174,7 +176,7 @@ try {
   // Pinning moves the row to another list, so rows are found again by position.
   await check(
     "the pin command moves the selected tab to the end of the pinned tabs",
-    `e2e.pinnedRows = () => [...document.querySelectorAll(".pinned > .tab-row")];
+    `e2e.pinnedRows = () => [...e2e.page().querySelectorAll(".pinned > .tab-row")];
      e2e.saved = document.querySelector(".url").textContent; e2e.count = e2e.rows().length; e2e.send("pin")`,
     `e2e.current() === e2e.pinnedRows().at(-1) && e2e.rows().length === e2e.count - 1 && e2e.above(e2e.current())`,
   );
@@ -196,8 +198,8 @@ try {
   );
   await check(
     "the new folder button adds a folder at the end of the pinned tabs and edits its title",
-    `e2e.folders = () => [...document.querySelectorAll(".pinned > li > .folder")];
-     document.querySelector(".new-folder").click()`,
+    `e2e.folders = () => [...e2e.page().querySelectorAll(".pinned > li > .folder")];
+     e2e.page().querySelector(".new-folder").click()`,
     `(() => {
       const input = e2e.folders()[5]?.querySelector("input");
       return e2e.folders().length === 6 && input?.value === "New Folder" && document.activeElement === input;
@@ -255,12 +257,12 @@ try {
     `scrollBy(0, 500)`,
     `document.scrollingElement.scrollTop === 0
       && getComputedStyle(document.documentElement).overscrollBehaviorY === "none"
-      && getComputedStyle(document.querySelector(".scroll")).overscrollBehaviorY === "none"`,
+      && getComputedStyle(e2e.page().querySelector(".scroll")).overscrollBehaviorY === "none"`,
   );
   await check(
     "scrolling the tabs keeps the url bar in place",
-    `e2e.top = document.querySelector(".url").getBoundingClientRect().top; document.querySelector(".scroll").scrollTop = 1000`,
-    `document.querySelector(".scroll").scrollTop > 0 && document.scrollingElement.scrollTop === 0
+    `e2e.top = document.querySelector(".url").getBoundingClientRect().top; e2e.page().querySelector(".scroll").scrollTop = 1000`,
+    `e2e.page().querySelector(".scroll").scrollTop > 0 && document.scrollingElement.scrollTop === 0
       && document.querySelector(".url").getBoundingClientRect().top === e2e.top`,
   );
 
@@ -284,7 +286,7 @@ try {
   await check(
     "the pointer at the window's left edge reveals the sidebar above the page",
     ``,
-    `innerWidth === 260 && document.querySelectorAll(".today .tab-row").length > 0`,
+    `innerWidth === 260 && document.querySelector(".space-page:not([inert])").querySelectorAll(".today .tab-row").length > 0`,
     reveal,
   );
   await check("the revealed sidebar does not resize the page", ``, `innerWidth === ${width}`, content);
@@ -292,7 +294,7 @@ try {
     "a tab clicked in the revealed sidebar is selected",
     ``,
     `(() => {
-      const row = document.querySelectorAll(".today .tab-row")[1];
+      const row = document.querySelector(".space-page:not([inert])").querySelectorAll(".today .tab-row")[1];
       if (!row.querySelector(".tab[aria-current]")) row.querySelector(".tab").click();
       return !!row.querySelector(".tab[aria-current]");
     })()`,
@@ -383,7 +385,7 @@ try {
     `e2e.spaceIcons()[${other}].click()`,
     `e2e.spaceIcons()[${other}].getAttribute("aria-current") === "true"
       && e2e.rows().length === 50 && e2e.rows()[0].dataset.id === "${todayTab(otherProfileSpace, 0)}"
-      && document.querySelector(".pinned .folder-tabs .tab-row").dataset.id === "${firstPinned(otherProfileSpace)}"
+      && e2e.page().querySelector(".pinned .folder-tabs .tab-row").dataset.id === "${firstPinned(otherProfileSpace)}"
       && !e2e.has(e2e.rows(), "${todayTab(home, 46)}") && e2e.currentId() === "${todayTab(otherProfileSpace, 0)}"`,
   );
   await checkShown("the content view shows that Space's selected tab", todayTab(otherProfileSpace, 0));
@@ -534,15 +536,16 @@ try {
   await check(
     "switching Space tints the sidebar with that Space's color",
     `e2e.spaceIcons()[0].click()`,
-    `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.tint().getPropertyValue("--space") === "#6e56cf"`,
+    `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.tint().getPropertyValue("--space") === "#6e56cf"
+      && document.querySelector(".pages").style.transform === "translateX(0%)"`,
   );
 
   // The tab list scrolls with a real wheel event, sent through DevTools, without switching Space.
   const scrollBox = await sidebar.eval(`(() => {
-    const rect = document.querySelector(".scroll").getBoundingClientRect();
+    const rect = e2e.page().querySelector(".scroll").getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   })()`);
-  await sidebar.eval(`document.querySelector(".scroll").scrollTop = 0`);
+  await sidebar.eval(`e2e.page().querySelector(".scroll").scrollTop = 0`);
   await sidebar.call("Input.dispatchMouseEvent", {
     type: "mouseWheel",
     ...scrollBox,
@@ -552,32 +555,113 @@ try {
   await check(
     "a vertical wheel scrolls the tab list and keeps the Space",
     ``,
-    `document.querySelector(".scroll").scrollTop > 0 && e2e.spaceIcons()[0].getAttribute("aria-current") === "true"`,
+    `e2e.page().querySelector(".scroll").scrollTop > 0 && e2e.spaceIcons()[0].getAttribute("aria-current") === "true"`,
   );
   await check(
-    "the second Space's shortcut shows it",
+    "the second Space's shortcut slides its page in",
     `e2e.send("space/number/2")`,
-    `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"`,
+    `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"
+      && document.querySelector(".pages").style.transform === "translateX(-100%)"`,
   );
   // The app sends a trackpad swipe, from touch to lift, as arbalette:swipe events: `dx` is how
-  // far the content would scroll, in points (app/src/swipe.rs).
-  const swipe = (dx) => `(() => {
-    const send = (phase, dx, time) =>
-      dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, time } }));
-    send("begin", ${dx}, 0);
-    for (let i = 1; i < 20; i++) send("move", ${dx}, i * 10);
-    send("end", 0, 200);
-  })()`;
+  // far the content would scroll, in points, `time` when, in milliseconds (app/src/swipe.rs).
+  await sidebar.eval(`Object.assign(e2e, {
+    gesture: (phase, dx, time) =>
+      dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, time } })),
+    // Touch, move \`events\` times \`interval\` ms apart, and lift unless \`hold\`.
+    swipe: (dx, events, interval, hold) => {
+      e2e.gesture("begin", dx, 0);
+      for (let i = 1; i < events; i++) e2e.gesture("move", dx, i * interval);
+      if (!hold) e2e.gesture("end", 0, events * interval);
+    },
+    // How far the pages are moved, in percent of a page.
+    offset: () => Number.parseFloat(document.querySelector(".pages").style.transform.slice("translateX(".length)),
+    displayed: (index) => e2e.spaceIcons()[index].getAttribute("aria-current") === "true"
+      && e2e.page().dataset.space === String(e2e.spaces[index]),
+    settled: (index) => e2e.displayed(index) && e2e.offset() === -index * 100,
+  })`);
+  await sidebar.eval(`e2e.spaces = [];
+    addEventListener("arbalette:state", (event) => { e2e.state = event.detail; e2e.spaces = event.detail.spaces.map((space) => space.id) });
+    e2e.send("ready")`);
   await check(
-    "a swipe moving the content left shows the next Space",
-    swipe(-30),
-    `e2e.spaceIcons()[2].getAttribute("aria-current") === "true"`,
+    "a Space next to the displayed one gets a color of its own",
+    `e2e.send("space/color/" + e2e.spaces[2] + "/green")`,
+    `e2e.state.spaces[2].color === "green"`,
   );
   await check(
-    "a swipe moving the content right shows the previous Space again",
-    swipe(30),
-    `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"`,
+    "a slow swipe moves the pages with the fingers and blends the Spaces' tints",
+    `e2e.swipe(-10, 15, 50, true)`,
+    `e2e.offset() < -100 && e2e.offset() > -200 && e2e.tint().getPropertyValue("--space").startsWith("color-mix")`,
   );
+  await check(
+    "lifting past half way displays the next Space, its page settled in view",
+    `e2e.swipe(-10, 15, 50)`,
+    `e2e.settled(2) && !e2e.tint().getPropertyValue("--space").startsWith("color-mix")`,
+  );
+  await check(
+    "a short slow swipe goes back to the displayed Space",
+    `e2e.swipe(-10, 5, 50, true)`,
+    `e2e.offset() < -200`,
+  );
+  await check("lifting it settles the page back", `e2e.gesture("end", 0, 300)`, `e2e.settled(2)`);
+  await check("a fast flick displays the next Space", `e2e.swipe(-15, 4, 10)`, `e2e.settled(3)`);
+  await check(
+    "a flick back displays the previous Space again",
+    `e2e.swipe(15, 4, 10)`,
+    `e2e.settled(2)`,
+  );
+  await check(
+    "only the displayed Space's page and its neighbors exist, each once",
+    ``,
+    `(() => {
+      const pages = [...document.querySelectorAll(".space-page")].map((page) => page.dataset.space);
+      return pages.length === 3 && new Set(pages).size === 3
+        && document.querySelectorAll(".space-page:not([inert])").length === 1
+        && pages.join() === e2e.spaces.slice(1, 4).join();
+    })()`,
+  );
+  await check(
+    "the switcher slides to the Space clicked",
+    `e2e.spaceIcons()[0].click()`,
+    `e2e.displayed(0) && e2e.offset() > -100 && e2e.offset() < 0`,
+  );
+  await check("its page settles in view", ``, `e2e.settled(0)`);
+  await check(
+    "the first Space resists a swipe towards the one before",
+    `e2e.swipe(100, 20, 50, true)`,
+    `e2e.offset() > 10 && e2e.offset() < 25`,
+  );
+  await check(
+    "lifting it settles back on the first Space",
+    `e2e.gesture("end", 0, 1000)`,
+    `e2e.settled(0)`,
+  );
+  const last = await sidebar.eval(`e2e.spaces.length - 1`);
+  await check(
+    "the last Space's shortcut slides its page in",
+    `e2e.send("space/number/${last + 1}")`,
+    `e2e.settled(${last})`,
+  );
+  await check(
+    "the last Space resists a swipe towards the one after",
+    `e2e.swipe(-100, 20, 50, true)`,
+    `e2e.offset() < ${-last * 100 - 10} && e2e.offset() > ${-last * 100 - 25}`,
+  );
+  await check(
+    "lifting it settles back on the last Space",
+    `e2e.gesture("end", 0, 1000)`,
+    `e2e.settled(${last})`,
+  );
+  // Only the app's scroll events, which have phases, page between Spaces.
+  const switcherBox = await sidebar.eval(`(() => {
+    const rect = document.querySelector(".switcher").getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  for (let i = 0; i < 10; i++) {
+    await sidebar.call("Input.dispatchMouseEvent", { type: "mouseWheel", ...switcherBox, deltaX: 100, deltaY: 0 });
+  }
+  await sleep(300);
+  await check("a horizontal wheel within the page alone keeps the Space", ``, `e2e.settled(${last})`);
 } finally {
   app.kill();
 }
