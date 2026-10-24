@@ -1,6 +1,9 @@
 //! Reads the data of a Chromium browser's profile (Chrome, Edge, Brave…).
 
+use super::Copy;
 use super::bookmarks::{Bookmark, Bookmarks, Folder};
+use crate::history::{self, Entry};
+use rusqlite::Connection;
 use serde_json::Value;
 use std::{fs, io, path::Path};
 
@@ -8,6 +11,26 @@ use std::{fs, io, path::Path};
 pub enum Error {
     Io(io::Error),
     Invalid(serde_json::Error),
+    Sqlite(rusqlite::Error),
+}
+
+/// Reads the profile's `History` database. A profile that has never been opened has none.
+pub fn read_history(profile: &Path) -> Result<Vec<Entry>, Error> {
+    let Some(copy) = Copy::of(&profile.join("History")).map_err(Error::Io)? else {
+        return Ok(Vec::new());
+    };
+    let db = Connection::open(copy.file()).map_err(Error::Sqlite)?;
+    history(&db).map_err(Error::Sqlite)
+}
+
+/// The visited urls of a `History` database, whose times are microseconds since 1601. Hidden
+/// urls are those of subframes, not pages.
+fn history(db: &Connection) -> rusqlite::Result<Vec<Entry>> {
+    history::select(
+        db,
+        "SELECT url, title, visit_count, last_visit_time / 1000 - 11644473600000 FROM urls
+         WHERE visit_count > 0 AND hidden = 0",
+    )
 }
 
 /// Reads the profile's `Bookmarks` file. A profile that has never saved a bookmark has none.
@@ -55,6 +78,7 @@ fn bookmark(node: &Value) -> Option<Bookmark> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::entry;
     use crate::import::TestDir;
     use crate::import::bookmarks::{folder, link};
 
@@ -109,6 +133,34 @@ mod tests {
         assert_eq!(empty.bar, folder("Bookmarks bar", vec![]));
         assert_eq!(empty.others[1], folder("Mobile bookmarks", vec![]));
         assert!(matches!(bookmarks("not json"), Err(Error::Invalid(_))));
+    }
+
+    /// The part of Chromium's `History` schema the import reads, with fictitious visits.
+    const HISTORY: &str = "
+        CREATE TABLE urls (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR,
+            visit_count INTEGER DEFAULT 0 NOT NULL, typed_count INTEGER DEFAULT 0 NOT NULL,
+            last_visit_time INTEGER NOT NULL, hidden INTEGER DEFAULT 0 NOT NULL);
+        INSERT INTO urls (url, title, visit_count, last_visit_time, hidden) VALUES
+            ('https://mail.example.com/', 'Mail', 3, 13350000000000000, 0),
+            ('https://ads.example.net/frame', '', 1, 13350000001000000, 1),
+            ('https://typed.example.org/', 'Typed only', 0, 0, 0);
+    ";
+
+    #[test]
+    fn reads_the_visited_pages_with_unix_times() {
+        let dir = TestDir::new("chromium-history");
+        assert_eq!(read_history(&dir.0).unwrap(), vec![]);
+        let db = Connection::open(dir.0.join("History")).unwrap();
+        db.execute_batch(HISTORY).unwrap();
+        assert_eq!(
+            read_history(&dir.0).unwrap(),
+            vec![entry(
+                "https://mail.example.com/",
+                "Mail",
+                3,
+                1_705_526_400_000
+            )]
+        );
     }
 
     #[test]
