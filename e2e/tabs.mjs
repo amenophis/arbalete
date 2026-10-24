@@ -236,6 +236,13 @@ try {
     `e2e.tiles().length === 7 && e2e.tiles()[6].closest("li").dataset.id === e2e.moved && !e2e.has(e2e.rows(), e2e.moved)`,
   );
   await check(
+    "the sidebar page does not scroll or bounce, only its tab list scrolls",
+    `scrollBy(0, 500)`,
+    `document.scrollingElement.scrollTop === 0
+      && getComputedStyle(document.documentElement).overscrollBehaviorY === "none"
+      && getComputedStyle(document.querySelector(".scroll")).overscrollBehaviorY === "none"`,
+  );
+  await check(
     "scrolling the tabs keeps the url bar in place",
     `e2e.top = document.querySelector(".url").getBoundingClientRect().top; document.querySelector(".scroll").scrollTop = 1000`,
     `document.querySelector(".scroll").scrollTop > 0 && document.scrollingElement.scrollTop === 0
