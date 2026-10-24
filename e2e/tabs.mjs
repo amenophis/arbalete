@@ -1,7 +1,7 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
-// between sections, hiding and revealing the sidebar, keeping profiles' web data apart, and
-// creating, renaming and coloring profiles, in the real app.
+// between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
+// Spaces, and creating, renaming and coloring profiles, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -13,7 +13,7 @@ import { connect, launch, pages, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error("usage: node e2e/tabs.mjs <data dir>");
 
-// The sidebar shows only the first Space: tabs of the others are found in the session file.
+// The sidebar shows one Space at a time: tabs of the others are found in the session file.
 const readSession = () => JSON.parse(readFileSync(join(dataDir, "session.json"), "utf8")).sidebar;
 const session = readSession();
 const todayTab = (space, index) => session.nodes[space.today].children[index];
@@ -324,6 +324,64 @@ try {
     `localStorage.getItem("profile") === "first" && document.cookie.includes("profile=first")`,
   );
 
+  // Waits until the session file meets `condition`.
+  async function checkSession(description, condition) {
+    const deadline = performance.now() + 10_000;
+    while (!condition(readSession())) {
+      if (performance.now() > deadline) throw new Error(`not ok - ${description}`);
+      await sleep(20);
+    }
+    console.log(`ok - ${description}`);
+  }
+  // Checks that the content view shows a tab's page.
+  async function checkShown(description, tab) {
+    const page = await connect(tabUrl(tab));
+    await check(description, ``, `document.visibilityState === "visible"`, page);
+  }
+  const other = session.spaces.indexOf(otherProfileSpace);
+  const firstPinned = (space) => session.nodes[session.nodes[space.pinned].children[0]].children[0];
+  await check(
+    "the switcher shows one icon per Space, the displayed one marked",
+    `e2e.spaceIcons = () => [...document.querySelectorAll(".spaces .space")];
+     e2e.currentId = () => e2e.current()?.dataset.id`,
+    `e2e.spaceIcons().length === ${session.spaces.length} && e2e.spaceIcons()[0].getAttribute("aria-current") === "true"
+      && e2e.spaceIcons().filter((icon) => icon.hasAttribute("aria-current")).length === 1`,
+  );
+  await check(
+    "clicking a Space's icon shows only its pinned and today's tabs, with its selected tab",
+    `e2e.spaceIcons()[${other}].click()`,
+    `e2e.spaceIcons()[${other}].getAttribute("aria-current") === "true"
+      && e2e.rows().length === 50 && e2e.rows()[0].dataset.id === "${todayTab(otherProfileSpace, 0)}"
+      && document.querySelector(".pinned .folder-tabs .tab-row").dataset.id === "${firstPinned(otherProfileSpace)}"
+      && !e2e.has(e2e.rows(), "${todayTab(home, 46)}") && e2e.currentId() === "${todayTab(otherProfileSpace, 0)}"`,
+  );
+  await checkShown("the content view shows that Space's selected tab", todayTab(otherProfileSpace, 0));
+  await check(
+    "selecting another tab of that Space marks it aria-current",
+    `e2e.rows()[2].querySelector(".tab").click()`,
+    `e2e.currentId() === "${todayTab(otherProfileSpace, 2)}"`,
+  );
+  await checkShown("the content view shows the tab selected in that Space", todayTab(otherProfileSpace, 2));
+  await check(
+    "switching back to the first Space shows its tabs and the tab it had selected",
+    `e2e.spaceIcons()[0].click()`,
+    `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.currentId() === "${todayTab(home, 46)}"
+      && !e2e.has(e2e.rows(), "${todayTab(otherProfileSpace, 0)}")`,
+  );
+  await checkShown("the content view shows the first Space's tab again", todayTab(home, 46));
+  await check(
+    "switching to the other Space again restores the tab it had selected",
+    `e2e.send("space/${otherProfileSpace.id}")`,
+    `e2e.spaceIcons()[${other}].getAttribute("aria-current") === "true"
+      && e2e.currentId() === "${todayTab(otherProfileSpace, 2)}"`,
+  );
+  await checkSession(
+    "the session saves the displayed Space and its selected tab",
+    (saved) =>
+      saved.displayed === otherProfileSpace.id &&
+      saved.spaces[other].selected === todayTab(otherProfileSpace, 2),
+  );
+
   await check(
     "the profiles button lists every profile by name",
     `e2e.names = () => [...document.querySelectorAll(".profile input")].map((input) => input.value);
@@ -337,6 +395,11 @@ try {
       && document.activeElement === document.querySelectorAll(".profile input")[2]`,
   );
   await check(
+    "the new profile's Space shows in the switcher",
+    ``,
+    `e2e.spaceIcons().length === ${session.spaces.length + 1}`,
+  );
+  await check(
     "Enter saves the edited profile name",
     `e2e.input = document.activeElement; e2e.input.value = "Travel";
      e2e.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`,
@@ -347,20 +410,10 @@ try {
     `document.querySelector('[aria-label="Color of Travel"] [aria-label="green"]').click()`,
     `document.querySelector('[aria-label="Color of Travel"] [aria-pressed="true"]')?.getAttribute("aria-label") === "green"`,
   );
-  const deadline = performance.now() + 10_000;
-  let saved;
-  while (!saved) {
-    const sidebar = readSession();
-    const travel = sidebar.profiles.find((profile) => profile.name === "Travel");
-    if (travel?.color === "green" && sidebar.spaces.some((space) => space.profile === travel.id)) {
-      saved = true;
-    } else if (performance.now() > deadline) {
-      throw new Error("not ok - the session saves the new profile, its color and its Space");
-    } else {
-      await sleep(20);
-    }
-  }
-  console.log("ok - the session saves the new profile, its color and its Space");
+  await checkSession("the session saves the new profile, its color and its Space", (saved) => {
+    const travel = saved.profiles.find((profile) => profile.name === "Travel");
+    return travel?.color === "green" && saved.spaces.some((space) => space.profile === travel.id);
+  });
 } finally {
   app.kill();
 }

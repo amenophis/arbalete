@@ -104,6 +104,9 @@ pub enum Error {
 pub struct Sidebar {
     profiles: Vec<Profile>,
     spaces: Vec<Space>,
+    /// The Space the sidebar shows, `None` for the first one.
+    #[serde(default)]
+    displayed: Option<SpaceId>,
     nodes: HashMap<NodeId, Node>,
     next_id: u64,
 }
@@ -114,6 +117,7 @@ impl Default for Sidebar {
         let mut sidebar = Self {
             profiles: Vec::new(),
             spaces: Vec::new(),
+            displayed: None,
             nodes: HashMap::new(),
             next_id: 1,
         };
@@ -133,6 +137,30 @@ impl Sidebar {
     /// Spaces in sidebar order.
     pub fn spaces(&self) -> &[Space] {
         &self.spaces
+    }
+
+    /// The Space the sidebar shows: the first one until another is displayed.
+    pub fn displayed(&self) -> &Space {
+        self.displayed
+            .and_then(|id| self.space(id).ok())
+            .unwrap_or(&self.spaces[0])
+    }
+
+    /// Shows a Space in the sidebar, with the tab it had selected.
+    pub fn display(&mut self, space: SpaceId) -> Result<(), Error> {
+        self.space(space)?;
+        self.displayed = Some(space);
+        Ok(())
+    }
+
+    /// The Space whose pinned or "Today" tabs hold a node; favorites belong to no Space.
+    pub fn space_of(&self, id: NodeId) -> Option<SpaceId> {
+        let root = self.ancestors(id).last()?;
+        let space = self
+            .spaces
+            .iter()
+            .find(|s| s.pinned == root || s.today == root);
+        space.map(|s| s.id)
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
@@ -328,12 +356,10 @@ impl Sidebar {
     /// The profile whose web data shows a node: the profile of its favorites, or of its Space.
     pub fn profile_of(&self, id: NodeId) -> Option<ProfileId> {
         let root = self.ancestors(id).last()?;
-        let profile = self.profiles.iter().find(|p| p.favorites == root);
-        let space = self
-            .spaces
-            .iter()
-            .find(|s| s.pinned == root || s.today == root);
-        profile.map(|p| p.id).or(space.map(|s| s.profile))
+        if let Some(profile) = self.profiles.iter().find(|p| p.favorites == root) {
+            return Some(profile.id);
+        }
+        Some(self.space(self.space_of(id)?).ok()?.profile)
     }
 
     pub fn is_favorite(&self, id: NodeId) -> bool {
@@ -804,6 +830,51 @@ mod tests {
         let work = sidebar.add_space("Work", profile).unwrap();
         assert_eq!(sidebar.spaces()[1].id, work);
         assert_eq!(sidebar.spaces()[1].profile, profile);
+    }
+
+    #[test]
+    fn displays_the_first_space_until_another_is_displayed() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        assert_eq!(sidebar.displayed().id, home.id);
+        sidebar.display(work).unwrap();
+        assert_eq!(sidebar.displayed().id, work);
+        assert_eq!(sidebar.display(SpaceId(999)), Err(Error::UnknownSpace));
+        assert_eq!(sidebar.displayed().id, work);
+    }
+
+    #[test]
+    fn each_space_keeps_its_selected_tab() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar).id;
+        let work = sidebar.add_space("Work", sidebar.profiles()[0].id).unwrap();
+        let read = sidebar.open_tab(home, "read").unwrap();
+        let mail = sidebar.open_tab(work, "mail").unwrap();
+        sidebar.select(home, read).unwrap();
+        sidebar.select(work, mail).unwrap();
+        sidebar.display(work).unwrap();
+        sidebar.display(home).unwrap();
+        assert_eq!(sidebar.displayed().selected, Some(read));
+        assert_eq!(sidebar.spaces()[1].selected, Some(mail));
+    }
+
+    #[test]
+    fn a_node_belongs_to_the_space_of_its_pinned_or_today_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let folder = sidebar.add_folder(home.pinned, "Docs").unwrap();
+        let pinned = sidebar.open_tab(home.id, "pinned").unwrap();
+        sidebar.move_node(pinned, folder, 0).unwrap();
+        let today = sidebar.open_tab(work, "today").unwrap();
+        let favorite = sidebar.open_tab(work, "favorite").unwrap();
+        let favorites = sidebar.profiles()[0].favorites;
+        sidebar.move_node(favorite, favorites, 0).unwrap();
+        assert_eq!(sidebar.space_of(pinned), Some(home.id));
+        assert_eq!(sidebar.space_of(today), Some(work));
+        assert_eq!(sidebar.space_of(favorite), None);
+        assert_eq!(sidebar.space_of(NodeId(999)), None);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { type KeyboardEvent, memo, useRef } from "react";
-import { type Item, send, type Tab, useAppState, useRenaming } from "./bridge";
+import { type Item, type Space, send, type Tab, useAppState, useRenaming } from "./bridge";
 import { useDrag } from "./drag";
 import { Profiles } from "./Profiles";
 
@@ -92,9 +92,34 @@ export function App() {
           />
         </ul>
       </div>
-      <Profiles profiles={state?.profiles ?? []} />
+      <div className="switcher">
+        <Spaces spaces={state?.spaces ?? []} displayed={state?.space} />
+        <Profiles profiles={state?.profiles ?? []} />
+      </div>
       <div className="drop-indicator" ref={indicator} />
     </nav>
+  );
+}
+
+// One icon per Space, its initial for now; the displayed one is marked aria-current.
+function Spaces({ spaces, displayed }: { spaces: Space[]; displayed?: number }) {
+  return (
+    <ul className="spaces" aria-label="Spaces">
+      {spaces.map((space) => (
+        <li key={space.id}>
+          <button
+            type="button"
+            className="space"
+            aria-label={space.title}
+            title={space.title}
+            aria-current={space.id === displayed ? "true" : undefined}
+            onClick={() => send(`space/${space.id}`)}
+          >
+            {space.title.charAt(0).toUpperCase()}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
