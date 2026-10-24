@@ -528,7 +528,9 @@ body {
   border-radius: 50%;
 }
 
+/* The row stays lit while the pointer is on its close button. */
 .tab:hover,
+.tab-row:hover > .tab,
 button.folder:hover {
   background: var(--hover);
 }
