@@ -494,6 +494,8 @@ try {
     return travel?.color === "green" && saved.spaces.some((space) => space.profile === travel.id);
   });
 
+  // Fields save on blur, which only fires in a focused page: the window may not be the active one.
+  await sidebar.call("Emulation.setFocusEmulationEnabled", { enabled: true });
   const spaceCount = session.spaces.length + 1;
   // Typed through DevTools, as the keyboard would.
   const type = (text) => sidebar.call("Input.insertText", { text });
