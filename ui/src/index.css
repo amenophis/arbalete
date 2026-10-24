@@ -197,8 +197,8 @@ body {
 .toolbar button {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -216,6 +216,11 @@ body {
 .toolbar button:disabled {
   opacity: 0.3;
   background: none;
+}
+
+/* A click leaves no ring nor fill: only the keyboard's focus shows. */
+.toolbar button:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .favicon {
@@ -1059,4 +1064,11 @@ button.folder:hover {
   .new-bubble span {
     transition: none;
   }
+}
+
+/* The hover the view kept from before it hid or moved (forgetHoverOnMove in bridge.ts):
+   last, above every other hover. */
+:root[data-stale-hover] .toolbar button:hover {
+  background: none;
+  opacity: 0.75;
 }

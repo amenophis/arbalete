@@ -226,18 +226,30 @@ export function firstGrapheme(text: string): string {
 // It floats a few points from the window's edge: the pointer that revealed it is left of it, and
 // leaving towards the edge keeps it open.
 export function revealOnHover(element: HTMLElement) {
+  forgetHoverOnMove(element);
   element.addEventListener("mouseenter", () => send("sidebar/reveal"));
   element.addEventListener("mouseleave", (event) => {
     if (event.clientX > 0) send("sidebar/conceal");
+    element.toggleAttribute("data-stale-hover", true);
   });
+}
+
+// A view hidden or moved under a resting pointer keeps the hover of the button the pointer last
+// left there, the click that hid it say: until the pointer moves in it again, no hover shows.
+function forgetHoverOnMove(root: HTMLElement) {
+  const fresh = () => root.removeAttribute("data-stale-hover");
+  addEventListener("pointermove", fresh, { passive: true });
+  addEventListener("pointerdown", fresh, { passive: true });
 }
 
 // The docked sidebar's content slides out to the left as the sidebar hides, and back as it shows
 // again, over its own background (index.css); it moves at once when it docks from above the page.
 export function followDocking(root: HTMLElement) {
+  forgetHoverOnMove(root);
   addEventListener("arbalette:docked", (event) => {
     const { docked, slide } = (event as CustomEvent<{ docked: boolean; slide: boolean }>).detail;
     root.toggleAttribute("data-instant", !slide);
     root.toggleAttribute("data-undocked", !docked);
+    root.toggleAttribute("data-stale-hover", true);
   });
 }
