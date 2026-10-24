@@ -1,10 +1,10 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
-// between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
-// Spaces, creating, renaming and coloring profiles, creating Spaces from the page after the last
-// one and editing them, switching Spaces by number and by swiping between their pages, reopening
-// closed tabs from the library before the first Space, showing the displayed profile's favorites,
-// and recording each profile's history, in the real app.
+// between sections, moving the window by its margins, hiding and revealing the sidebar, keeping
+// profiles' web data apart, switching Spaces, creating, renaming and coloring profiles, creating
+// Spaces from the page after the last one and editing them, switching Spaces by number and by
+// swiping between their pages, reopening closed tabs from the library before the first Space,
+// showing the displayed profile's favorites, and recording each profile's history, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -289,6 +289,17 @@ try {
         && parseFloat(window.width) === innerWidth && parseFloat(window.height) === innerHeight
         && window.backgroundImage.startsWith("linear-gradient")
         && document.querySelector(".sidebar").getBoundingClientRect().width === 260;
+    })()`,
+  );
+  await check(
+    "the margins around the card move the window, not the controls of the sidebar",
+    ``,
+    `(() => {
+      const region = (x, y) => getComputedStyle(document.elementFromPoint(x, y)).getPropertyValue("app-region");
+      const back = document.querySelector('[aria-label="Back"]').getBoundingClientRect();
+      return region(innerWidth / 2, 4) === "drag" && region(260 + 4, innerHeight / 2) === "drag"
+        && region(innerWidth - 4, innerHeight / 2) === "drag" && region(innerWidth / 2, innerHeight - 4) === "drag"
+        && region(back.left + 4, back.top + 4) === "no-drag";
     })()`,
   );
   await check(

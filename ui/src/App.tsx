@@ -100,6 +100,11 @@ export function App() {
       <div className="drop-indicator" ref={indicator} />
       {/* In place of the page's card, which the app leaves empty without a selected tab. */}
       {current && current.selected === null && <div className="empty-space" />}
+      {/* The window's margins around the card move it, like the toolbar (shell.rs). */}
+      <div className="margin top" />
+      <div className="margin left" />
+      <div className="margin bottom" />
+      <div className="margin right" />
     </nav>
   );
 }

@@ -78,6 +78,42 @@ body {
   background: color-mix(in srgb, var(--space, var(--panel)) 8%, var(--panel));
 }
 
+/* The margins between the sidebar, the card and the window's edges. */
+.margin {
+  position: fixed;
+  -webkit-app-region: drag;
+}
+
+.margin.top,
+.margin.bottom {
+  right: 0;
+  left: 260px;
+  height: 9px;
+}
+
+.margin.top {
+  top: 0;
+}
+
+.margin.bottom {
+  bottom: 0;
+}
+
+.margin.left,
+.margin.right {
+  top: 0;
+  bottom: 0;
+  width: 9px;
+}
+
+.margin.left {
+  left: 260px;
+}
+
+.margin.right {
+  right: 0;
+}
+
 /* The Spaces' pages side by side, edge to edge, the displayed one in view (ui/src/pager.ts). */
 .pager {
   position: relative;
