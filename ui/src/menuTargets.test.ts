@@ -54,6 +54,21 @@ test("lists the displayed page's tiles, header, folder and tab rows and split ha
   ]);
 });
 
+test("leaves out the rows an open footer menu or popover covers", () => {
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div class="menu" data-rect="140,170,120,40"></div>`,
+  );
+  const nodes = () => menuTargets(document, viewport).map(({ target }) => target);
+  expect(nodes()).toEqual([{ node: 10 }, { space: 14 }, { node: 8 }, { node: 9 }, { node: 3 }]);
+  document.querySelector(".menu")?.remove();
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div class="library-popover" data-rect="0,460,240,60"></div>`,
+  );
+  expect(nodes()).not.toContainEqual({ node: 3 });
+});
+
 test("lists nothing while no Space's page shows", () => {
   document.querySelector('[data-space="14"]')?.setAttribute("inert", "");
   expect(menuTargets(document, viewport)).toEqual([]);

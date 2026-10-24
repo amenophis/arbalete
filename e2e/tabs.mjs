@@ -739,7 +739,7 @@ try {
      e2e.menu = async (name) => {
        document.querySelector(".new-toggle").click();
        await new Promise(requestAnimationFrame);
-       [...document.querySelectorAll('[role="menuitem"]')].find((item) => item.textContent === name).click();
+       [...document.querySelectorAll('[role="menuitem"]')].find((item) => item.getAttribute("aria-label") === name).click();
      };
      e2e.menu("Profiles…")`,
     `e2e.names().join() === "Default,Work"`,

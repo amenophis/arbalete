@@ -13,7 +13,7 @@ import {
 } from "./bridge";
 import { favoriteColumns, previewTiles, type TilePreview, useDrag } from "./drag";
 import { Icon } from "./Icon";
-import { Library } from "./Library";
+import { Library, LibraryButton } from "./Library";
 import { NewMenu } from "./NewMenu";
 import { Profiles } from "./Profiles";
 import { usePager } from "./pager";
@@ -115,15 +115,11 @@ export function App() {
         </div>
       </div>
       <div className="switcher">
-        <button
-          type="button"
-          className="footer-button"
-          aria-label="Library"
-          title="Library"
-          onClick={() => pager.go(-1)}
-        >
-          <Icon d="M3 2.5v11M6 2.5v11M9 4.5v9M10.5 4.2l2.6 9.3" />
-        </button>
+        <LibraryButton
+          closed={state?.closed ?? []}
+          onOpen={() => pager.go(-1)}
+          onReopen={() => pager.go(displayed)}
+        />
         <Spaces
           spaces={state?.spaces ?? []}
           displayed={onSpace ? state?.space : undefined}

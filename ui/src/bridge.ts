@@ -22,6 +22,8 @@ export type ClosedTab = {
   url: string;
   title: string;
   favicon: string | null;
+  // When the tab closed, in milliseconds since the epoch.
+  closedAt: number;
 };
 
 // What the sidebar shows of a Space: its tabs, and the favorites of its profile.
