@@ -196,26 +196,34 @@ fn scroll(event: &NSEvent) -> Scroll {
     } else {
         Phase::Other
     };
+    let (x, y) = main_window_point(event);
     Scroll {
         phase,
         momentum: !event.momentumPhase().is_empty(),
         dx: event.scrollingDeltaX(),
         dy: event.scrollingDeltaY(),
+        y,
         time: event.timestamp(),
-        inside: crate::shell::is_over_sidebar(main_window_x(event)),
+        inside: crate::shell::is_over_sidebar(x),
     }
 }
 
-/// How far from the main window's left edge an event happened: the views above the page, like
-/// the card, are windows of their own.
-fn main_window_x(event: &NSEvent) -> f64 {
-    let x = event.locationInWindow().x;
+/// Where an event happened in the main window, from its top left corner: the views above the
+/// page, like the card, are windows of their own.
+fn main_window_point(event: &NSEvent) -> (f64, f64) {
+    let point = event.locationInWindow();
     let mtm = MainThreadMarker::new().expect("main thread");
     let Some(window) = event.window(mtm) else {
-        return x;
+        return (point.x, point.y);
     };
     let main = window.parentWindow().unwrap_or_else(|| window.clone());
-    window.frame().origin.x + x - main.frame().origin.x
+    let (frame, main) = (window.frame(), main.frame());
+    // The system counts from the bottom of the screen.
+    let top = main.origin.y + main.size.height;
+    (
+        frame.origin.x + point.x - main.origin.x,
+        top - (frame.origin.y + point.y),
+    )
 }
 
 pub fn setup_application() {
@@ -546,6 +554,34 @@ pub fn slide(view: *mut c_void, offsets: &[f64], duration: f64) {
         let _: () = msg_send![&*animation, setFillMode: ns_string!("forwards")];
         let _: () = msg_send![&*animation, setRemovedOnCompletion: Bool::NO];
         let _: () = msg_send![&*layer, addAnimation: &*animation, forKey: key];
+    }
+}
+
+/// Moves a window's content `x` points right of where it rests, at once, clipped by the window:
+/// the window itself stays in place. `view` is any view in the window, like the card's page.
+pub fn shift(view: *mut c_void, x: f64) {
+    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
+    let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
+        return;
+    };
+    let Some(content) = view.window().and_then(|window| window.contentView()) else {
+        return;
+    };
+    content.setWantsLayer(true);
+    let layer: Option<Retained<AnyObject>> = unsafe { msg_send![&*content, layer] };
+    let (Some(layer), Some(transaction)) = (layer, AnyClass::get(c"CATransaction")) else {
+        return;
+    };
+    let x = NSNumber::new_f64(x);
+    unsafe {
+        let _: () = msg_send![transaction, begin];
+        let _: () = msg_send![transaction, setDisableActions: Bool::YES];
+        let _: () = msg_send![
+            &*layer,
+            setValue: &*x,
+            forKeyPath: ns_string!("transform.translation.x")
+        ];
+        let _: () = msg_send![transaction, commit];
     }
 }
 

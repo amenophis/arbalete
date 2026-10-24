@@ -26,6 +26,9 @@ const UI_ORIGIN: &str = "https://arbalette.ui/";
 
 const SIDEBAR_WIDTH: i32 = 260;
 
+/// The docked sidebar is wider while it shows the library (LIBRARY_SHIFT in ui/src/pager.ts).
+const LIBRARY_WIDTH: i32 = SIDEBAR_WIDTH + 180;
+
 /// The page is a card inset from the window's edges and from the sidebar. The window paints its
 /// margins with the colors the sidebar sends (Command::WindowColors).
 const CARD_MARGIN: i32 = 9;
@@ -106,6 +109,8 @@ thread_local! {
     /// The first launch shows the import assistant with the window, instead of the start page.
     static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
+    /// The docked sidebar shows the library, wider (LIBRARY_WIDTH).
+    static LIBRARY: Cell<bool> = const { Cell::new(false) };
     /// Under way while the sidebar moves to its mode.
     static SLIDE: RefCell<Option<Slide>> = const { RefCell::new(None) };
     /// The sidebar's draggable regions, which move the window while the sidebar is shown, with
@@ -140,7 +145,8 @@ impl SidebarMode {
     /// the sidebar is docked, the revealed one's place is the docked one's, which it docks into.
     fn layout(self, size: &Size) -> Layout {
         let left = match self {
-            SidebarMode::Shown | SidebarMode::Floating => SIDEBAR_WIDTH + CARD_MARGIN,
+            SidebarMode::Shown => docked_width() + CARD_MARGIN,
+            SidebarMode::Floating => SIDEBAR_WIDTH + CARD_MARGIN,
             SidebarMode::Hidden | SidebarMode::Revealed => CARD_MARGIN,
         };
         let card = Rect {
@@ -176,10 +182,19 @@ impl SidebarMode {
     /// drag areas, or at the window's edge.
     fn margins_start(self) -> i32 {
         if self == SidebarMode::Shown {
-            SIDEBAR_WIDTH
+            docked_width()
         } else {
             0
         }
+    }
+}
+
+/// The docked sidebar's width: wider for the library.
+fn docked_width() -> i32 {
+    if LIBRARY.get() {
+        LIBRARY_WIDTH
+    } else {
+        SIDEBAR_WIDTH
     }
 }
 
@@ -617,6 +632,57 @@ fn place_card() {
     card.set_bounds(Some(&SIDEBAR_MODE.get().layout(&size).card));
 }
 
+/// Moves the card `offset` points right of where it rests beside the docked sidebar, which pages
+/// towards the library; the sidebar gets its own width back first. The compositor moves the
+/// card's window content, clipped by the window: the page keeps its size.
+fn shift_card(offset: u32) {
+    if SIDEBAR_MODE.get() != SidebarMode::Shown {
+        return;
+    }
+    widen_for_library(false);
+    #[cfg(target_os = "macos")]
+    if let Some(view) = card_window() {
+        crate::mac::shift(view, f64::from(offset));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = offset;
+}
+
+/// Widens the docked sidebar for the library, the card resting beside it.
+fn show_library() {
+    if SIDEBAR_MODE.get() != SidebarMode::Shown {
+        return;
+    }
+    widen_for_library(true);
+    #[cfg(target_os = "macos")]
+    if let Some(view) = card_window() {
+        crate::mac::shift(view, 0.0);
+    }
+}
+
+/// Gives the docked sidebar the library's width, or its own, and places the card beside it.
+fn widen_for_library(library: bool) {
+    if LIBRARY.replace(library) == library {
+        return;
+    }
+    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+        sidebar.invalidate_layout();
+    }
+    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+        window.layout();
+    }
+    place_card();
+    update_drag_regions();
+}
+
+/// The card's window, once a content view's browser is created: every content view draws in it.
+#[cfg(target_os = "macos")]
+fn card_window() -> Option<*mut std::ffi::c_void> {
+    let view = content()
+        .or_else(|| CONTENTS.with_borrow(|contents| contents.values().flatten().next().cloned()))?;
+    Some(view.browser()?.host()?.window_handle())
+}
+
 /// The panel holding the content views.
 fn card_panel() -> Option<Panel> {
     CARD.with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
@@ -674,7 +740,7 @@ fn show_import() {
     SOURCES.set(browsers::detect(&crate::import_home()));
     if IMPORT.with_borrow(Option::is_none) {
         let url = format!("{UI_ORIGIN}index.html#import");
-        let view = browser_view(UiClient::new(), &url, 0, None);
+        let view = browser_view(UiClient::new(), &url, no_width, None);
         let controller = window
             .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
             .expect("import");
@@ -1187,7 +1253,7 @@ wrap_request_context_handler! {
         /// (content_created).
         fn on_request_context_initialized(&self, context: Option<&mut RequestContext>) {
             let Some(card) = card_panel() else { return };
-            let view = browser_view(ContentClient::new(self.profile), "about:blank", 0, context);
+            let view = browser_view(ContentClient::new(self.profile), "about:blank", no_width, context);
             view.set_visible(0);
             card.add_child_view(Some(&mut View::from(&view)));
         }
@@ -1220,6 +1286,8 @@ pub fn run(command: Command) {
             set_sidebar(SidebarMode::Hidden);
         }
         (Command::RevealSidebar | Command::ConcealSidebar, _) => {}
+        (Command::CardOffset(offset), _) => shift_card(offset),
+        (Command::ShowLibrary, _) => show_library(),
         (Command::Open(url), _) => {
             show_overlay(false);
             open_tab(&url);
@@ -1280,7 +1348,12 @@ pub fn run(command: Command) {
 /// Whether a point at `x` from the window's left edge is over the sidebar, shown or revealed.
 #[cfg(target_os = "macos")]
 pub fn is_over_sidebar(x: f64) -> bool {
-    SIDEBAR_MODE.get() != SidebarMode::Hidden && x < f64::from(SIDEBAR_WIDTH)
+    let width = match SIDEBAR_MODE.get() {
+        SidebarMode::Hidden => return false,
+        SidebarMode::Shown => docked_width(),
+        SidebarMode::Revealed | SidebarMode::Floating => SIDEBAR_WIDTH,
+    };
+    x < f64::from(width)
 }
 
 /// Sends the swipes among the window's scroll events to the sidebar the window shows.
@@ -1386,7 +1459,7 @@ wrap_window_delegate! {
                     ..Default::default()
                 }))
                 .expect("box layout");
-            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH, None);
+            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), docked_width, None);
             let mut view = View::from(&sidebar);
             window.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
@@ -1399,14 +1472,14 @@ wrap_window_delegate! {
             controller.set_visible(0);
             CARD.set(Some(controller));
             // Below the overlay, which is added after it.
-            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), 0, None);
+            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
                 .expect("reveal");
             controller.set_visible(0);
             REVEAL_VIEW.set(Some(reveal));
             REVEAL.set(Some(controller));
-            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), 0, None);
+            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
                 .expect("overlay");
@@ -1468,12 +1541,13 @@ wrap_window_delegate! {
     }
 }
 
-/// An Alloy browser view, `width` wide, or sized by the layout or its overlay's bounds for 0.
-/// Without a request context, it uses the global one, which only the app's own UI uses.
+/// An Alloy browser view, as wide as `width` says when the layout asks, or sized by the layout or
+/// its overlay's bounds for 0 (no_width). Without a request context, it uses the global one,
+/// which only the app's own UI uses.
 fn browser_view(
     mut client: Client,
     url: &str,
-    width: i32,
+    width: fn() -> i32,
     context: Option<&mut RequestContext>,
 ) -> BrowserView {
     browser_view_create(
@@ -1487,15 +1561,19 @@ fn browser_view(
     .expect("browser view")
 }
 
+fn no_width() -> i32 {
+    0
+}
+
 wrap_browser_view_delegate! {
     struct AlloyViewDelegate {
-        width: i32,
+        width: fn() -> i32,
     }
 
     impl ViewDelegate {
         // A zero height would make the size "empty" and CEF would ignore it.
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: self.width, height: 1 }
+            Size { width: (self.width)(), height: 1 }
         }
     }
 
@@ -1779,8 +1857,9 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, Rect, SIDEBAR_WIDTH, SidebarMode,
-        Size, UiState, lerp_rect, margin_regions, slide_duration, toggled, ui_file, ui_path,
+        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH, Rect,
+        SIDEBAR_WIDTH, SidebarMode, Size, UiState, lerp_rect, margin_regions, slide_duration,
+        toggled, ui_file, ui_path,
     };
 
     fn rect(rect: &Rect) -> (i32, i32, i32, i32) {
@@ -1850,6 +1929,28 @@ mod tests {
         assert_eq!(rect(&SidebarMode::Shown.layout(&SIZE).card), docked);
         // An empty Space's panel stays where it is while the sidebar floats beside it.
         assert_eq!(rect(&SidebarMode::Floating.layout(&SIZE).card), docked);
+    }
+
+    #[test]
+    fn the_card_rests_beside_the_wider_library_while_the_sidebar_is_docked() {
+        let m = CARD_MARGIN;
+        LIBRARY.set(true);
+        let docked = rect(&SidebarMode::Shown.layout(&SIZE).card);
+        let start = SidebarMode::Shown.margins_start();
+        let hidden = rect(&SidebarMode::Hidden.layout(&SIZE).card);
+        LIBRARY.set(false);
+        assert_eq!(
+            docked,
+            (
+                LIBRARY_WIDTH + m,
+                m,
+                1000 - LIBRARY_WIDTH - 2 * m,
+                600 - 2 * m
+            )
+        );
+        assert_eq!(start, LIBRARY_WIDTH);
+        // Hidden, the sidebar leaves the card its margins whatever it shows.
+        assert_eq!(hidden, (m, m, 1000 - 2 * m, 600 - 2 * m));
     }
 
     #[test]
