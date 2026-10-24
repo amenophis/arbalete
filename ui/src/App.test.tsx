@@ -528,3 +528,11 @@ test("the library reopens a closed tab in the displayed Space and slides back to
   expect(position()).toBe("translateX(0%)");
   expect(library()?.hasAttribute("inert")).toBe(true);
 });
+
+test("shows a flat panel in place of the page in a Space without a selected tab", () => {
+  render(<App />);
+  receive({});
+  expect(document.querySelector(".empty-space")).toBeNull();
+  receive({}, 3, favorites, 14);
+  expect(document.querySelector(".empty-space")).not.toBeNull();
+});

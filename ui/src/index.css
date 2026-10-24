@@ -11,6 +11,7 @@
   /* The window's diagonal gradient, nearly flat in light mode. */
   --window-start: #efebf6;
   --window-end: #e7e2f1;
+  --panel: #f8f6fb;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,6 +22,7 @@
     --accent: #9e8cfc;
     --window-start: #110f1d;
     --window-end: #1b0e1f;
+    --panel: #1e1a28;
   }
 }
 
@@ -61,6 +63,15 @@ body {
     color-mix(in srgb, var(--space, var(--window-start)) 14%, var(--window-start)),
     color-mix(in srgb, var(--space, var(--window-end)) 14%, var(--window-end))
   );
+}
+
+/* Where the page's card would be, 9 px from the window's edges and from the sidebar (CARD_MARGIN
+   in shell.rs), with its rounded corners (CARD_RADIUS in mac.rs). */
+.empty-space {
+  position: fixed;
+  inset: 9px 9px 9px calc(260px + 9px);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--space, var(--panel)) 8%, var(--panel));
 }
 
 /* The Spaces' pages side by side, edge to edge, the displayed one in view (ui/src/pager.ts). */

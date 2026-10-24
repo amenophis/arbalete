@@ -89,6 +89,8 @@ export function App() {
         <Profiles profiles={state?.profiles ?? []} />
       </div>
       <div className="drop-indicator" ref={indicator} />
+      {/* In place of the page's card, which the app leaves empty without a selected tab. */}
+      {current && current.selected === null && <div className="empty-space" />}
     </nav>
   );
 }

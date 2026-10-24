@@ -635,7 +635,7 @@ fn close_tab(tab: Option<NodeId>) {
     match next {
         Some(next) => select_tab(next),
         None => {
-            load("about:blank");
+            hide_content();
             show_overlay(true);
         }
     }
@@ -748,11 +748,11 @@ fn selected() -> Option<(ProfileId, String)> {
     })
 }
 
-/// Shows the selected tab in its profile's content view, which is created the first time, or a
-/// blank page when the displayed Space has none.
+/// Shows the selected tab in its profile's content view, which is created the first time, or
+/// leaves the card empty when the displayed Space has none.
 fn show_selected() {
     let Some((profile, url)) = selected() else {
-        load("about:blank");
+        hide_content();
         return;
     };
     match CONTENTS.with_borrow(|contents| contents.get(&profile).cloned()) {
@@ -776,16 +776,12 @@ fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     }
 }
 
-/// Puts a profile's content view in the window instead of the shown one, which is left on a
-/// blank page: only the selected tab runs.
+/// Puts a profile's content view in the window instead of the shown one, if any.
 fn show_content(profile: ProfileId, view: &BrowserView) {
     if SHOWN_PROFILE.get() == Some(profile) {
         return;
     }
-    if let Some(shown) = content() {
-        load("about:blank");
-        shown.set_visible(0);
-    }
+    hide_content();
     SHOWN_PROFILE.set(Some(profile));
     view.set_visible(1);
     if let Some(card) = CARD.with_borrow(Clone::clone) {
@@ -795,6 +791,16 @@ fn show_content(profile: ProfileId, view: &BrowserView) {
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
         crate::mac::round_card(window.window_handle());
     }
+}
+
+/// Hides the shown content view, left on a blank page: only the selected tab runs. Without one,
+/// the card shows the sidebar page below it, which paints an empty Space's panel there.
+fn hide_content() {
+    if let Some(shown) = content() {
+        load("about:blank");
+        shown.set_visible(0);
+    }
+    SHOWN_PROFILE.set(None);
 }
 
 /// Opens a profile's web data in its own directory, `Profile <id>`: Chromium only accepts profile

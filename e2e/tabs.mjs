@@ -558,6 +558,17 @@ try {
       && e2e.tint().getPropertyValue("--space") === "#3e7bfa" && e2e.newField("name").value === ""`,
   );
   await check(
+    "an empty Space shows a flat panel in place of the page's card",
+    ``,
+    `(() => {
+      const panel = document.querySelector(".empty-space")?.getBoundingClientRect();
+      return panel?.left === 260 + 9 && panel.top === 9 && panel.right === innerWidth - 9
+        && panel.bottom === innerHeight - 9;
+    })()`,
+  );
+  const blank = await connect("about:blank");
+  await check("the page's view is hidden on a blank page", ``, `document.visibilityState === "hidden"`, blank);
+  await check(
     "clicking the displayed Space's icon opens its editor",
     `e2e.last().click()`,
     `e2e.spaceField("name")?.value === "Novels"`,
@@ -592,10 +603,10 @@ try {
     );
   });
   await check(
-    "switching Space tints the sidebar with that Space's color",
+    "switching Space tints the window with that Space's color, the panel gone",
     `e2e.spaceIcons()[0].click()`,
     `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.tint().getPropertyValue("--space") === "#6e56cf"
-      && document.querySelector(".pages").style.transform === "translateX(0%)"`,
+      && document.querySelector(".pages").style.transform === "translateX(0%)" && !document.querySelector(".empty-space")`,
   );
 
   // The tab list scrolls with a real wheel event, sent through DevTools, without switching Space.
