@@ -58,9 +58,18 @@ impl UiState {
     /// Sent whole to the UI on every change. Only the first Space is shown for now.
     fn to_json(&self) -> serde_json::Value {
         let home = &self.sidebar.spaces()[0];
-        let today = self.sidebar.node(home.today).expect("a Space's root");
-        let tabs: Vec<_> = today
-            .children
+        json!({
+            "page": self.page,
+            "pinned": self.items(home.pinned),
+            "today": self.items(home.today),
+            "active": home.selected,
+        })
+    }
+
+    /// The tabs and folders inside a container or a folder, folders with their own content.
+    fn items(&self, parent: NodeId) -> Vec<serde_json::Value> {
+        let node = self.sidebar.node(parent).expect("a known container");
+        node.children
             .iter()
             .filter_map(|&id| match &self.sidebar.node(id)?.kind {
                 NodeKind::Tab(tab) => Some(json!({
@@ -69,10 +78,15 @@ impl UiState {
                     "title": tab.title,
                     "favicon": tab.favicon,
                 })),
-                _ => None,
+                NodeKind::Folder { title, expanded } => Some(json!({
+                    "id": id,
+                    "title": title,
+                    "expanded": expanded,
+                    "children": self.items(id),
+                })),
+                NodeKind::Container => None,
             })
-            .collect();
-        json!({ "page": self.page, "tabs": tabs, "active": home.selected })
+            .collect()
     }
 }
 
@@ -662,8 +676,28 @@ mod tests {
         state.sidebar.select(home, tab).unwrap();
         let json = state.to_json();
         assert_eq!(json["page"]["canGoBack"], false);
-        assert_eq!(json["tabs"][0]["url"], "https://example.com/");
-        assert_eq!(json["tabs"][0]["id"], json["active"]);
+        assert_eq!(json["today"][0]["url"], "https://example.com/");
+        assert_eq!(json["today"][0]["id"], json["active"]);
+    }
+
+    #[test]
+    fn sends_pinned_folders_with_their_tabs() {
+        let mut state = UiState::default();
+        let home = state.sidebar.spaces()[0].clone();
+        let folder = state.sidebar.add_folder(home.pinned, "Docs").unwrap();
+        let tab = state
+            .sidebar
+            .open_tab(home.id, "https://example.com/")
+            .unwrap();
+        state.sidebar.move_node(tab, folder, 0).unwrap();
+        let json = state.to_json();
+        assert_eq!(json["pinned"][0]["title"], "Docs");
+        assert_eq!(json["pinned"][0]["expanded"], true);
+        assert_eq!(
+            json["pinned"][0]["children"][0]["url"],
+            "https://example.com/"
+        );
+        assert_eq!(json["today"], serde_json::json!([]));
     }
 
     #[test]

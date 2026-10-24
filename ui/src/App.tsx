@@ -1,10 +1,11 @@
 import { memo } from "react";
-import { send, useAppState } from "./bridge";
+import { type Item, send, type Tab, useAppState } from "./bridge";
 
 export function App() {
   const state = useAppState();
   const page = state?.page;
-  const active = state?.tabs.find((tab) => tab.id === state.active);
+  const active =
+    state && tabs([...state.pinned, ...state.today]).find((tab) => tab.id === state.active);
   return (
     <nav className="sidebar">
       <div className="toolbar">
@@ -32,22 +33,48 @@ export function App() {
       {page?.loading && (
         <progress className="progress" aria-label="Loading" value={page.progress} />
       )}
+      <ul className="tabs pinned">
+        <Items items={state?.pinned ?? []} active={state?.active} />
+      </ul>
+      <hr className="divider" />
       <button type="button" className="tab" onClick={() => send("overlay/show")}>
         <span className="favicon">+</span>
         <span className="title">New tab</span>
       </button>
-      <ul className="tabs">
-        {state?.tabs.map((tab) => (
-          <TabItem
-            key={tab.id}
-            id={tab.id}
-            title={tab.title || tab.url}
-            favicon={tab.favicon}
-            active={tab.id === state.active}
-          />
-        ))}
+      <ul className="tabs today">
+        <Items items={state?.today ?? []} active={state?.active} />
       </ul>
     </nav>
+  );
+}
+
+function tabs(items: Item[]): Tab[] {
+  return items.flatMap((item) => ("children" in item ? tabs(item.children) : [item]));
+}
+
+function Items({ items, active }: { items: Item[]; active?: number | null }) {
+  return items.map((item) =>
+    "children" in item ? (
+      <li key={item.id}>
+        <div className="folder">
+          <span className="favicon">{item.expanded ? "▾" : "▸"}</span>
+          <span className="title">{item.title}</span>
+        </div>
+        {item.expanded && (
+          <ul className="folder-tabs">
+            <Items items={item.children} active={active} />
+          </ul>
+        )}
+      </li>
+    ) : (
+      <TabItem
+        key={item.id}
+        id={item.id}
+        title={item.title || item.url}
+        favicon={item.favicon}
+        active={item.id === active}
+      />
+    ),
   );
 }
 
