@@ -217,6 +217,14 @@ impl Sidebar {
         self.nodes.get(&id)
     }
 
+    /// Every tab of every profile, in no order.
+    pub fn tabs(&self) -> impl Iterator<Item = (NodeId, &Tab)> {
+        self.nodes.values().filter_map(|node| match &node.kind {
+            NodeKind::Tab(tab) => Some((node.id, tab)),
+            _ => None,
+        })
+    }
+
     pub fn tab_mut(&mut self, id: NodeId) -> Option<&mut Tab> {
         match &mut self.nodes.get_mut(&id)?.kind {
             NodeKind::Tab(tab) => Some(tab),
