@@ -484,19 +484,21 @@ button.folder:hover {
   background: none;
 }
 
-/* One icon per Space and a button to create one, then the profiles button at the end of the row. */
+/* The Library button, then one icon per Space in the middle, then the profiles button. */
 .switcher {
   position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
   flex: none;
-  padding-top: 8px;
+  height: 36px;
+  padding-top: 4px;
 }
 
 .spaces {
   display: flex;
   flex: 1;
+  justify-content: center;
   gap: 2px;
   min-width: 0;
   margin: 0;
@@ -504,21 +506,43 @@ button.folder:hover {
   list-style: none;
 }
 
+.footer-button,
 .space,
 .new-space {
-  width: 24px;
-  height: 24px;
+  display: grid;
+  place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 50%;
   background: none;
   color: inherit;
   font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  opacity: 0.5;
 }
 
+.footer-button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  opacity: 0.75;
+}
+
+.space,
+.new-space {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  opacity: 0.45;
+}
+
+.space .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.footer-button:hover,
 .space:hover,
 .new-space:hover {
   background: var(--hover);
@@ -526,8 +550,12 @@ button.folder:hover {
 }
 
 .space[aria-current] {
-  background: var(--active);
   opacity: 1;
+}
+
+.space[aria-current] .dot {
+  width: 8px;
+  height: 8px;
 }
 
 .profiles {
