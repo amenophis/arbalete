@@ -28,7 +28,8 @@ export function menuTargets(root: ParentNode, viewport: DOMRect): HitTarget[] {
     if (right <= left || bottom <= top) return;
     targets.push({ target, x: left, y: top, width: right - left, height: bottom - top });
   };
-  for (const tile of page.querySelectorAll<HTMLElement>(".favorites li[data-id]")) {
+  // The tile being dragged follows the pointer, out of reach.
+  for (const tile of page.querySelectorAll<HTMLElement>(".favorites li[data-id]:not(.lifted)")) {
     add({ node: Number(tile.dataset.id) }, tile, viewport);
   }
   add({ space: Number(page.dataset.space) }, page.querySelector(".space-header"), scroll);
