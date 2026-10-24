@@ -47,7 +47,9 @@ run = [
   # Bundling in place over a previous build invalidates its code signature on macOS.
   "rm -rf target/bundle",
   "bundle-cef-app arbalette -o target/bundle -i net.leherpeur.arbalette -d Arbalette",
-  "codesign --force --deep -s - target/bundle/arbalette.app",
+  # Ad hoc signatures change on every build, so macOS asks again for each permission. A stable
+  # identity, set in .config/mise.local.toml (not committed), keeps permissions across builds.
+  "codesign --force --deep -s \"${ARBALETTE_SIGN_IDENTITY:--}\" target/bundle/arbalette.app",
 ]
 
 [tasks.run]

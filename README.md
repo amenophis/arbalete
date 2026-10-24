@@ -31,6 +31,16 @@ mise run run     # build the UI, bundle the app and run it
 
 `mise run setup` downloads CEF (about 350 MB) to `~/cef` once; every build uses it through `CEF_PATH`.
 
+On macOS, builds are signed ad hoc, so the system asks again for each permission (such as access to the
+Documents folder) after every build. To keep permissions across builds, create a code signing certificate in
+Keychain Access (Certificate Assistant → Create a Certificate, type "Code Signing", trusted for code signing)
+and name it in `.config/mise.local.toml`, which is not committed:
+
+```toml
+[env]
+ARBALETTE_SIGN_IDENTITY = "Arbalette Dev"
+```
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) first: simplicity is the project's doctrine.
