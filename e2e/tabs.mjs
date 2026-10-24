@@ -2,13 +2,14 @@
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
 // between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
 // Spaces, creating, renaming and coloring profiles, creating and editing Spaces, and switching
-// Spaces by number and with a horizontal swipe, and showing the displayed profile's favorites,
-// in the real app.
+// Spaces by number and with a horizontal swipe, showing the displayed profile's favorites, and
+// recording each profile's history, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { connect, launch, pages, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs";
 
@@ -324,6 +325,34 @@ try {
     "back on a tab of the first profile, its web data is still there",
     todayTab(home, 46),
     `localStorage.getItem("profile") === "first" && document.cookie.includes("profile=first")`,
+  );
+
+  // The urls in a profile's history, with their title and visit count.
+  const history = (profile) => {
+    const db = new DatabaseSync(join(dataDir, `Profile ${profile}`, "History.sqlite"), { readOnly: true });
+    try {
+      return db.prepare("SELECT url, title, visit_count FROM urls").all();
+    } finally {
+      db.close();
+    }
+  };
+  // Waits until a profile's history meets `condition`.
+  async function checkHistory(description, profile, condition) {
+    const deadline = performance.now() + 10_000;
+    while (!condition(history(profile))) {
+      if (performance.now() > deadline) throw new Error(`not ok - ${description}`);
+      await sleep(20);
+    }
+    console.log(`ok - ${description}`);
+  }
+  const visited = (urls, tab) => urls.find((entry) => entry.url === tabUrl(tab));
+  await checkHistory("the first profile's history records its visits with their title", home.profile, (urls) =>
+    [45, 46].every((index) => visited(urls, todayTab(home, index))?.title === "Example Domain"),
+  );
+  await checkHistory(
+    "the other profile's history records only its own visits",
+    otherProfileSpace.profile,
+    (urls) => !!visited(urls, todayTab(otherProfileSpace, 0)) && !visited(urls, todayTab(home, 45)),
   );
 
   // Waits until the session file meets `condition`.

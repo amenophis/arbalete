@@ -4,6 +4,7 @@
 //! relies on is implemented explicitly.
 
 use crate::command::Command;
+use arbalette_core::history::{self, History};
 use arbalette_core::sidebar::{NodeId, NodeKind, ProfileId, Sidebar, SpaceId, Tab};
 use arbalette_core::{import, store};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
@@ -12,8 +13,10 @@ use serde::Serialize;
 use serde_json::json;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::path::PathBuf;
 use std::thread::LocalKey;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The UI is served by the app itself under this origin.
 const UI_ORIGIN: &str = "https://arbalette.ui/";
@@ -58,6 +61,8 @@ thread_local! {
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// CEF's root cache path, which holds every profile's web data.
     static DATA_DIR: RefCell<PathBuf> = RefCell::default();
+    /// Each profile's history, opened on its first visit.
+    static HISTORIES: RefCell<HashMap<ProfileId, History>> = RefCell::default();
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
 }
@@ -535,8 +540,7 @@ fn show_content(profile: ProfileId, view: &BrowserView) {
 /// use it (ProfileContextHandler).
 fn create_profile_context(profile: ProfileId) {
     CONTENTS.with_borrow_mut(|contents| contents.insert(profile, None));
-    let id = serde_json::to_string(&profile).expect("an id");
-    let dir = DATA_DIR.with_borrow(|dir| dir.join(format!("Profile {id}")));
+    let dir = profile_dir(profile);
     let settings = RequestContextSettings {
         cache_path: CefString::from(dir.to_str().expect("a UTF-8 path")),
         ..Default::default()
@@ -545,6 +549,40 @@ fn create_profile_context(profile: ProfileId) {
         Some(&settings),
         Some(&mut ProfileContextHandler::new(profile)),
     );
+}
+
+fn profile_dir(profile: ProfileId) -> PathBuf {
+    let id = serde_json::to_string(&profile).expect("an id");
+    DATA_DIR.with_borrow(|dir| dir.join(format!("Profile {id}")))
+}
+
+/// Changes a profile's history, kept in its directory beside its web data. A history that cannot
+/// be written is not worth stopping the browsing for.
+fn update_history<E: std::fmt::Display>(
+    profile: ProfileId,
+    change: impl FnOnce(&History) -> Result<(), E>,
+) {
+    HISTORIES.with_borrow_mut(|histories| {
+        let history = match histories.entry(profile) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                match History::open(&profile_dir(profile).join(history::FILE_NAME)) {
+                    Ok(history) => entry.insert(history),
+                    Err(error) => return eprintln!("cannot open the history: {error}"),
+                }
+            }
+        };
+        if let Err(error) = change(history) {
+            eprintln!("cannot write the history: {error}");
+        }
+    });
+}
+
+fn now() -> i64 {
+    let since_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    since_epoch.as_millis().try_into().unwrap_or(i64::MAX)
 }
 
 wrap_request_context_handler! {
@@ -878,17 +916,19 @@ wrap_client! {
         }
 
         fn display_handler(&self) -> Option<DisplayHandler> {
-            Some(ContentDisplayHandler::new())
+            Some(ContentDisplayHandler::new(self.profile))
         }
 
         fn load_handler(&self) -> Option<LoadHandler> {
-            Some(ContentLoadHandler::new())
+            Some(ContentLoadHandler::new(self.profile))
         }
     }
 }
 
 wrap_display_handler! {
-    struct ContentDisplayHandler {}
+    struct ContentDisplayHandler {
+        profile: ProfileId,
+    }
 
     impl DisplayHandler {
         fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
@@ -903,10 +943,14 @@ wrap_display_handler! {
         }
 
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
+            let title = title.map(CefString::to_string).unwrap_or_default();
+            if let Some(frame) = browser.as_ref().and_then(|browser| browser.main_frame()) {
+                let url = CefString::from(&frame.url()).to_string();
+                update_history(self.profile, |history| history.set_title(&url, &title));
+            }
             if !is_shown(browser) {
                 return;
             }
-            let title = title.map(CefString::to_string).unwrap_or_default();
             update_sidebar(|sidebar| {
                 if let Some(tab) = active_tab(sidebar) {
                     tab.title = title;
@@ -935,9 +979,18 @@ wrap_display_handler! {
 }
 
 wrap_load_handler! {
-    struct ContentLoadHandler {}
+    struct ContentLoadHandler {
+        profile: ProfileId,
+    }
 
     impl LoadHandler {
+        /// A page's navigation is committed: it is a visit, whether or not the page loads fully.
+        fn on_load_start(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _transition_type: TransitionType) {
+            let Some(frame) = frame.filter(|frame| frame.is_main() == 1) else { return };
+            let url = CefString::from(&frame.url()).to_string();
+            update_history(self.profile, |history| history.visit(&url, now()));
+        }
+
         fn on_loading_state_change(&self, browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
             if !is_shown(browser) {
                 return;
