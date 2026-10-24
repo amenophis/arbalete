@@ -64,8 +64,8 @@ export function App() {
         </button>
       </div>
       {/* Kept empty without a selected tab, so the sections below do not move. */}
-      <div className="url">
-        {active?.url}
+      <div className="url" title={active?.url}>
+        <span className="title">{active && domain(active.url)}</span>
         {active && page?.loading && (
           <progress className="progress" aria-label="Loading" value={page.progress} />
         )}
@@ -191,6 +191,16 @@ function Sections({
       </div>
     </section>
   );
+}
+
+// What the url bar shows of a page's address: its host, without "www.", or the whole address
+// when it has no host, like about:blank.
+export function domain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "") || url;
+  } catch {
+    return url;
+  }
 }
 
 function tabs(items: Item[]): Tab[] {
