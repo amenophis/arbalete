@@ -23,12 +23,14 @@ fn main() {
     }
 
     let root = data_dir();
+    // The global context, under `Default`, serves only the app's own UI: each profile's pages use
+    // their own context (app/src/shell.rs).
     let settings = Settings {
         root_cache_path: CefString::from(root.to_str().unwrap()),
         cache_path: CefString::from(root.join("Default").to_str().unwrap()),
         ..Default::default()
     };
-    let mut app = shell::ArbaletteApp::new(root.join(arbalette_core::store::FILE_NAME));
+    let mut app = shell::ArbaletteApp::new(root.clone());
     assert_eq!(
         initialize(
             Some(args.as_main_args()),

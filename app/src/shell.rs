@@ -4,13 +4,14 @@
 //! relies on is implemented explicitly.
 
 use crate::command::Command;
-use arbalette_core::sidebar::{NodeId, NodeKind, Sidebar, SpaceId, Tab};
+use arbalette_core::sidebar::{NodeId, NodeKind, ProfileId, Sidebar, SpaceId, Tab};
 use arbalette_core::store;
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
 use serde::Serialize;
 use serde_json::json;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread::LocalKey;
 
@@ -38,7 +39,11 @@ const START_URL: &str = "https://www.wikipedia.org/";
 thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     static SIDEBAR: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    static CONTENT: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    /// The content view of each profile, `None` until its browser is created. Tabs of the same
+    /// profile share one view: switching between them only navigates.
+    static CONTENTS: RefCell<HashMap<ProfileId, Option<BrowserView>>> = RefCell::default();
+    /// The profile whose content view the window shows.
+    static SHOWN_PROFILE: Cell<Option<ProfileId>> = const { Cell::new(None) };
     /// Shown above the page, to open tabs.
     static OVERLAY_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static OVERLAY: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
@@ -51,6 +56,8 @@ thread_local! {
     static STATE: RefCell<UiState> = RefCell::default();
     /// Where the sidebar is saved, once the previous session is restored.
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    /// CEF's root cache path, which holds every profile's web data.
+    static DATA_DIR: RefCell<PathBuf> = RefCell::default();
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
 }
@@ -262,17 +269,16 @@ fn open_tab(url: &str) {
         let tab = sidebar.open_tab(home, url).expect("the first Space");
         sidebar.select(home, tab).expect("a new tab");
     });
-    load(url);
+    show_selected();
 }
 
 fn select_tab(id: NodeId) {
-    let url = update_sidebar(|sidebar| {
+    let selected = update_sidebar(|sidebar| {
         let home = sidebar.spaces()[0].id;
-        sidebar.select(home, id).ok()?;
-        Some(sidebar.tab_mut(id)?.url.clone())
+        sidebar.select(home, id).is_ok()
     });
-    if let Some(url) = url {
-        load(&url);
+    if selected {
+        show_selected();
     }
 }
 
@@ -367,15 +373,121 @@ fn reopen_tab() {
     });
 }
 
+/// Loads a url in the shown content view.
 fn load(url: &str) {
-    if let Some(frame) = CONTENT.with_borrow(|view| view.as_ref()?.browser()?.main_frame()) {
+    if let Some(frame) = content().and_then(|view| view.browser()?.main_frame()) {
         frame.load_url(Some(&CefString::from(url)));
+    }
+}
+
+/// The content view the window shows.
+fn content() -> Option<BrowserView> {
+    let profile = SHOWN_PROFILE.get()?;
+    CONTENTS.with_borrow(|contents| contents.get(&profile)?.clone())
+}
+
+/// Whether a browser is the shown content view's: the other views' pages are blank.
+fn is_shown(browser: Option<&mut Browser>) -> bool {
+    let (Some(browser), Some(mut shown)) = (browser, content().and_then(|view| view.browser()))
+    else {
+        return false;
+    };
+    browser.is_same(Some(&mut shown)) == 1
+}
+
+/// The selected tab's profile and url.
+fn selected() -> Option<(ProfileId, String)> {
+    STATE.with_borrow_mut(|state| {
+        let tab = state.sidebar.spaces()[0].selected?;
+        let profile = state.sidebar.profile_of(tab)?;
+        Some((profile, state.sidebar.tab_mut(tab)?.url.clone()))
+    })
+}
+
+/// Shows the selected tab in its profile's content view, which is created the first time.
+fn show_selected() {
+    let Some((profile, url)) = selected() else {
+        return;
+    };
+    match CONTENTS.with_borrow(|contents| contents.get(&profile).cloned()) {
+        Some(Some(view)) => {
+            show_content(profile, &view);
+            load(&url);
+        }
+        // The view shows the selected tab once its browser is created.
+        Some(None) => {}
+        None => create_profile_context(profile),
+    }
+}
+
+/// Makes a profile's content view usable once its browser exists, and shows the selected tab in it
+/// if the tab belongs to the profile.
+fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
+    let view = browser_view_get_for_browser(browser);
+    CONTENTS.with_borrow_mut(|contents| contents.insert(profile, view));
+    if selected().is_some_and(|(selected, _)| selected == profile) {
+        show_selected();
+    }
+}
+
+/// Puts a profile's content view in the window instead of the shown one, which is left on a
+/// blank page: only the selected tab runs.
+fn show_content(profile: ProfileId, view: &BrowserView) {
+    if SHOWN_PROFILE.get() == Some(profile) {
+        return;
+    }
+    if let Some(shown) = content() {
+        load("about:blank");
+        shown.set_visible(0);
+    }
+    SHOWN_PROFILE.set(Some(profile));
+    view.set_visible(1);
+    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+        window.layout();
+    }
+}
+
+/// Opens a profile's web data in its own directory, `Profile <id>`: Chromium only accepts profile
+/// directories directly in the root cache path. CEF needs it initialized before a browser can
+/// use it (ProfileContextHandler).
+fn create_profile_context(profile: ProfileId) {
+    CONTENTS.with_borrow_mut(|contents| contents.insert(profile, None));
+    let id = serde_json::to_string(&profile).expect("an id");
+    let dir = DATA_DIR.with_borrow(|dir| dir.join(format!("Profile {id}")));
+    let settings = RequestContextSettings {
+        cache_path: CefString::from(dir.to_str().expect("a UTF-8 path")),
+        ..Default::default()
+    };
+    request_context_create_context(
+        Some(&settings),
+        Some(&mut ProfileContextHandler::new(profile)),
+    );
+}
+
+wrap_request_context_handler! {
+    struct ProfileContextHandler {
+        profile: ProfileId,
+    }
+
+    impl RequestContextHandler {
+        /// Adds the profile's content view to the window, hidden. Its browser is created after it
+        /// (content_created).
+        fn on_request_context_initialized(&self, context: Option<&mut RequestContext>) {
+            let Some(window) = WINDOW.with_borrow(Clone::clone) else { return };
+            let view = browser_view(ContentClient::new(self.profile), "about:blank", 0, context);
+            view.set_visible(0);
+            let mut child = View::from(&view);
+            window.add_child_view(Some(&mut child));
+            if let Some(layout) = window.get_layout().and_then(|layout| layout.as_box_layout()) {
+                layout.set_flex_for_view(Some(&mut child), 1);
+            }
+        }
     }
 }
 
 /// Runs a command from the UI or a menu, on the UI thread.
 pub fn run(command: Command) {
-    let browser = CONTENT.with_borrow(|view| view.as_ref()?.browser());
+    let browser = content().and_then(|view| view.browser());
     match (command, browser) {
         (Command::Ready, _) => send_state(),
         (Command::Select(id), _) => select_tab(id),
@@ -433,7 +545,7 @@ pub fn close() {
 
 wrap_app! {
     pub struct ArbaletteApp {
-        session_file: PathBuf,
+        data_dir: PathBuf,
     }
 
     impl App {
@@ -453,19 +565,20 @@ wrap_app! {
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
-            Some(ArbaletteBrowserProcessHandler::new(self.session_file.clone()))
+            Some(ArbaletteBrowserProcessHandler::new(self.data_dir.clone()))
         }
     }
 }
 
 wrap_browser_process_handler! {
     struct ArbaletteBrowserProcessHandler {
-        session_file: PathBuf,
+        data_dir: PathBuf,
     }
 
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
-            restore(self.session_file.clone());
+            DATA_DIR.set(self.data_dir.clone());
+            restore(self.data_dir.join(store::FILE_NAME));
             window_create_top_level(Some(&mut MainWindowDelegate::new()));
         }
     }
@@ -498,26 +611,20 @@ wrap_window_delegate! {
                     ..Default::default()
                 }))
                 .expect("box layout");
-            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH);
-            // Only the active tab loads: the others wait until they are selected.
-            let url = STATE.with_borrow_mut(|state| Some(active_tab(&mut state.sidebar)?.url.clone()));
-            let content = browser_view(ContentClient::new(), &url.expect("restore selects a tab"), 0);
+            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH, None);
             SIDEBAR.set(Some(sidebar.clone()));
-            CONTENT.set(Some(content.clone()));
-            for (view, flex) in [(sidebar, 0), (content, 1)] {
-                let mut view = View::from(&view);
-                window.add_child_view(Some(&mut view));
-                layout.set_flex_for_view(Some(&mut view), flex);
-            }
+            let mut view = View::from(&sidebar);
+            window.add_child_view(Some(&mut view));
+            layout.set_flex_for_view(Some(&mut view), 0);
             // Below the overlay, which is added after it.
-            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), 0);
+            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), 0, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
                 .expect("reveal");
             controller.set_visible(0);
             REVEAL_VIEW.set(Some(reveal));
             REVEAL.set(Some(controller));
-            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), 0);
+            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), 0, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
                 .expect("overlay");
@@ -526,13 +633,20 @@ wrap_window_delegate! {
             OVERLAY.set(Some(controller));
             window.show();
             WINDOW.set(Some(window));
+            // Only the selected tab loads: the others wait until they are selected.
+            show_selected();
         }
 
         /// Asks every browser to close; the window closes once they all have.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
+            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW]
+                .into_iter()
+                .filter_map(|view| view.with_borrow(Clone::clone))
+                .collect();
+            views.extend(CONTENTS.with_borrow(|contents| contents.values().flatten().cloned().collect::<Vec<_>>()));
             let mut closed = 1;
-            for view in [&SIDEBAR, &CONTENT, &REVEAL_VIEW, &OVERLAY_VIEW] {
-                if let Some(host) = view.with_borrow(|view| view.as_ref()?.browser()?.host()) {
+            for view in views {
+                if let Some(host) = view.browser().and_then(|browser| browser.host()) {
                     closed &= host.try_close_browser();
                 }
             }
@@ -568,14 +682,20 @@ wrap_window_delegate! {
     }
 }
 
-/// An Alloy browser view. A width of 0 means "no preferred width": the layout decides.
-fn browser_view(mut client: Client, url: &str, width: i32) -> BrowserView {
+/// An Alloy browser view. A width of 0 means "no preferred width": the layout decides. Without a
+/// request context, it uses the global one, which only the app's own UI uses.
+fn browser_view(
+    mut client: Client,
+    url: &str,
+    width: i32,
+    context: Option<&mut RequestContext>,
+) -> BrowserView {
     browser_view_create(
         Some(&mut client),
         Some(&CefString::from(url)),
         Some(&BrowserSettings::default()),
         None,
-        None,
+        context,
         Some(&mut AlloyViewDelegate::new(width)),
     )
     .expect("browser view")
@@ -610,7 +730,7 @@ wrap_client! {
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new())
+            Some(BrowserLifeSpan::new(None))
         }
 
         fn drag_handler(&self) -> Option<DragHandler> {
@@ -642,13 +762,15 @@ wrap_drag_handler! {
     }
 }
 
-// Shows web pages.
+// Shows a profile's web pages.
 wrap_client! {
-    struct ContentClient {}
+    struct ContentClient {
+        profile: ProfileId,
+    }
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new())
+            Some(BrowserLifeSpan::new(Some(self.profile)))
         }
 
         fn display_handler(&self) -> Option<DisplayHandler> {
@@ -665,8 +787,8 @@ wrap_display_handler! {
     struct ContentDisplayHandler {}
 
     impl DisplayHandler {
-        fn on_address_change(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
-            if frame.is_some_and(|frame| frame.is_main() == 1) {
+        fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
+            if is_shown(browser) && frame.is_some_and(|frame| frame.is_main() == 1) {
                 let url = url.map(CefString::to_string).unwrap_or_default();
                 update_sidebar(|sidebar| {
                     if let Some(tab) = active_tab(sidebar) {
@@ -676,7 +798,10 @@ wrap_display_handler! {
             }
         }
 
-        fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
+        fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
+            if !is_shown(browser) {
+                return;
+            }
             let title = title.map(CefString::to_string).unwrap_or_default();
             update_sidebar(|sidebar| {
                 if let Some(tab) = active_tab(sidebar) {
@@ -685,7 +810,10 @@ wrap_display_handler! {
             });
         }
 
-        fn on_favicon_urlchange(&self, _browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
+        fn on_favicon_urlchange(&self, browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
+            if !is_shown(browser) {
+                return;
+            }
             let favicon = icon_urls.and_then(|urls| urls.clone().into_iter().next());
             update_sidebar(|sidebar| {
                 if let Some(tab) = active_tab(sidebar) {
@@ -694,8 +822,10 @@ wrap_display_handler! {
             });
         }
 
-        fn on_loading_progress_change(&self, _browser: Option<&mut Browser>, progress: f64) {
-            update_page(|page| page.progress = progress);
+        fn on_loading_progress_change(&self, browser: Option<&mut Browser>, progress: f64) {
+            if is_shown(browser) {
+                update_page(|page| page.progress = progress);
+            }
         }
     }
 }
@@ -704,7 +834,10 @@ wrap_load_handler! {
     struct ContentLoadHandler {}
 
     impl LoadHandler {
-        fn on_loading_state_change(&self, _browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
+        fn on_loading_state_change(&self, browser: Option<&mut Browser>, is_loading: i32, can_go_back: i32, can_go_forward: i32) {
+            if !is_shown(browser) {
+                return;
+            }
             update_page(|page| {
                 page.loading = is_loading == 1;
                 page.can_go_back = can_go_back == 1;
@@ -714,9 +847,12 @@ wrap_load_handler! {
     }
 }
 
-// Quits the app when its last browser closes, and opens popups as tabs.
+// Quits the app when its last browser closes, and opens popups as tabs. `profile` is the profile
+// of a content view's browser, `None` for the app's own UI.
 wrap_life_span_handler! {
-    struct BrowserLifeSpan {}
+    struct BrowserLifeSpan {
+        profile: Option<ProfileId>,
+    }
 
     impl LifeSpanHandler {
         fn on_before_popup(
@@ -741,8 +877,11 @@ wrap_life_span_handler! {
             1
         }
 
-        fn on_after_created(&self, _browser: Option<&mut Browser>) {
+        fn on_after_created(&self, browser: Option<&mut Browser>) {
             OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
+            if let Some(profile) = self.profile {
+                content_created(profile, browser);
+            }
         }
 
         fn on_before_close(&self, _browser: Option<&mut Browser>) {

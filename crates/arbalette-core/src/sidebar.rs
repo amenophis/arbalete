@@ -284,6 +284,17 @@ impl Sidebar {
         }
     }
 
+    /// The profile whose web data shows a node: the profile of its favorites, or of its Space.
+    pub fn profile_of(&self, id: NodeId) -> Option<ProfileId> {
+        let root = self.ancestors(id).last()?;
+        let profile = self.profiles.iter().find(|p| p.favorites == root);
+        let space = self
+            .spaces
+            .iter()
+            .find(|s| s.pinned == root || s.today == root);
+        profile.map(|p| p.id).or(space.map(|s| s.profile))
+    }
+
     pub fn is_favorite(&self, id: NodeId) -> bool {
         let parent = self.nodes.get(&id).and_then(|node| node.parent);
         self.profiles.iter().any(|p| Some(p.favorites) == parent)
@@ -701,6 +712,28 @@ mod tests {
         let work = sidebar.add_space("Work", profile).unwrap();
         assert_eq!(sidebar.spaces()[1].id, work);
         assert_eq!(sidebar.spaces()[1].profile, profile);
+    }
+
+    #[test]
+    fn a_node_shows_in_the_profile_of_its_favorites_or_its_space() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_profile("Work");
+        let office = sidebar.add_space("Office", work).unwrap();
+        let favorite = sidebar.open_tab(office, "favorite").unwrap();
+        sidebar.move_node(favorite, home.today, 0).unwrap();
+        let favorites = sidebar.profiles()[1].favorites;
+        let folder = sidebar
+            .add_folder(sidebar.spaces()[1].pinned, "Docs")
+            .unwrap();
+        let pinned = sidebar.open_tab(home.id, "pinned").unwrap();
+        sidebar.move_node(pinned, folder, 0).unwrap();
+        assert_eq!(sidebar.profile_of(favorite), Some(home.profile));
+        sidebar.move_node(favorite, favorites, 0).unwrap();
+        assert_eq!(sidebar.profile_of(favorite), Some(work));
+        assert_eq!(sidebar.profile_of(pinned), Some(work));
+        assert_eq!(sidebar.profile_of(home.today), Some(home.profile));
+        assert_eq!(sidebar.profile_of(NodeId(999)), None);
     }
 
     #[test]
