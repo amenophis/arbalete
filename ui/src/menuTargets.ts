@@ -33,6 +33,13 @@ export function menuTargets(root: ParentNode, viewport: DOMRect): HitTarget[] {
   }
   add({ space: Number(page.dataset.space) }, page.querySelector(".space-header"), scroll);
   for (const row of page.querySelectorAll<HTMLElement>(".scroll li[data-id]")) {
+    // Each half of a split row is its tab's.
+    if (row.classList.contains("split-row")) {
+      for (const half of row.querySelectorAll<HTMLElement>(".half[data-tab]")) {
+        add({ node: Number(half.dataset.tab) }, half, scroll);
+      }
+      continue;
+    }
     // A folder's own row, without the tabs it shows below.
     const element = row.classList.contains("folder-item")
       ? row.querySelector(":scope > .folder")

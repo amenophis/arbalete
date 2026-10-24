@@ -18,6 +18,10 @@ beforeEach(() => {
             <button class="folder" data-rect="7,140,250,41"></button>
             <ul><li class="tab-row" data-id="7" data-rect="19,181,238,41"></li></ul>
           </li>
+          <li class="split-row" data-id="5" data-rect="7,222,250,41">
+            <div class="split"><button class="half" data-tab="8" data-rect="11,226,118,28"></button
+            ><button class="half" data-tab="9" data-rect="135,226,118,28"></button></div>
+          </li>
           <li class="tab-row" data-id="3" data-rect="7,480,250,41"></li>
           <li class="tab-row" data-id="4" data-rect="7,600,250,41"></li>
         </ul>
@@ -38,12 +42,14 @@ afterEach(() => {
 
 const viewport = new DOMRect(0, 0, 260, 800);
 
-test("lists the displayed page's tiles, header, folder and tab rows, as much as shows of them", () => {
+test("lists the displayed page's tiles, header, folder and tab rows and split halves, as much as shows of them", () => {
   expect(menuTargets(document, viewport)).toEqual([
     { target: { node: 10 }, x: 7, y: 50, width: 120, height: 47 },
     { target: { space: 14 }, x: 7, y: 104, width: 250, height: 32 },
     { target: { node: 6 }, x: 7, y: 140, width: 250, height: 41 },
     { target: { node: 7 }, x: 19, y: 181, width: 238, height: 41 },
+    { target: { node: 8 }, x: 11, y: 226, width: 118, height: 28 },
+    { target: { node: 9 }, x: 135, y: 226, width: 118, height: 28 },
     { target: { node: 3 }, x: 7, y: 480, width: 250, height: 20 },
   ]);
 });

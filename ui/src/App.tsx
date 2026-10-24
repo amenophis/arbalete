@@ -3,6 +3,7 @@ import {
   type Item,
   type Space,
   type SpacePage,
+  type Split,
   send,
   showMenu,
   type Tab,
@@ -267,7 +268,10 @@ export function domain(url: string): string {
 }
 
 function tabs(items: Item[]): Tab[] {
-  return items.flatMap((item) => ("children" in item ? tabs(item.children) : [item]));
+  return items.flatMap((item) => {
+    if ("children" in item) return tabs(item.children);
+    return "split" in item ? item.split : [item];
+  });
 }
 
 type Rename = (folder: number | null) => void;
@@ -284,7 +288,9 @@ function Items({
   onRename: Rename;
 }) {
   return items.map((item) =>
-    "children" in item ? (
+    "split" in item ? (
+      <SplitItem key={item.id} split={item} active={active} />
+    ) : "children" in item ? (
       <li key={item.id} data-id={item.id} className="folder-item">
         <FolderRow
           id={item.id}
@@ -401,11 +407,7 @@ const TabItem = memo(function TabItem({
         aria-current={active ? "page" : undefined}
         onClick={() => send(`select/${id}`)}
       >
-        {favicon ? (
-          <img className="favicon" src={favicon} alt="" />
-        ) : (
-          <span className="favicon placeholder" />
-        )}
+        <TabIcon favicon={favicon} />
         <span className="title">{title}</span>
       </button>
       {/* On the selected row, closing may only deselect a pinned tab (close_tab in shell.rs). */}
@@ -420,6 +422,60 @@ const TabItem = memo(function TabItem({
     </li>
   );
 });
+
+// A split's row holds a pill per tab. Its tabs close from their menus or the keyboard, which
+// leaves the other tab alone in the row.
+function SplitItem({ split, active }: { split: Split; active?: number | null }) {
+  return (
+    <li className="split-row" data-id={split.id}>
+      <div className="split">
+        {split.split.map((tab) => (
+          <Half
+            key={tab.id}
+            id={tab.id}
+            title={tab.title || tab.url}
+            favicon={tab.favicon}
+            active={tab.id === active}
+          />
+        ))}
+      </div>
+    </li>
+  );
+}
+
+const Half = memo(function Half({
+  id,
+  title,
+  favicon,
+  active,
+}: {
+  id: number;
+  title: string;
+  favicon: string | null;
+  active: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="half"
+      data-tab={id}
+      title={title}
+      aria-current={active ? "page" : undefined}
+      onClick={() => send(`select/${id}`)}
+    >
+      <TabIcon favicon={favicon} />
+      <span className="title">{title}</span>
+    </button>
+  );
+});
+
+function TabIcon({ favicon }: { favicon: string | null }) {
+  return favicon ? (
+    <img className="favicon" src={favicon} alt="" />
+  ) : (
+    <span className="favicon placeholder" />
+  );
+}
 
 // Favorites are not closed from the grid: closing the selected one only deselects it.
 const Favorite = memo(function Favorite({

@@ -454,6 +454,42 @@ button.folder:hover {
   background: var(--active);
 }
 
+/* A split's row is a 36 px pill, like a tab's, holding a 28 px pill per tab. */
+.split {
+  display: flex;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 41px;
+  padding: 4px;
+  border-block: 2.5px solid transparent;
+  border-radius: 8px / 10.5px;
+  background: var(--hover);
+  background-clip: padding-box;
+}
+
+.half {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.half:hover {
+  background: var(--hover);
+}
+
+.half[aria-current] {
+  background: var(--active);
+}
+
 /* Drawn over the url pill's bottom edge, inside its rounded corners, so that loading moves nothing. */
 .progress {
   position: absolute;
