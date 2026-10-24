@@ -1,10 +1,11 @@
 import { type KeyboardEvent, memo, useRef } from "react";
 import { type Item, send, type Tab, useAppState, useRenaming } from "./bridge";
 import { useDrag } from "./drag";
+import { Profiles } from "./Profiles";
 
 export function App() {
   const state = useAppState();
-  const [renaming, setRenaming] = useRenaming();
+  const [renaming, setRenaming] = useRenaming("arbalette:rename");
   const { dragging, indicator, onPointerDown } = useDrag();
   const page = state?.page;
   const active =
@@ -91,6 +92,7 @@ export function App() {
           />
         </ul>
       </div>
+      <Profiles profiles={state?.profiles ?? []} />
       <div className="drop-indicator" ref={indicator} />
     </nav>
   );

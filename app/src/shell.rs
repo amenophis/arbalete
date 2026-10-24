@@ -98,6 +98,11 @@ impl UiState {
             "pinned": self.items(home.pinned),
             "today": self.items(home.today),
             "active": home.selected,
+            "profiles": self.sidebar.profiles().iter().map(|p| json!({
+                "id": p.id,
+                "name": p.name,
+                "color": p.color,
+            })).collect::<Vec<_>>(),
         })
     }
 
@@ -360,6 +365,22 @@ fn new_folder() {
     dispatch(&REVEAL_VIEW, &event);
 }
 
+/// Creates a profile and asks the sidebar to rename it, like a new folder.
+fn new_profile() {
+    let profile = update_sidebar(|sidebar| {
+        sidebar
+            .create_profile("New Profile")
+            .expect("a name that is not blank")
+    });
+    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+        sidebar.request_focus();
+    }
+    let profile = serde_json::to_string(&profile).expect("an id");
+    let event = format!(r#"new CustomEvent("arbalette:rename-profile", {{ detail: {profile} }})"#);
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
+}
+
 fn reopen_tab() {
     let Some(closed) = STATE.with_borrow_mut(|state| state.closed.pop()) else {
         return;
@@ -526,6 +547,14 @@ pub fn run(command: Command) {
         }
         (Command::Move(id, parent, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.move_node(id, parent, index));
+        }
+        (Command::NewProfile, _) => new_profile(),
+        // Like a folder, an unknown profile or a blank name from the UI is ignored.
+        (Command::RenameProfile(id, name), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.rename_profile(id, &name));
+        }
+        (Command::ColorProfile(id, color), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.set_profile_color(id, color));
         }
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
@@ -1038,6 +1067,23 @@ mod tests {
         assert_eq!(json["favorites"][0]["url"], "https://example.com/");
         assert_eq!(json["favorites"][0]["id"], serde_json::json!(tab));
         assert_eq!(json["today"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn sends_every_profile_with_its_name_and_color() {
+        let mut state = UiState::default();
+        let work = state.sidebar.create_profile("Work").unwrap();
+        state
+            .sidebar
+            .set_profile_color(work, arbalette_core::sidebar::Color::Blue)
+            .unwrap();
+        let json = state.to_json();
+        let default = state.sidebar.profiles()[0].id;
+        let profiles = serde_json::json!([
+            { "id": default, "name": "Default", "color": "purple" },
+            { "id": work, "name": "Work", "color": "blue" },
+        ]);
+        assert_eq!(json["profiles"], profiles);
     }
 
     #[test]
