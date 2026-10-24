@@ -4,15 +4,15 @@ use crate::command::Command;
 use crate::swipe::{Phase, Scroll};
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::{
-    ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, extern_methods,
-    msg_send,
+    ClassType, DefinedClass, Encoding, MainThreadMarker, MainThreadOnly, RefEncode, define_class,
+    extern_methods, msg_send,
     rc::Retained,
-    runtime::{AnyClass, AnyObject, Bool, NSObjectProtocol, Sel},
+    runtime::{AnyObject, Bool, NSObjectProtocol, Sel},
     sel,
 };
 use objc2_app_kit::{
-    NSApp, NSApplication, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags, NSEventPhase,
-    NSEventType, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSRightArrowFunctionKey,
+    NSApp, NSApplication, NSColor, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags,
+    NSEventPhase, NSEventType, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSRightArrowFunctionKey,
     NSUpArrowFunctionKey, NSView, NSWindowButton,
 };
 use objc2_foundation::{NSString, ns_string};
@@ -21,6 +21,20 @@ use std::ffi::c_void;
 
 /// The page's corner radius, in points.
 const CARD_RADIUS: f64 = 8.0;
+
+/// Core Graphics' color, which only passes through here: no need for its bindings.
+#[repr(C)]
+struct CGColor {
+    _private: [u8; 0],
+}
+
+// SAFETY: the encoding Objective-C gives a CGColorRef.
+unsafe impl RefEncode for CGColor {
+    const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGColor", &[]));
+}
+
+/// The width of the card's edge, in points: one pixel on a Retina display.
+const CARD_EDGE: f64 = 0.5;
 
 thread_local! {
     /// Its title says what it does: hide or show the sidebar.
@@ -188,8 +202,20 @@ fn scroll(event: &NSEvent) -> Scroll {
         dx: event.scrollingDeltaX(),
         dy: event.scrollingDeltaY(),
         time: event.timestamp(),
-        inside: crate::shell::is_over_sidebar(event.locationInWindow().x),
+        inside: crate::shell::is_over_sidebar(main_window_x(event)),
     }
+}
+
+/// How far from the main window's left edge an event happened: the views above the page, like
+/// the card, are windows of their own.
+fn main_window_x(event: &NSEvent) -> f64 {
+    let x = event.locationInWindow().x;
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let Some(window) = event.window(mtm) else {
+        return x;
+    };
+    let main = window.parentWindow().unwrap_or_else(|| window.clone());
+    window.frame().origin.x + x - main.frame().origin.x
 }
 
 pub fn setup_application() {
@@ -429,28 +455,27 @@ fn item(
     }
 }
 
-/// Rounds the corners of the page's views: the window's web views except the first, the sidebar,
-/// which fills the window below the card. Native views are drawn above the views of the window,
-/// which cannot clip them. `view` is the window's content view.
+/// Rounds the corners of the card's window, which draws the page, and outlines it. `view` is
+/// its content view, whose layer holds what the window's compositor draws.
 pub fn round_card(view: *mut c_void) {
     // SAFETY: CEF gives the window's NSView, which the window keeps alive.
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
     };
-    let Some(web_view) = AnyClass::get(c"WebContentsViewCocoa") else {
-        return;
-    };
-    let subviews = view.subviews();
-    let pages = subviews
-        .iter()
-        .filter(|v| v.isKindOfClass(web_view))
-        .skip(1);
-    for page in pages {
-        page.setWantsLayer(true);
-        let layer: Option<Retained<AnyObject>> = unsafe { msg_send![&*page, layer] };
-        if let Some(layer) = layer {
-            let _: () = unsafe { msg_send![&*layer, setCornerRadius: CARD_RADIUS] };
-            let _: () = unsafe { msg_send![&*layer, setMasksToBounds: Bool::YES] };
-        }
+    // The corners show the window below.
+    if let Some(window) = view.window() {
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+    }
+    view.setWantsLayer(true);
+    let layer: Option<Retained<AnyObject>> = unsafe { msg_send![view, layer] };
+    if let Some(layer) = layer {
+        let _: () = unsafe { msg_send![&*layer, setCornerRadius: CARD_RADIUS] };
+        let _: () = unsafe { msg_send![&*layer, setMasksToBounds: Bool::YES] };
+        // A darker edge, drawn above the page.
+        let edge = NSColor::colorWithWhite_alpha(0.0, 0.25);
+        let edge: *const CGColor = unsafe { msg_send![&*edge, CGColor] };
+        let _: () = unsafe { msg_send![&*layer, setBorderColor: edge] };
+        let _: () = unsafe { msg_send![&*layer, setBorderWidth: CARD_EDGE] };
     }
 }
