@@ -66,7 +66,7 @@ define_class!(
 
         #[unsafe(method(arbaletteReopenTab:))]
         fn reopen_tab(&self, _sender: Option<&AnyObject>) {
-            crate::shell::run(Command::Reopen);
+            crate::shell::run(Command::Reopen(0));
         }
 
         #[unsafe(method(arbaletteTogglePin:))]

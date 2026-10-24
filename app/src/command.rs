@@ -29,8 +29,9 @@ pub enum Command {
     Open(String),
     /// Closes a tab, `close/<tab id>`, or the selected one, `close`.
     Close(Option<NodeId>),
-    /// Reopens the last closed tab.
-    Reopen,
+    /// Reopens a closed tab, by its rank from the last closed one, 0: `reopen/<rank>`, or the last
+    /// closed one, `reopen`.
+    Reopen(usize),
     /// Pins or unpins a tab, `pin/<tab id>`, or the selected one, `pin`.
     Pin(Option<NodeId>),
     /// Creates a folder at the end of the pinned tabs, for the UI to rename: `folder/new`.
@@ -96,7 +97,7 @@ impl Command {
             "sidebar/reveal" => Some(Self::RevealSidebar),
             "sidebar/conceal" => Some(Self::ConcealSidebar),
             "close" => Some(Self::Close(None)),
-            "reopen" => Some(Self::Reopen),
+            "reopen" => Some(Self::Reopen(0)),
             "pin" => Some(Self::Pin(None)),
             "folder/new" => Some(Self::NewFolder),
             "next" => Some(Self::NextTab),
@@ -167,6 +168,9 @@ impl Command {
                 }
                 if let Some(id) = path.strip_prefix("space/") {
                     return serde_json::from_str(id).ok().map(Self::ShowSpace);
+                }
+                if let Some(rank) = path.strip_prefix("reopen/") {
+                    return rank.parse().ok().map(Self::Reopen);
                 }
                 if let Some(id) = path.strip_prefix("select/") {
                     return serde_json::from_str(id).ok().map(Self::Select);
@@ -245,7 +249,9 @@ mod tests {
         assert_eq!(Command::parse("overlay/show"), Some(Command::ShowOverlay));
         assert_eq!(Command::parse("overlay/hide"), Some(Command::HideOverlay));
         assert_eq!(Command::parse("close"), Some(Command::Close(None)));
-        assert_eq!(Command::parse("reopen"), Some(Command::Reopen));
+        assert_eq!(Command::parse("reopen"), Some(Command::Reopen(0)));
+        assert_eq!(Command::parse("reopen/2"), Some(Command::Reopen(2)));
+        assert_eq!(Command::parse("reopen/x"), None);
         assert!(matches!(
             Command::parse("close/3"),
             Some(Command::Close(Some(_)))

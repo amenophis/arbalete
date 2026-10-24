@@ -21,12 +21,13 @@ test("the pages follow the fingers, slower than they move", () => {
   expect(follow(1, 0, 200)).toBe(1);
 });
 
-test("a swipe reaches at most the pages next to where it began, up to the new Space's", () => {
+test("a swipe reaches at most the pages next to where it began, from the library to the new Space's", () => {
   expect(bounds(2, 5)).toEqual([1, 3]);
-  expect(bounds(0, 5)).toEqual([0, 1]);
+  expect(bounds(0, 5)).toEqual([-1, 1]);
+  expect(bounds(-1, 5)).toEqual([-1, 0]);
   expect(bounds(4, 5)).toEqual([3, 5]);
   expect(bounds(5, 5)).toEqual([4, 5]);
-  expect(bounds(0, 1)).toEqual([0, 1]);
+  expect(bounds(0, 1)).toEqual([-1, 1]);
 });
 
 test("past its bounds, a position resists more and more, never past the overshoot", () => {
@@ -77,7 +78,9 @@ test("a flick goes on to the next page in its direction", () => {
 test("a release lands at most one page from where the swipe began, within the pages", () => {
   const fast = FLICK_SPEED * 2;
   expect(target(2.2, fast, 1, 5)).toBe(2);
-  expect(target(-0.2, -fast, 0, 5)).toBe(0);
+  expect(target(-0.2, -fast, 0, 5)).toBe(-1);
+  expect(target(-1.2, -fast, -1, 5)).toBe(-1);
+  expect(target(-0.8, fast, -1, 5)).toBe(0);
   expect(target(4.2, fast, 4, 5)).toBe(5);
   expect(target(5.2, fast, 5, 5)).toBe(5);
   expect(target(4.8, -fast, 5, 5)).toBe(4);
@@ -110,11 +113,13 @@ test("the tint blends the colors of the two Spaces in view", () => {
   expect(tint(spaces, 0)).toBe("#3e7bfa");
   expect(tint(spaces, 1)).toBe("#e5484d");
   expect(tint(spaces, 0.25)).toBe("color-mix(in srgb, #3e7bfa, #e5484d 25%)");
-  expect(tint(spaces, -0.2)).toBe("#3e7bfa");
   expect(tint([], 0)).toBeUndefined();
 });
 
-test("the page after the last Space leaves the sidebar untinted", () => {
+test("the library and the page after the last Space leave the sidebar untinted", () => {
+  expect(tint(spaces, -1)).toBe(NEUTRAL);
+  expect(tint(spaces, -1.2)).toBe(NEUTRAL);
+  expect(tint(spaces, -0.5)).toBe(`color-mix(in srgb, ${NEUTRAL}, #3e7bfa 50%)`);
   expect(tint(spaces, 2)).toBe(NEUTRAL);
   expect(tint(spaces, 2.2)).toBe(NEUTRAL);
   expect(tint(spaces, 1.5)).toBe(`color-mix(in srgb, #e5484d, ${NEUTRAL} 50%)`);

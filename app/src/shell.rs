@@ -101,6 +101,9 @@ enum SidebarMode {
     Revealed,
 }
 
+/// How many closed tabs the UI lists, the last closed first: the state weighs on every update.
+const RECENTLY_CLOSED: usize = 10;
+
 /// What the UI shows.
 #[derive(Default)]
 struct UiState {
@@ -140,6 +143,11 @@ impl UiState {
                 "id": p.id,
                 "name": p.name,
                 "color": p.color,
+            })).collect::<Vec<_>>(),
+            "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|tab| json!({
+                "url": tab.url,
+                "title": tab.title,
+                "favicon": tab.favicon,
             })).collect::<Vec<_>>(),
         })
     }
@@ -667,10 +675,13 @@ fn create_space(title: &str, emoji: &str, color: Color) {
     }
 }
 
-fn reopen_tab() {
-    let Some(closed) = STATE.with_borrow_mut(|state| state.closed.pop()) else {
-        return;
-    };
+/// Reopens a closed tab in the displayed Space, by its rank from the last closed one.
+fn reopen_tab(rank: usize) {
+    let closed = STATE.with_borrow_mut(|state| {
+        let index = state.closed.len().checked_sub(rank + 1)?;
+        Some(state.closed.remove(index))
+    });
+    let Some(closed) = closed else { return };
     open_tab(&closed.url);
     update_sidebar(|sidebar| {
         if let Some(tab) = active_tab(sidebar) {
@@ -863,7 +874,7 @@ pub fn run(command: Command) {
             open_tab(&url);
         }
         (Command::Close(tab), _) => close_tab(tab),
-        (Command::Reopen, _) => reopen_tab(),
+        (Command::Reopen(rank), _) => reopen_tab(rank),
         (Command::Pin(tab), _) => toggle_pin(tab),
         (Command::NewFolder, _) => new_folder(),
         // Like a selection, an unknown folder or a blank title from the UI is ignored.

@@ -3,8 +3,9 @@ import { COLORS, type Space, send } from "./bridge";
 
 // The Spaces' pages sit side by side and the sidebar shows one at a time. A position counts in
 // pages: 0 shows the first Space, 0.5 half of it and half of the second. One more page after the
-// last Space, at the Spaces' count, creates a Space. These pages are the sidebar's alone: while one
-// shows, the app still displays the last Space shown, and the content view its tab.
+// last Space, at the Spaces' count, creates a Space, and one before the first, at -1, holds the
+// library. These pages are the sidebar's alone: while one shows, the app still displays the last
+// Space shown, and the content view its tab.
 
 // How far the pages move for each point the fingers move.
 export const GAIN = 0.7;
@@ -28,10 +29,10 @@ export function follow(from: number, distance: number, width: number): number {
   return from - (distance * GAIN) / width;
 }
 
-// A swipe goes at most one page from where it began, and not past the first Space or the page
-// after the last of the `count` Spaces.
+// A swipe goes at most one page from where it began, and not past the library before the first
+// Space or the page after the last of the `count` Spaces.
 export function bounds(start: number, count: number): [number, number] {
-  return [Math.max(0, start - 1), Math.min(count, start + 1)];
+  return [Math.max(-1, start - 1), Math.min(count, start + 1)];
 }
 
 // Past its bounds, a position resists more and more and never goes past OVERSHOOT.
@@ -80,7 +81,7 @@ export const NEUTRAL = "var(--background)";
 export function tint(spaces: Space[], position: number): string | undefined {
   if (spaces.length === 0) return undefined;
   const color = (page: number) => (spaces[page] ? COLORS[spaces[page].color] : NEUTRAL);
-  const clamped = Math.min(spaces.length, Math.max(0, position));
+  const clamped = Math.min(spaces.length, Math.max(-1, position));
   const left = Math.floor(clamped);
   const share = Math.round((clamped - left) * 100);
   const [from, to] = [color(left), color(left + 1)];

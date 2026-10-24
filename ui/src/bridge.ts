@@ -14,6 +14,14 @@ export type State = {
   // The pages of the displayed Space and its neighbors.
   pages: SpacePage[];
   profiles: Profile[];
+  // The tabs closed since launch, the last closed first: the app lists the most recent ones.
+  closed: ClosedTab[];
+};
+
+export type ClosedTab = {
+  url: string;
+  title: string;
+  favicon: string | null;
 };
 
 // What the sidebar shows of a Space: its tabs, and the favorites of its profile.

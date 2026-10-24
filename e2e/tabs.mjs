@@ -2,8 +2,9 @@
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
 // between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
 // Spaces, creating, renaming and coloring profiles, creating Spaces from the page after the last
-// one and editing them, switching Spaces by number and by swiping between their pages, showing the
-// displayed profile's favorites, and recording each profile's history, in the real app.
+// one and editing them, switching Spaces by number and by swiping between their pages, reopening
+// closed tabs from the library before the first Space, showing the displayed profile's favorites,
+// and recording each profile's history, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -657,14 +658,34 @@ try {
   );
   await check("its page settles in view", ``, `e2e.settled(0)`);
   await check(
-    "the first Space resists a swipe towards the one before",
-    `e2e.swipe(100, 20, 50, true)`,
-    `e2e.offset() > 10 && e2e.offset() < 25`,
+    "a closed tab leaves the displayed Space for the closed tabs",
+    `e2e.count = e2e.rows().length; e2e.closing = e2e.rows().at(-1);
+     e2e.closedText = e2e.closing.querySelector(".title").textContent;
+     e2e.closing.querySelector(".close").click()`,
+    `e2e.rows().length === e2e.count - 1 && e2e.state.closed.length > 0`,
   );
   await check(
-    "lifting it settles back on the first Space",
+    "a swipe before the first Space shows the library listing it, the app keeping the first Space",
+    `e2e.library = () => document.querySelector(".library:not([inert])"); e2e.swipe(20, 15, 50)`,
+    `e2e.library()?.querySelector(".tab")?.textContent === e2e.closedText && e2e.offset() === 100
+      && e2e.state.space === e2e.spaces[0] && !e2e.page()
+      && document.querySelector(".sidebar").style.getPropertyValue("--space") === "var(--background)"`,
+  );
+  await check(
+    "the library resists a swipe towards a page before it",
+    `e2e.swipe(100, 20, 50, true)`,
+    `e2e.offset() > 110 && e2e.offset() < 125`,
+  );
+  await check(
+    "lifting it settles back on the library",
     `e2e.gesture("end", 0, 1000)`,
-    `e2e.settled(0)`,
+    `e2e.library() && e2e.offset() === 100`,
+  );
+  await check(
+    "reopening a tab from the library slides back to the displayed Space, where it opens",
+    `e2e.closedCount = e2e.state.closed.length; e2e.library().querySelector(".tab").click()`,
+    `e2e.settled(0) && !e2e.library() && e2e.rows().length === e2e.count
+      && e2e.state.closed.length === e2e.closedCount - 1`,
   );
   const last = await sidebar.eval(`e2e.spaces.length - 1`);
   await check(
