@@ -4,7 +4,7 @@
 //! relies on is implemented explicitly.
 
 use crate::command::Command;
-use arbalette_core::sidebar::{NodeId, NodeKind, Sidebar, Tab};
+use arbalette_core::sidebar::{NodeId, NodeKind, Sidebar, SpaceId, Tab};
 use arbalette_core::store;
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
@@ -221,6 +221,14 @@ fn select_tab(id: NodeId) {
     }
 }
 
+/// Shows the tab `find` picks in the first Space, if any.
+fn select_found(find: impl FnOnce(&Sidebar, SpaceId) -> Option<NodeId>) {
+    let tab = STATE.with_borrow(|state| find(&state.sidebar, state.sidebar.spaces()[0].id));
+    if let Some(tab) = tab {
+        select_tab(tab);
+    }
+}
+
 /// Closes a tab; closing the selected one shows the next tab, or the overlay when none is left.
 /// Favorites and pinned tabs stay where they are: closing one deselects it and takes it back to
 /// its saved url, and it cannot be reopened since it was never removed.
@@ -317,6 +325,11 @@ pub fn run(command: Command) {
     match (command, browser) {
         (Command::Ready, _) => send_state(),
         (Command::Select(id), _) => select_tab(id),
+        (Command::NextTab, _) => select_found(|sidebar, home| sidebar.next_tab(home, true)),
+        (Command::PreviousTab, _) => select_found(|sidebar, home| sidebar.next_tab(home, false)),
+        (Command::Favorite(number), _) => {
+            select_found(|sidebar, home| sidebar.favorite(home, number));
+        }
         (Command::ShowOverlay, _) => show_overlay(true),
         (Command::HideOverlay, _) => show_overlay(false),
         (Command::Open(url), _) => {

@@ -9,7 +9,10 @@ use objc2::{
     runtime::{AnyObject, Bool, NSObjectProtocol, Sel},
     sel,
 };
-use objc2_app_kit::{NSApp, NSApplication, NSEvent, NSMenu, NSMenuItem};
+use objc2_app_kit::{
+    NSApp, NSApplication, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags, NSMenu,
+    NSMenuItem, NSUpArrowFunctionKey,
+};
 use objc2_foundation::{NSString, ns_string};
 use std::cell::Cell;
 
@@ -62,6 +65,24 @@ define_class!(
         #[unsafe(method(arbaletteNewFolder:))]
         fn new_folder(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::NewFolder);
+        }
+
+        #[unsafe(method(arbaletteNextTab:))]
+        fn next_tab(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::NextTab);
+        }
+
+        #[unsafe(method(arbalettePreviousTab:))]
+        fn previous_tab(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::PreviousTab);
+        }
+
+        // The item's tag is the favorite's number.
+        #[unsafe(method(arbaletteFavorite:))]
+        fn favorite(&self, sender: Option<&NSMenuItem>) {
+            if let Some(item) = sender {
+                crate::shell::run(Command::Favorite(item.tag() as usize));
+            }
         }
 
         #[unsafe(method(arbaletteBack:))]
@@ -160,6 +181,7 @@ pub fn setup_menu() {
                 ),
             ],
         ),
+        (ns_string!("Tabs"), tabs_menu(mtm)),
         (
             ns_string!("View"),
             vec![item(
@@ -196,6 +218,46 @@ pub fn setup_menu() {
         menu_bar.addItem(&menu_item);
     }
     NSApp(mtm).setMainMenu(Some(&menu_bar));
+}
+
+/// Next and previous tab with ⌘⌥↓ and ⌘⌥↑, then the favorites with ⌘1 to ⌘9.
+fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
+    let mut items = Vec::new();
+    for (title, action, key) in [
+        (
+            ns_string!("Next Tab"),
+            sel!(arbaletteNextTab:),
+            NSDownArrowFunctionKey,
+        ),
+        (
+            ns_string!("Previous Tab"),
+            sel!(arbalettePreviousTab:),
+            NSUpArrowFunctionKey,
+        ),
+    ] {
+        let key = char::from_u32(key).expect("a function key").to_string();
+        let item = item(mtm, title, action, &NSString::from_str(&key));
+        item.setKeyEquivalentModifierMask(
+            NSEventModifierFlags::Command | NSEventModifierFlags::Option,
+        );
+        items.push(item);
+    }
+    for number in 1..=9 {
+        let title = if number == 9 {
+            "Last Favorite".to_string()
+        } else {
+            format!("Favorite {number}")
+        };
+        let item = item(
+            mtm,
+            &NSString::from_str(&title),
+            sel!(arbaletteFavorite:),
+            &NSString::from_str(&number.to_string()),
+        );
+        item.setTag(number);
+        items.push(item);
+    }
+    items
 }
 
 /// A menu item sending `action` with ⌘ and `key`.

@@ -1,5 +1,6 @@
-// Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, and
-// creating, renaming and collapsing folders, and dragging tabs between sections, in the real app.
+// Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
+// between tabs and to favorites, creating, renaming and collapsing folders, and dragging tabs
+// between sections, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -94,6 +95,36 @@ try {
     `e2e.tiles = () => [...document.querySelectorAll(".favorites .favorite")]`,
     `e2e.tiles().length === 6 && e2e.tiles()[0].getAttribute("aria-label") === "Favorite 1"
       && !!(e2e.tiles()[5].compareDocumentPosition(document.querySelector(".pinned")) & Node.DOCUMENT_POSITION_FOLLOWING)`,
+  );
+  await check(
+    "the next command selects the next tab, inside the folder",
+    `e2e.send("next")`,
+    `e2e.current() === document.querySelectorAll(".pinned .folder-tabs .tab-row")[14]`,
+  );
+  await check(
+    "the previous command selects the previous tab",
+    `e2e.send("previous")`,
+    `e2e.current() === e2e.picked`,
+  );
+  await check(
+    "the favorite/1 command selects the first favorite",
+    `e2e.send("favorite/1")`,
+    `e2e.tiles()[0].getAttribute("aria-current") === "page" && !e2e.current()`,
+  );
+  await check(
+    "the favorite/9 command selects the last favorite",
+    `e2e.send("favorite/9")`,
+    `e2e.tiles()[5].getAttribute("aria-current") === "page" && !e2e.tiles()[0].hasAttribute("aria-current")`,
+  );
+  await check(
+    "the previous command from a favorite selects the last of today's tabs",
+    `e2e.send("previous")`,
+    `e2e.current() === e2e.rows().at(-1)`,
+  );
+  await check(
+    "the next command wraps around to the first pinned tab",
+    `e2e.send("next")`,
+    `e2e.current() === document.querySelector(".pinned .tab-row")`,
   );
   await check(
     "selecting a favorite marks its tile aria-current and shows its url",
