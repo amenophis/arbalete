@@ -333,6 +333,20 @@ impl Sidebar {
         Ok(())
     }
 
+    /// Moves a Space to `index` in sidebar order, counted once it has left its place; past the
+    /// end, it goes last. The displayed Space stays displayed, though it may no longer be first.
+    pub fn move_space(&mut self, id: SpaceId, index: usize) -> Result<(), Error> {
+        self.displayed = Some(self.displayed().id);
+        let from = self
+            .spaces
+            .iter()
+            .position(|s| s.id == id)
+            .ok_or(Error::UnknownSpace)?;
+        let space = self.spaces.remove(from);
+        self.spaces.insert(index.min(self.spaces.len()), space);
+        Ok(())
+    }
+
     /// Deletes a Space with its tabs and folders, but not the last one. Its neighbor, the next one
     /// or else the previous one, is displayed instead.
     pub fn delete_space(&mut self, id: SpaceId) -> Result<(), Error> {
@@ -1812,6 +1826,27 @@ mod tests {
         );
         assert_eq!(
             sidebar.set_space_profile(SpaceId(999), work),
+            Err(Error::UnknownSpace)
+        );
+    }
+
+    #[test]
+    fn moves_a_space_in_sidebar_order_keeping_the_displayed_one() {
+        let mut sidebar = Sidebar::default();
+        let profile = sidebar.profiles()[0].id;
+        let home = sidebar.spaces()[0].id;
+        let work = sidebar.add_space("Work", profile).unwrap();
+        let play = sidebar.add_space("Play", profile).unwrap();
+        let order = |sidebar: &Sidebar| sidebar.spaces().iter().map(|s| s.id).collect::<Vec<_>>();
+        sidebar.move_space(home, 2).unwrap();
+        assert_eq!(order(&sidebar), [work, play, home]);
+        sidebar.move_space(play, 0).unwrap();
+        assert_eq!(order(&sidebar), [play, work, home]);
+        sidebar.move_space(play, usize::MAX).unwrap();
+        assert_eq!(order(&sidebar), [work, home, play]);
+        assert_eq!(sidebar.displayed().id, home);
+        assert_eq!(
+            sidebar.move_space(SpaceId(999), 0),
             Err(Error::UnknownSpace)
         );
     }
