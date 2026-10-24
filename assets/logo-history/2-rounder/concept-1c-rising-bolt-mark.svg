@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="112 112 800 800" role="img" aria-label="Arbalette - Rising Bolt mark">
+  <title>Arbalette - Rising Bolt mark</title>
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="200" y1="200" x2="824" y2="824"><stop offset="0" stop-color="#FF3D7F"/><stop offset="1" stop-color="#FF8A3D"/></linearGradient>
+  </defs>
+  <g>
+    <path d="M300 792 C318 520 398 262 512 262 C626 262 706 520 724 792" fill="none" stroke="url(#g)" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="rotate(-16 512 600)">
+      <path d="M214 600 L830 600" fill="none" stroke="url(#g)" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M826 540 L892 600 L826 660 Z" fill="url(#g)" stroke="url(#g)" stroke-width="44" stroke-linejoin="round"/>
+      <path d="M156 548 L206 600 L156 652" fill="none" stroke="url(#g)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>

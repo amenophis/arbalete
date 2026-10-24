@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 140 744 744" role="img" aria-label="Arbalette - Bullseye monochrome">
+  <title>Arbalette - Bullseye monochrome</title>
+  <g>
+    <circle cx="448" cy="576" r="196" fill="none" stroke="#000" stroke-width="76"/>
+    <circle cx="448" cy="576" r="62" fill="#000"/>
+    <path d="M448 576 L790 234" fill="none" stroke="#000" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M779 156 L760 264 L868 245" fill="none" stroke="#000" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

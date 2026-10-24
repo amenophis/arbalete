@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="112 112 800 800" role="img" aria-label="Arbalette - Front Crossbow monochrome">
+  <title>Arbalette - Front Crossbow monochrome</title>
+  <g>
+    <path d="M300 792 L478 360 Q512 280 546 360 L724 792" fill="none" stroke="#000" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M379 600 L512 690 L645 600" fill="none" stroke="#000" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M512 690 L512 816" fill="none" stroke="#000" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M512 690 L512 236" fill="none" stroke="#000" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M444 250 L512 172 L580 250 Z" fill="#000" stroke="#000" stroke-width="44" stroke-linejoin="round"/>
+  </g>
+</svg>

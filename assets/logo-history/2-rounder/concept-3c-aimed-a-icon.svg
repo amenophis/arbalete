@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Arbalette - Aimed A app icon">
+  <title>Arbalette - Aimed A app icon</title>
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="200" y1="824" x2="824" y2="200"><stop offset="0" stop-color="#FF4D5E"/><stop offset="1" stop-color="#B44DFF"/></linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <g>
+    <g transform="translate(512 524) rotate(18) scale(.92) translate(-512 -520)">
+      <path d="M296 800 C312 560 396 330 512 330 C628 330 712 560 728 800" fill="none" stroke="#fff" stroke-width="100" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M332 640 L692 640" fill="none" stroke="#fff" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M512 640 L512 240" fill="none" stroke="#fff" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M444 250 L512 172 L580 250 Z" fill="#fff" stroke="#fff" stroke-width="44" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>

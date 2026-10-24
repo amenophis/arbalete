@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="48 204 866 674" role="img" aria-label="Arbalette">
+  <title>Arbalette - tail proposal c: Three vanes (monochrome)</title>
+  <g>
+    <path d="M316 792 L478 334 Q512 246 546 334 L708 792" fill="none" stroke="#000" stroke-width="124" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M120 622 L800 622" fill="none" stroke="#000" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M792 548 L866 622 L792 696 Z" fill="#000" stroke="#000" stroke-width="48" stroke-linejoin="round"/>
+    <path d="M88 556 L150 604" fill="none" stroke="#000" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M88 688 L150 640" fill="none" stroke="#000" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M138 556 L200 604" fill="none" stroke="#000" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M138 688 L200 640" fill="none" stroke="#000" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M188 556 L250 604" fill="none" stroke="#000" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M188 688 L250 640" fill="none" stroke="#000" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

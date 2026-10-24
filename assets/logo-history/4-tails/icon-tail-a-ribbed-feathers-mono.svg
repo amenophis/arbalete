@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 204 884 674" role="img" aria-label="Arbalette">
+  <title>Arbalette - tail proposal a: Ribbed feathers (monochrome)</title>
+  <g>
+    <path d="M316 792 L478 334 Q512 246 546 334 L708 792" fill="none" stroke="#000" stroke-width="124" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M96 622 L800 622" fill="none" stroke="#000" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M792 548 L866 622 L792 696 Z" fill="#000" stroke="#000" stroke-width="48" stroke-linejoin="round"/>
+    <path d="M262 598 L194 518 L174 518 L158 558 L146 518 L126 518 L110 558 L98 518 L78 518 L108 598 Z" fill="#000" stroke="#000" stroke-width="22" stroke-linejoin="round"/>
+    <path d="M 262 646 L 194 726 L 174 726 L 158 686 L 146 726 L 126 726 L 110 686 L 98 726 L 78 726 L 108 646 Z" fill="#000" stroke="#000" stroke-width="22" stroke-linejoin="round"/>
+  </g>
+</svg>
