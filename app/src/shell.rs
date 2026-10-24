@@ -19,6 +19,10 @@ const UI_ORIGIN: &str = "https://arbalette.ui/";
 
 const SIDEBAR_WIDTH: i32 = 260;
 
+/// The strip along the window's left edge that reveals the hidden sidebar when the pointer
+/// reaches it. Views cannot be transparent, so it shows the sidebar's background.
+const EDGE_WIDTH: i32 = 4;
+
 /// The overlay's size: one text field for now (ui/src/Overlay.tsx).
 const OVERLAY_SIZE: Size = Size {
     width: 600,
@@ -38,11 +42,26 @@ thread_local! {
     /// Shown above the page, to open tabs.
     static OVERLAY_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static OVERLAY: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// A second sidebar, shown above the page while the sidebar is hidden.
+    static REVEAL_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static REVEAL: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
+    /// The sidebar's draggable regions, which move the window while the sidebar is shown.
+    static DRAG_REGIONS: RefCell<Vec<DraggableRegion>> = const { RefCell::new(Vec::new()) };
     static STATE: RefCell<UiState> = RefCell::default();
     /// Where the sidebar is saved, once the previous session is restored.
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
+}
+
+/// The sidebar sits beside the page, or is hidden: then a strip at the window's left edge
+/// reveals it above the page while the pointer is over it. For this session only.
+#[derive(Clone, Copy, PartialEq)]
+enum SidebarMode {
+    Shown,
+    Hidden,
+    Revealed,
 }
 
 /// What the UI shows.
@@ -146,10 +165,9 @@ fn update_sidebar<R>(change: impl FnOnce(&mut Sidebar) -> R) -> R {
 
 fn send_state() {
     let json = STATE.with_borrow(UiState::to_json);
-    dispatch(
-        &SIDEBAR,
-        &format!(r#"new CustomEvent("arbalette:state", {{ detail: {json} }})"#),
-    );
+    let event = format!(r#"new CustomEvent("arbalette:state", {{ detail: {json} }})"#);
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
 }
 
 /// Dispatches a DOM event, given as JavaScript, in one of the UI's views.
@@ -179,6 +197,43 @@ fn show_overlay(visible: bool) {
     if visible && let Some(view) = overlay.contents_view() {
         view.request_focus();
     }
+}
+
+fn set_sidebar(mode: SidebarMode) {
+    SIDEBAR_MODE.set(mode);
+    let shown = mode == SidebarMode::Shown;
+    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+        sidebar.set_visible(shown.into());
+    }
+    place_reveal();
+    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+        return;
+    };
+    let regions = DRAG_REGIONS.with_borrow(|regions| if shown { regions.clone() } else { vec![] });
+    window.set_draggable_regions(Some(&regions));
+    #[cfg(target_os = "macos")]
+    crate::mac::sidebar_shown(window.window_handle(), shown);
+}
+
+/// Places the revealed sidebar, or the strip that reveals it, along the window's left edge.
+fn place_reveal() {
+    let Some(reveal) = REVEAL.with_borrow(Clone::clone) else {
+        return;
+    };
+    let mode = SIDEBAR_MODE.get();
+    let height = WINDOW.with_borrow(|window| window.as_ref().map_or(0, |w| w.size().height));
+    let width = if mode == SidebarMode::Revealed {
+        SIDEBAR_WIDTH
+    } else {
+        EDGE_WIDTH
+    };
+    reveal.set_bounds(Some(&Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    }));
+    reveal.set_visible((mode != SidebarMode::Shown).into());
 }
 
 /// Loads the sidebar saved by the previous session; a file that cannot be read is replaced on the
@@ -294,10 +349,9 @@ fn new_folder() {
         sidebar.request_focus();
     }
     let folder = serde_json::to_string(&folder).expect("an id");
-    dispatch(
-        &SIDEBAR,
-        &format!(r#"new CustomEvent("arbalette:rename", {{ detail: {folder} }})"#),
-    );
+    let event = format!(r#"new CustomEvent("arbalette:rename", {{ detail: {folder} }})"#);
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
 }
 
 fn reopen_tab() {
@@ -332,6 +386,17 @@ pub fn run(command: Command) {
         }
         (Command::ShowOverlay, _) => show_overlay(true),
         (Command::HideOverlay, _) => show_overlay(false),
+        (Command::ToggleSidebar, _) => set_sidebar(match SIDEBAR_MODE.get() {
+            SidebarMode::Shown => SidebarMode::Hidden,
+            _ => SidebarMode::Shown,
+        }),
+        (Command::RevealSidebar, _) if SIDEBAR_MODE.get() == SidebarMode::Hidden => {
+            set_sidebar(SidebarMode::Revealed);
+        }
+        (Command::ConcealSidebar, _) if SIDEBAR_MODE.get() == SidebarMode::Revealed => {
+            set_sidebar(SidebarMode::Hidden);
+        }
+        (Command::RevealSidebar | Command::ConcealSidebar, _) => {}
         (Command::Open(url), _) => {
             show_overlay(false);
             open_tab(&url);
@@ -413,6 +478,11 @@ wrap_window_delegate! {
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
             Size { width: 1280, height: 820 }
         }
+
+        // The revealed sidebar is as tall as the window.
+        fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
+            place_reveal();
+        }
     }
 
     impl PanelDelegate {}
@@ -439,6 +509,14 @@ wrap_window_delegate! {
                 window.add_child_view(Some(&mut view));
                 layout.set_flex_for_view(Some(&mut view), flex);
             }
+            // Below the overlay, which is added after it.
+            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), 0);
+            let controller = window
+                .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
+                .expect("reveal");
+            controller.set_visible(0);
+            REVEAL_VIEW.set(Some(reveal));
+            REVEAL.set(Some(controller));
             let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), 0);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
@@ -453,7 +531,7 @@ wrap_window_delegate! {
         /// Asks every browser to close; the window closes once they all have.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             let mut closed = 1;
-            for view in [&SIDEBAR, &CONTENT, &OVERLAY_VIEW] {
+            for view in [&SIDEBAR, &CONTENT, &REVEAL_VIEW, &OVERLAY_VIEW] {
                 if let Some(host) = view.with_borrow(|view| view.as_ref()?.browser()?.host()) {
                     closed &= host.try_close_browser();
                 }
@@ -546,9 +624,18 @@ wrap_drag_handler! {
     struct UiDragHandler {}
 
     impl DragHandler {
-        // The sidebar sits at the window's origin: its coordinates are the window's.
-        fn on_draggable_regions_changed(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, regions: Option<&[DraggableRegion]>) {
-            if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+        // The sidebar sits at the window's origin: its coordinates are the window's. Only the
+        // sidebar beside the page moves the window: the views above the page are separate
+        // windows on macOS, which the window's regions do not reach.
+        fn on_draggable_regions_changed(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, regions: Option<&[DraggableRegion]>) {
+            let Some(mut sidebar) = SIDEBAR.with_borrow(|view| view.as_ref()?.browser()) else { return };
+            if browser.is_none_or(|browser| browser.is_same(Some(&mut sidebar)) == 0) {
+                return;
+            }
+            DRAG_REGIONS.set(regions.unwrap_or_default().to_vec());
+            if SIDEBAR_MODE.get() == SidebarMode::Shown
+                && let Some(window) = WINDOW.with_borrow(Clone::clone)
+            {
                 window.set_draggable_regions(regions);
             }
         }

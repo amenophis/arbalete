@@ -62,3 +62,10 @@ export function useRenaming() {
   }, []);
   return [renaming, setRenaming] as const;
 }
+
+// The sidebar shown above the page while the sidebar is hidden opens when the pointer reaches it,
+// at the window's edge, and closes when the pointer leaves it (set_sidebar in app/src/shell.rs).
+export function revealOnHover(element: HTMLElement) {
+  element.addEventListener("mouseenter", () => send("sidebar/reveal"));
+  element.addEventListener("mouseleave", () => send("sidebar/conceal"));
+}
