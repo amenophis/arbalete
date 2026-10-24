@@ -314,6 +314,13 @@ fn show_space(id: SpaceId) {
     }
 }
 
+/// Shows the Space `find` picks, if any.
+fn show_found_space(find: impl FnOnce(&Sidebar) -> Option<SpaceId>) {
+    if let Some(space) = STATE.with_borrow(|state| find(&state.sidebar)) {
+        show_space(space);
+    }
+}
+
 /// Closes a tab; closing the selected one shows the next tab, or the overlay when none is left.
 /// Favorites and pinned tabs stay where they are: closing one deselects it and takes it back to
 /// its saved url, and it cannot be reopened since it was never removed.
@@ -561,6 +568,9 @@ pub fn run(command: Command) {
             select_found(|s| s.favorite(s.spaces()[0].id, number));
         }
         (Command::ShowSpace(id), _) => show_space(id),
+        (Command::SpaceNumber(number), _) => show_found_space(|s| s.space_at(number)),
+        (Command::NextSpace, _) => show_found_space(|s| s.next_space(true)),
+        (Command::PreviousSpace, _) => show_found_space(|s| s.next_space(false)),
         (Command::ShowOverlay, _) => show_overlay(true),
         (Command::HideOverlay, _) => show_overlay(false),
         (Command::ToggleSidebar, _) => set_sidebar(match SIDEBAR_MODE.get() {

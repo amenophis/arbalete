@@ -3,6 +3,10 @@ import { COLORS, type Item, send, type Tab, useAppState, useRenaming } from "./b
 import { useDrag } from "./drag";
 import { Profiles } from "./Profiles";
 import { Spaces } from "./Spaces";
+import { swipeTracker } from "./swipe";
+
+// The page shows one sidebar, which follows one swipe at a time.
+const trackSwipe = swipeTracker();
 
 export function App() {
   const state = useAppState();
@@ -18,7 +22,15 @@ export function App() {
   // The displayed Space's color tints the sidebar.
   const tint = space && ({ "--space": COLORS[space.color] } as CSSProperties);
   return (
-    <nav className="sidebar" style={tint} onPointerDown={onPointerDown}>
+    <nav
+      className="sidebar"
+      style={tint}
+      onPointerDown={onPointerDown}
+      onWheel={(event) => {
+        const command = trackSwipe(event.deltaX, event.deltaY, event.timeStamp);
+        if (command) send(command);
+      }}
+    >
       <div className="toolbar">
         <button
           type="button"

@@ -10,8 +10,9 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApp, NSApplication, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags, NSMenu,
-    NSMenuItem, NSUpArrowFunctionKey, NSView, NSWindowButton,
+    NSApp, NSApplication, NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags,
+    NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSRightArrowFunctionKey, NSUpArrowFunctionKey,
+    NSView, NSWindowButton,
 };
 use objc2_foundation::{NSString, ns_string};
 use std::cell::{Cell, RefCell};
@@ -88,6 +89,24 @@ define_class!(
         fn favorite(&self, sender: Option<&NSMenuItem>) {
             if let Some(item) = sender {
                 crate::shell::run(Command::Favorite(item.tag() as usize));
+            }
+        }
+
+        #[unsafe(method(arbaletteNextSpace:))]
+        fn next_space(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::NextSpace);
+        }
+
+        #[unsafe(method(arbalettePreviousSpace:))]
+        fn previous_space(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::PreviousSpace);
+        }
+
+        // The item's tag is the Space's number.
+        #[unsafe(method(arbaletteSpace:))]
+        fn space(&self, sender: Option<&NSMenuItem>) {
+            if let Some(item) = sender {
+                crate::shell::run(Command::SpaceNumber(item.tag() as usize));
             }
         }
 
@@ -193,6 +212,7 @@ pub fn setup_menu() {
             ],
         ),
         (ns_string!("Tabs"), tabs_menu(mtm)),
+        (ns_string!("Spaces"), spaces_menu(mtm)),
         (
             ns_string!("View"),
             vec![
@@ -272,26 +292,20 @@ pub fn sidebar_shown(view: *mut c_void, shown: bool) {
 
 /// Next and previous tab with ⌘⌥↓ and ⌘⌥↑, then the favorites with ⌘1 to ⌘9.
 fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
-    let mut items = Vec::new();
-    for (title, action, key) in [
-        (
+    let mut items = vec![
+        arrow_item(
+            mtm,
             ns_string!("Next Tab"),
             sel!(arbaletteNextTab:),
             NSDownArrowFunctionKey,
         ),
-        (
+        arrow_item(
+            mtm,
             ns_string!("Previous Tab"),
             sel!(arbalettePreviousTab:),
             NSUpArrowFunctionKey,
         ),
-    ] {
-        let key = char::from_u32(key).expect("a function key").to_string();
-        let item = item(mtm, title, action, &NSString::from_str(&key));
-        item.setKeyEquivalentModifierMask(
-            NSEventModifierFlags::Command | NSEventModifierFlags::Option,
-        );
-        items.push(item);
-    }
+    ];
     for number in 1..=9 {
         let title = if number == 9 {
             "Last Favorite".to_string()
@@ -308,6 +322,50 @@ fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
         items.push(item);
     }
     items
+}
+
+/// Next and previous Space with ⌘⌥→ and ⌘⌥←, as Spaces sit side by side, then the Spaces by
+/// number with ⌃1 to ⌃9.
+fn spaces_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
+    let mut items = vec![
+        arrow_item(
+            mtm,
+            ns_string!("Next Space"),
+            sel!(arbaletteNextSpace:),
+            NSRightArrowFunctionKey,
+        ),
+        arrow_item(
+            mtm,
+            ns_string!("Previous Space"),
+            sel!(arbalettePreviousSpace:),
+            NSLeftArrowFunctionKey,
+        ),
+    ];
+    for number in 1..=9 {
+        let item = item(
+            mtm,
+            &NSString::from_str(&format!("Space {number}")),
+            sel!(arbaletteSpace:),
+            &NSString::from_str(&number.to_string()),
+        );
+        item.setKeyEquivalentModifierMask(NSEventModifierFlags::Control);
+        item.setTag(number);
+        items.push(item);
+    }
+    items
+}
+
+/// A menu item sending `action` with ⌘⌥ and an arrow `key`.
+fn arrow_item(
+    mtm: MainThreadMarker,
+    title: &NSString,
+    action: Sel,
+    key: u32,
+) -> Retained<NSMenuItem> {
+    let key = char::from_u32(key).expect("a function key").to_string();
+    let item = item(mtm, title, action, &NSString::from_str(&key));
+    item.setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Option);
+    item
 }
 
 /// A menu item sending `action` with ⌘ and `key`.

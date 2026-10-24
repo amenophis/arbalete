@@ -158,6 +158,26 @@ impl Sidebar {
         Ok(())
     }
 
+    /// The Space at `number` in sidebar order, counted from 1.
+    pub fn space_at(&self, number: usize) -> Option<SpaceId> {
+        self.spaces.get(number.checked_sub(1)?).map(|s| s.id)
+    }
+
+    /// The Space after the displayed one in sidebar order, or before it; none past the first or
+    /// the last, as a swipe stops there.
+    pub fn next_space(&self, forward: bool) -> Option<SpaceId> {
+        let index = self
+            .spaces
+            .iter()
+            .position(|s| s.id == self.displayed().id)?;
+        let next = if forward {
+            index + 1
+        } else {
+            index.checked_sub(1)?
+        };
+        self.spaces.get(next).map(|s| s.id)
+    }
+
     /// The Space whose pinned or "Today" tabs hold a node; favorites belong to no Space.
     pub fn space_of(&self, id: NodeId) -> Option<SpaceId> {
         let root = self.ancestors(id).last()?;
@@ -943,6 +963,32 @@ mod tests {
         assert_eq!(sidebar.displayed().id, work);
         assert_eq!(sidebar.display(SpaceId(999)), Err(Error::UnknownSpace));
         assert_eq!(sidebar.displayed().id, work);
+    }
+
+    #[test]
+    fn finds_a_space_by_number() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar).id;
+        let work = sidebar.add_space("Work", sidebar.profiles()[0].id).unwrap();
+        assert_eq!(sidebar.space_at(1), Some(home));
+        assert_eq!(sidebar.space_at(2), Some(work));
+        assert_eq!(sidebar.space_at(3), None);
+        assert_eq!(sidebar.space_at(0), None);
+    }
+
+    #[test]
+    fn finds_the_next_and_previous_space_without_wrapping_around() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar).id;
+        let work = sidebar.add_space("Work", sidebar.profiles()[0].id).unwrap();
+        let read = sidebar.add_space("Read", sidebar.profiles()[0].id).unwrap();
+        assert_eq!(sidebar.next_space(true), Some(work));
+        assert_eq!(sidebar.next_space(false), None);
+        sidebar.display(work).unwrap();
+        assert_eq!(sidebar.next_space(true), Some(read));
+        assert_eq!(sidebar.next_space(false), Some(home));
+        sidebar.display(read).unwrap();
+        assert_eq!(sidebar.next_space(true), None);
     }
 
     #[test]

@@ -49,6 +49,11 @@ pub enum Command {
     ColorProfile(ProfileId, Color),
     /// Shows a Space in the sidebar, and its selected tab in the content view: `space/<space id>`.
     ShowSpace(SpaceId),
+    /// Shows a Space by its number in sidebar order, from 1 to 9: `space/number/<n>`.
+    SpaceNumber(usize),
+    /// Shows the Space after the displayed one, `space/next`, or before it, `space/previous`.
+    NextSpace,
+    PreviousSpace,
     /// Creates a Space in the displayed Space's profile and displays it, for the UI to rename:
     /// `space/new`.
     NewSpace,
@@ -81,6 +86,8 @@ impl Command {
             "previous" => Some(Self::PreviousTab),
             "profile/new" => Some(Self::NewProfile),
             "space/new" => Some(Self::NewSpace),
+            "space/next" => Some(Self::NextSpace),
+            "space/previous" => Some(Self::PreviousSpace),
             _ => {
                 if let Some((id, name)) = path
                     .strip_prefix("profile/rename/")
@@ -116,6 +123,10 @@ impl Command {
                 {
                     let id = serde_json::from_str(id).ok()?;
                     return parse_color(color).map(|color| Self::ColorSpace(id, color));
+                }
+                if let Some(number) = path.strip_prefix("space/number/") {
+                    let number = number.parse().ok().filter(|n| (1..=9).contains(n));
+                    return number.map(Self::SpaceNumber);
                 }
                 if let Some(number) = path.strip_prefix("favorite/") {
                     let number = number.parse().ok().filter(|n| (1..=9).contains(n));
@@ -320,6 +331,26 @@ mod tests {
         assert_eq!(serde_json::to_string(&id).unwrap(), "4");
         assert_eq!(Command::parse("space/x"), None);
         assert_eq!(Command::parse("space"), None);
+    }
+
+    #[test]
+    fn parses_space_shortcuts() {
+        assert_eq!(Command::parse("space/next"), Some(Command::NextSpace));
+        assert_eq!(
+            Command::parse("space/previous"),
+            Some(Command::PreviousSpace)
+        );
+        assert_eq!(
+            Command::parse("space/number/1"),
+            Some(Command::SpaceNumber(1))
+        );
+        assert_eq!(
+            Command::parse("space/number/9"),
+            Some(Command::SpaceNumber(9))
+        );
+        assert_eq!(Command::parse("space/number/0"), None);
+        assert_eq!(Command::parse("space/number/10"), None);
+        assert_eq!(Command::parse("space/number/x"), None);
     }
 
     #[test]

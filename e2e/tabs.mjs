@@ -1,8 +1,8 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
 // between sections, hiding and revealing the sidebar, keeping profiles' web data apart, switching
-// Spaces, creating, renaming and coloring profiles, and creating and editing Spaces, in the real
-// app.
+// Spaces, creating, renaming and coloring profiles, creating and editing Spaces, and switching
+// Spaces by number and with a horizontal swipe, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -460,6 +460,57 @@ try {
     "switching Space tints the sidebar with that Space's color",
     `e2e.spaceIcons()[0].click()`,
     `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.tint().getPropertyValue("--space") === "#6e56cf"`,
+  );
+
+  // The tab list scrolls with a real wheel event, sent through DevTools, without switching Space.
+  const scrollBox = await sidebar.eval(`(() => {
+    const rect = document.querySelector(".scroll").getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  await sidebar.eval(`document.querySelector(".scroll").scrollTop = 0`);
+  await sidebar.call("Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    ...scrollBox,
+    deltaX: 0,
+    deltaY: 300,
+  });
+  await check(
+    "a vertical wheel scrolls the tab list and keeps the Space",
+    ``,
+    `document.querySelector(".scroll").scrollTop > 0 && e2e.spaceIcons()[0].getAttribute("aria-current") === "true"`,
+  );
+  await check(
+    "the second Space's shortcut shows it",
+    `e2e.send("space/number/2")`,
+    `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"`,
+  );
+  // A swipe is a burst of mostly horizontal wheel events; a pause ends it.
+  const swipe = (deltaX) => `(() => {
+    const target = document.querySelector(".scroll");
+    for (let i = 0; i < 20; i++) {
+      target.dispatchEvent(new WheelEvent("wheel", { deltaX: ${deltaX}, bubbles: true }));
+    }
+  })()`;
+  const pause = `new Promise((resolve) => setTimeout(resolve, 400))`;
+  await check(
+    "a leftward swipe in the sidebar shows the next Space",
+    swipe(30),
+    `e2e.spaceIcons()[2].getAttribute("aria-current") === "true"`,
+  );
+  await check(
+    "the swipe switches Space once for the whole gesture",
+    pause,
+    `e2e.spaceIcons()[2].getAttribute("aria-current") === "true"`,
+  );
+  await check(
+    "a rightward swipe shows the previous Space again",
+    swipe(-30),
+    `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"`,
+  );
+  await check(
+    "that swipe also switches only once",
+    pause,
+    `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"`,
   );
 } finally {
   app.kill();
