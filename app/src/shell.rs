@@ -60,8 +60,9 @@ thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// As large as the window, below the card: it paints the window's background around it.
     static SIDEBAR: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    /// Holds the content views, inset from the window's edges.
-    static CARD: RefCell<Option<Panel>> = const { RefCell::new(None) };
+    /// Holds the content views above the sidebar, inset from the window's edges. An overlay, as
+    /// macOS only rounds the corners of a window of its own.
+    static CARD: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The content view of each profile, `None` until its browser is created. Tabs of the same
     /// profile share one view: switching between them only navigates.
     static CONTENTS: RefCell<HashMap<ProfileId, Option<BrowserView>>> = RefCell::default();
@@ -303,17 +304,23 @@ fn place_card() {
     let Some(card) = CARD.with_borrow(Clone::clone) else {
         return;
     };
+    let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
+    let Some(size) = size else { return };
     let left = match SIDEBAR_MODE.get() {
         SidebarMode::Shown => SIDEBAR_WIDTH + CARD_MARGIN,
         _ => CARD_MARGIN,
     };
-    card.set_insets(Some(&Insets {
-        top: CARD_MARGIN,
-        left,
-        bottom: CARD_MARGIN,
-        right: CARD_MARGIN,
+    card.set_bounds(Some(&Rect {
+        x: left,
+        y: CARD_MARGIN,
+        width: size.width - left - CARD_MARGIN,
+        height: size.height - 2 * CARD_MARGIN,
     }));
-    card.layout();
+}
+
+/// The panel holding the content views.
+fn card_panel() -> Option<Panel> {
+    CARD.with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
 }
 
 /// Places the revealed sidebar, or the strip that reveals it, along the window's left edge.
@@ -662,13 +669,21 @@ fn new_folder() {
             .add_folder(pinned, "New Folder")
             .expect("the pinned tabs")
     });
-    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
-        sidebar.request_focus();
-    }
+    focus_sidebar();
     let folder = serde_json::to_string(&folder).expect("an id");
     let event = format!(r#"new CustomEvent("arbalette:rename", {{ detail: {folder} }})"#);
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
+}
+
+/// Gives the sidebar the keyboard focus, even from the page, whose card is a window of its own.
+fn focus_sidebar() {
+    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+        window.activate();
+    }
+    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+        sidebar.request_focus();
+    }
 }
 
 /// Creates a profile and asks the sidebar to rename it, like a new folder.
@@ -678,9 +693,7 @@ fn new_profile() {
             .create_profile("New Profile")
             .expect("a name that is not blank")
     });
-    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
-        sidebar.request_focus();
-    }
+    focus_sidebar();
     let profile = serde_json::to_string(&profile).expect("an id");
     let event = format!(r#"new CustomEvent("arbalette:rename-profile", {{ detail: {profile} }})"#);
     dispatch(&SIDEBAR, &event);
@@ -785,11 +798,15 @@ fn show_content(profile: ProfileId, view: &BrowserView) {
     SHOWN_PROFILE.set(Some(profile));
     view.set_visible(1);
     if let Some(card) = CARD.with_borrow(Clone::clone) {
-        card.layout();
+        card.set_visible(1);
     }
+    if let Some(panel) = card_panel() {
+        panel.layout();
+    }
+    // The browser's window is the card's.
     #[cfg(target_os = "macos")]
-    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
-        crate::mac::round_card(window.window_handle());
+    if let Some(host) = view.browser().and_then(|browser| browser.host()) {
+        crate::mac::round_card(host.window_handle());
     }
 }
 
@@ -799,6 +816,9 @@ fn hide_content() {
     if let Some(shown) = content() {
         load("about:blank");
         shown.set_visible(0);
+    }
+    if let Some(card) = CARD.with_borrow(Clone::clone) {
+        card.set_visible(0);
     }
     SHOWN_PROFILE.set(None);
 }
@@ -867,7 +887,7 @@ wrap_request_context_handler! {
         /// Adds the profile's content view to the window, hidden. Its browser is created after it
         /// (content_created).
         fn on_request_context_initialized(&self, context: Option<&mut RequestContext>) {
-            let Some(card) = CARD.with_borrow(Clone::clone) else { return };
+            let Some(card) = card_panel() else { return };
             let view = browser_view(ContentClient::new(self.profile), "about:blank", context);
             view.set_visible(0);
             card.add_child_view(Some(&mut View::from(&view)));
@@ -1043,8 +1063,9 @@ wrap_window_delegate! {
             Size { width: 1280, height: 820 }
         }
 
-        // The revealed sidebar is as tall as the window.
+        // The card and the revealed sidebar follow the window's size.
         fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
+            place_card();
             place_reveal();
         }
     }
@@ -1055,16 +1076,18 @@ wrap_window_delegate! {
         fn on_window_created(&self, window: Option<&mut Window>) {
             let window = window.expect("window").clone();
             window.set_title(Some(&CefString::from("Arbalette")));
-            // The card above the sidebar, both as large as the window.
+            // The sidebar fills the window, below the card and the other overlays.
             window.set_to_fill_layout();
             let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), None);
             window.add_child_view(Some(&mut View::from(&sidebar)));
             SIDEBAR.set(Some(sidebar));
             let card = panel_create(None).expect("card");
             card.set_to_fill_layout();
-            window.add_child_view(Some(&mut View::from(&card)));
-            CARD.set(Some(card));
-            place_card();
+            let controller = window
+                .add_overlay_view(Some(&mut View::from(&card)), DockingMode::CUSTOM, 1)
+                .expect("card");
+            controller.set_visible(0);
+            CARD.set(Some(controller));
             // Below the overlay, which is added after it.
             let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), None);
             let controller = window
@@ -1082,6 +1105,7 @@ wrap_window_delegate! {
             OVERLAY.set(Some(controller));
             window.show();
             WINDOW.set(Some(window));
+            place_card();
             // Only the selected tab loads: the others wait until they are selected.
             show_selected();
             if IMPORT_AT_LAUNCH.take() {

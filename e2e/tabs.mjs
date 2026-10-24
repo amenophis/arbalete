@@ -270,11 +270,14 @@ try {
   const reveal = await connect(REVEAL);
   const content = await connect((await pages()).find((url) => !url.startsWith(SIDEBAR)));
   const width = (await content.eval("innerWidth")) + 260;
-  // The card's margin, 9 pt from the window's edges and from the sidebar (CARD_MARGIN in shell.rs).
+  // The card's margin, 9 pt from the window's edges and from the sidebar (CARD_MARGIN in shell.rs),
+  // measured from the sidebar, which fills the window: the card is a window of its own.
+  const frame = await sidebar.eval(`({ x: screenX, y: screenY, width: innerWidth, height: innerHeight })`);
   await check(
     "the page is a card inset from the window's edges and from the sidebar",
     ``,
-    `innerWidth === outerWidth - 260 - 2 * 9 && innerHeight === outerHeight - 2 * 9`,
+    `screenX === ${frame.x + 260 + 9} && screenY === ${frame.y + 9}
+      && innerWidth === ${frame.width - 260 - 2 * 9} && innerHeight === ${frame.height - 2 * 9}`,
     content,
   );
   await check(
@@ -296,7 +299,7 @@ try {
   await check(
     "the page then takes the window's width within its margins",
     ``,
-    `innerWidth === ${width} && innerWidth === outerWidth - 2 * 9`,
+    `innerWidth === ${width} && screenX === ${frame.x + 9}`,
     content,
   );
   await check(
