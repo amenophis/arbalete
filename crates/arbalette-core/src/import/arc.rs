@@ -6,12 +6,25 @@
 use crate::sidebar::{Color, NodeId, ProfileId, Sidebar};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::{fs, io, path::Path};
 
 #[derive(Debug)]
 pub enum Error {
+    Io(io::Error),
     Invalid(serde_json::Error),
     /// Arbalette needs at least one Space to open tabs in.
     NoSpaces,
+}
+
+/// Reads the sidebar in Arc's data directory, or `None` when Arc saved none there.
+pub fn read(dir: &Path) -> Result<Option<Sidebar>, Error> {
+    let storable_sidebar = match fs::read_to_string(dir.join("StorableSidebar.json")) {
+        Ok(json) => json,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(Error::Io(error)),
+    };
+    let local_state = fs::read_to_string(dir.join("User Data/Local State")).ok();
+    sidebar(&storable_sidebar, local_state.as_deref()).map(Some)
 }
 
 /// Builds a sidebar from `StorableSidebar.json`. `local_state`, Arc's `User Data/Local State`,
@@ -207,7 +220,7 @@ mod tests {
     use serde_json::json;
 
     const SIDEBAR: &str = include_str!("../../tests/fixtures/arc/StorableSidebar.json");
-    const LOCAL_STATE: &str = include_str!("../../tests/fixtures/arc/Local State");
+    const LOCAL_STATE: &str = include_str!("../../tests/fixtures/arc/User Data/Local State");
 
     fn fixture() -> Sidebar {
         sidebar(SIDEBAR, Some(LOCAL_STATE)).unwrap()
@@ -336,6 +349,13 @@ mod tests {
         assert!(content(&sidebar, space.today).is_empty());
         let favorites = sidebar.profiles()[0].favorites;
         assert_eq!(content(&sidebar, favorites), ["https://example.com/"]);
+    }
+
+    #[test]
+    fn reads_the_sidebar_in_arc_s_data_directory() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/arc");
+        assert_eq!(read(&dir).unwrap(), Some(fixture()));
+        assert!(matches!(read(&dir.join("missing")), Ok(None)));
     }
 
     #[test]

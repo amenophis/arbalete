@@ -78,4 +78,6 @@ run = [
   "rm -rf \"$TMPDIR/arbalette-e2e\"",
   "cargo run -q -p arbalette-core --example bench-session -- \"$TMPDIR/arbalette-e2e\"",
   "node e2e/tabs.mjs \"$TMPDIR/arbalette-e2e\"",
+  "rm -rf \"$TMPDIR/arbalette-e2e-arc\"",
+  "node e2e/arc.mjs \"$TMPDIR/arbalette-e2e-arc\"",
 ]
