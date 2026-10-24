@@ -1,6 +1,6 @@
 //! Commands the UI sends to the app, as `https://arbalette.ui/command/<name>` requests.
 
-use arbalette_core::sidebar::NodeId;
+use arbalette_core::sidebar::{Color, NodeId, ProfileId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -41,6 +41,12 @@ pub enum Command {
     /// Moves a tab or a folder to an index among a container's or a folder's children, as the
     /// app counts them once the node has left: `move/<id>/<parent id>/<index>`.
     Move(NodeId, NodeId, usize),
+    /// Creates a profile, with a Space of its own, for the UI to rename: `profile/new`.
+    NewProfile,
+    /// Renames a profile: `profile/rename/<profile id>/<percent-encoded name>`.
+    RenameProfile(ProfileId, String),
+    /// Changes a profile's color: `profile/color/<profile id>/<color>`, like `blue`.
+    ColorProfile(ProfileId, Color),
 }
 
 impl Command {
@@ -61,7 +67,25 @@ impl Command {
             "folder/new" => Some(Self::NewFolder),
             "next" => Some(Self::NextTab),
             "previous" => Some(Self::PreviousTab),
+            "profile/new" => Some(Self::NewProfile),
             _ => {
+                if let Some((id, name)) = path
+                    .strip_prefix("profile/rename/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    return percent_decode(name).map(|name| Self::RenameProfile(id, name));
+                }
+                if let Some((id, color)) = path
+                    .strip_prefix("profile/color/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    let color = serde_json::Value::String(color.to_string());
+                    return serde_json::from_value(color)
+                        .ok()
+                        .map(|color| Self::ColorProfile(id, color));
+                }
                 if let Some(number) = path.strip_prefix("favorite/") {
                     let number = number.parse().ok().filter(|n| (1..=9).contains(n));
                     return number.map(Self::Favorite);
@@ -203,6 +227,29 @@ mod tests {
         assert_eq!(Command::parse("rename/6"), None);
         assert_eq!(Command::parse("rename/x/a"), None);
         assert_eq!(Command::parse("toggle/x"), None);
+    }
+
+    #[test]
+    fn parses_profile_commands() {
+        assert_eq!(Command::parse("profile/new"), Some(Command::NewProfile));
+        let Some(Command::RenameProfile(id, name)) =
+            Command::parse("profile/rename/1/Caf%C3%A9%2F2")
+        else {
+            panic!("not a rename")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "1");
+        assert_eq!(name, "Café/2");
+        let Some(Command::ColorProfile(id, color)) = Command::parse("profile/color/1/blue") else {
+            panic!("not a color")
+        };
+        assert_eq!(
+            serde_json::to_string(&(id, color)).unwrap(),
+            r#"[1,"blue"]"#
+        );
+        assert_eq!(Command::parse("profile/color/1/teal"), None);
+        assert_eq!(Command::parse("profile/color/x/blue"), None);
+        assert_eq!(Command::parse("profile/rename/1"), None);
+        assert_eq!(Command::parse("profile/rename/x/a"), None);
     }
 
     #[test]

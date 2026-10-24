@@ -51,6 +51,7 @@ function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites) {
     pinned,
     today,
     active,
+    profiles: [{ id: 1, name: "Default", color: "purple" }],
   };
   act(() => {
     dispatchEvent(new CustomEvent("arbalette:state", { detail }));
@@ -243,4 +244,11 @@ test("renames the folder the app has just created", () => {
   const input = screen.getByRole("textbox", { name: "Folder name" }) as HTMLInputElement;
   expect(input.value).toBe("Archive");
   expect(document.activeElement).toBe(input);
+});
+
+test("shows the profiles control at the bottom of the sidebar", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "Profiles" }));
+  expect(screen.getByRole("textbox", { name: "Profile name" })).toHaveProperty("value", "Default");
 });

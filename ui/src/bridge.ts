@@ -15,7 +15,28 @@ export type State = {
   pinned: Item[];
   today: Item[];
   active: number | null;
+  profiles: Profile[];
 };
+
+export type Profile = {
+  id: number;
+  name: string;
+  color: Color;
+};
+
+// The palette of profiles (Color in crates/arbalette-core/src/sidebar.rs).
+export const COLORS = {
+  purple: "#6e56cf",
+  blue: "#3e7bfa",
+  green: "#30a46c",
+  yellow: "#e5b800",
+  orange: "#f76b15",
+  red: "#e5484d",
+  pink: "#d6409f",
+  gray: "#8b8d98",
+};
+
+export type Color = keyof typeof COLORS;
 
 export type Page = {
   progress: number;
@@ -51,15 +72,15 @@ export function useAppState(): State | undefined {
   return state;
 }
 
-// The folder whose title is edited: one the app asks to rename once it creates it, or any the
-// user picks.
-export function useRenaming() {
+// The folder or the profile whose name is edited: one the app asks to rename, with `event`, once
+// it creates it, or any the user picks.
+export function useRenaming(event: "arbalette:rename" | "arbalette:rename-profile") {
   const [renaming, setRenaming] = useState<number | null>(null);
   useEffect(() => {
     const listener = (event: Event) => setRenaming((event as CustomEvent<number>).detail);
-    addEventListener("arbalette:rename", listener);
-    return () => removeEventListener("arbalette:rename", listener);
-  }, []);
+    addEventListener(event, listener);
+    return () => removeEventListener(event, listener);
+  }, [event]);
   return [renaming, setRenaming] as const;
 }
 

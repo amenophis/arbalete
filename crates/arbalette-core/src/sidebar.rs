@@ -21,7 +21,24 @@ pub struct NodeId(u64);
 pub struct Profile {
     pub id: ProfileId,
     pub name: String,
+    #[serde(default)]
+    pub color: Color,
     pub favorites: NodeId,
+}
+
+/// The colors a profile can take: a small palette, which the UI draws (ui/src/App.tsx).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Color {
+    #[default]
+    Purple,
+    Blue,
+    Green,
+    Yellow,
+    Orange,
+    Red,
+    Pink,
+    Gray,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -75,7 +92,7 @@ pub enum Error {
     NotAContainer,
     NotATab,
     NotAFolder,
-    /// Folders keep a title to be told apart.
+    /// Folders and profiles keep a title to be told apart.
     EmptyTitle,
     /// A folder cannot move inside itself or one of its descendants.
     MoveIntoItself,
@@ -135,9 +152,33 @@ impl Sidebar {
         self.profiles.push(Profile {
             id,
             name: name.to_string(),
+            color: Color::default(),
             favorites,
         });
         id
+    }
+
+    /// Creates a profile with a Space of the same name, so the profile has somewhere to open tabs.
+    pub fn create_profile(&mut self, name: &str) -> Result<ProfileId, Error> {
+        if name.trim().is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        let profile = self.add_profile(name);
+        self.add_space(name, profile)?;
+        Ok(profile)
+    }
+
+    pub fn rename_profile(&mut self, id: ProfileId, name: &str) -> Result<(), Error> {
+        if name.trim().is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        self.profile_mut(id)?.name = name.to_string();
+        Ok(())
+    }
+
+    pub fn set_profile_color(&mut self, id: ProfileId, color: Color) -> Result<(), Error> {
+        self.profile_mut(id)?.color = color;
+        Ok(())
     }
 
     pub fn add_space(&mut self, title: &str, profile: ProfileId) -> Result<SpaceId, Error> {
@@ -428,6 +469,13 @@ impl Sidebar {
         matches!(self.nodes.get(&id).map(|n| &n.kind), Some(NodeKind::Tab(_)))
     }
 
+    fn profile_mut(&mut self, id: ProfileId) -> Result<&mut Profile, Error> {
+        self.profiles
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or(Error::UnknownProfile)
+    }
+
     fn space(&self, id: SpaceId) -> Result<&Space, Error> {
         self.spaces
             .iter()
@@ -499,6 +547,50 @@ mod tests {
             sidebar.profiles()[0].favorites,
             sidebar.profiles()[1].favorites
         );
+    }
+
+    #[test]
+    fn creates_a_profile_with_a_space_of_its_own() {
+        let mut sidebar = Sidebar::default();
+        let work = sidebar.create_profile("Work").unwrap();
+        let profile = &sidebar.profiles()[1];
+        assert_eq!((profile.id, profile.name.as_str()), (work, "Work"));
+        assert_eq!(profile.color, Color::Purple);
+        let space = &sidebar.spaces()[1];
+        assert_eq!((space.profile, space.title.as_str()), (work, "Work"));
+        assert_eq!(sidebar.create_profile(" "), Err(Error::EmptyTitle));
+        assert_eq!(sidebar.profiles().len(), 2);
+        assert_eq!(sidebar.spaces().len(), 2);
+    }
+
+    #[test]
+    fn renames_and_recolors_a_profile() {
+        let mut sidebar = Sidebar::default();
+        let id = sidebar.profiles()[0].id;
+        sidebar.rename_profile(id, "Personal").unwrap();
+        sidebar.set_profile_color(id, Color::Green).unwrap();
+        assert_eq!(sidebar.rename_profile(id, " "), Err(Error::EmptyTitle));
+        let profile = &sidebar.profiles()[0];
+        assert_eq!(
+            (profile.name.as_str(), profile.color),
+            ("Personal", Color::Green)
+        );
+        let unknown = ProfileId(999);
+        assert_eq!(
+            sidebar.rename_profile(unknown, "a"),
+            Err(Error::UnknownProfile)
+        );
+        assert_eq!(
+            sidebar.set_profile_color(unknown, Color::Red),
+            Err(Error::UnknownProfile)
+        );
+    }
+
+    #[test]
+    fn a_profile_saved_without_a_color_is_purple() {
+        let json = r#"{ "id": 1, "name": "Default", "favorites": 2 }"#;
+        let profile: Profile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.color, Color::Purple);
     }
 
     #[test]

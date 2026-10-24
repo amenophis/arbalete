@@ -1,19 +1,21 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
-// between sections, hiding and revealing the sidebar, and keeping profiles' web data apart, in the
-// real app.
+// between sections, hiding and revealing the sidebar, keeping profiles' web data apart, and
+// creating, renaming and coloring profiles, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { connect, launch, pages, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs";
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error("usage: node e2e/tabs.mjs <data dir>");
 
 // The sidebar shows only the first Space: tabs of the others are found in the session file.
-const session = JSON.parse(readFileSync(join(dataDir, "session.json"), "utf8")).sidebar;
+const readSession = () => JSON.parse(readFileSync(join(dataDir, "session.json"), "utf8")).sidebar;
+const session = readSession();
 const todayTab = (space, index) => session.nodes[space.today].children[index];
 const tabUrl = (tab) => session.nodes[tab].kind.Tab.url;
 const home = session.spaces[0];
@@ -321,6 +323,44 @@ try {
     todayTab(home, 46),
     `localStorage.getItem("profile") === "first" && document.cookie.includes("profile=first")`,
   );
+
+  await check(
+    "the profiles button lists every profile by name",
+    `e2e.names = () => [...document.querySelectorAll(".profile input")].map((input) => input.value);
+     document.querySelector(".profiles-toggle").click()`,
+    `e2e.names().join() === "Default,Work"`,
+  );
+  await check(
+    "the new profile button adds a profile and edits its name",
+    `document.querySelector(".new-profile").click()`,
+    `e2e.names().join() === "Default,Work,New Profile"
+      && document.activeElement === document.querySelectorAll(".profile input")[2]`,
+  );
+  await check(
+    "Enter saves the edited profile name",
+    `e2e.input = document.activeElement; e2e.input.value = "Travel";
+     e2e.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`,
+    `e2e.names().join() === "Default,Work,Travel" && document.activeElement !== document.querySelectorAll(".profile input")[2]`,
+  );
+  await check(
+    "picking a color marks it as the profile's",
+    `document.querySelector('[aria-label="Color of Travel"] [aria-label="green"]').click()`,
+    `document.querySelector('[aria-label="Color of Travel"] [aria-pressed="true"]')?.getAttribute("aria-label") === "green"`,
+  );
+  const deadline = performance.now() + 10_000;
+  let saved;
+  while (!saved) {
+    const sidebar = readSession();
+    const travel = sidebar.profiles.find((profile) => profile.name === "Travel");
+    if (travel?.color === "green" && sidebar.spaces.some((space) => space.profile === travel.id)) {
+      saved = true;
+    } else if (performance.now() > deadline) {
+      throw new Error("not ok - the session saves the new profile, its color and its Space");
+    } else {
+      await sleep(20);
+    }
+  }
+  console.log("ok - the session saves the new profile, its color and its Space");
 } finally {
   app.kill();
 }
