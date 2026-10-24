@@ -156,7 +156,21 @@ export function firstGrapheme(text: string): string {
 
 // The sidebar shown above the page while the sidebar is hidden opens when the pointer reaches it,
 // at the window's edge, and closes when the pointer leaves it (set_sidebar in app/src/shell.rs).
+// It floats a few points from the window's edge: the pointer that revealed it is left of it, and
+// leaving towards the edge keeps it open.
 export function revealOnHover(element: HTMLElement) {
   element.addEventListener("mouseenter", () => send("sidebar/reveal"));
-  element.addEventListener("mouseleave", () => send("sidebar/conceal"));
+  element.addEventListener("mouseleave", (event) => {
+    if (event.clientX > 0) send("sidebar/conceal");
+  });
+}
+
+// The docked sidebar's content slides out to the left as the sidebar hides, and back as it shows
+// again, over its own background (index.css); it moves at once when it docks from above the page.
+export function followDocking(root: HTMLElement) {
+  addEventListener("arbalette:docked", (event) => {
+    const { docked, slide } = (event as CustomEvent<{ docked: boolean; slide: boolean }>).detail;
+    root.toggleAttribute("data-instant", !slide);
+    root.toggleAttribute("data-undocked", !docked);
+  });
 }
