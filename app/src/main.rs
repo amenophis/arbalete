@@ -2,6 +2,8 @@ mod command;
 #[cfg(target_os = "macos")]
 mod mac;
 mod shell;
+#[cfg(target_os = "macos")]
+mod swipe;
 
 use cef::*;
 use std::path::PathBuf;

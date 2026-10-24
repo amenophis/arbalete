@@ -1,17 +1,15 @@
-import { type CSSProperties, type KeyboardEvent, memo, useRef } from "react";
+import { type CSSProperties, type KeyboardEvent, memo, useEffect, useRef } from "react";
 import { COLORS, type Item, send, type Tab, useAppState, useRenaming } from "./bridge";
 import { useDrag } from "./drag";
 import { Profiles } from "./Profiles";
 import { Spaces } from "./Spaces";
-import { swipeTracker } from "./swipe";
-
-// The page shows one sidebar, which follows one swipe at a time.
-const trackSwipe = swipeTracker();
+import { type Gesture, swipeTracker } from "./swipe";
 
 export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalette:rename");
   const { dragging, indicator, onPointerDown } = useDrag();
+  useSwipes();
   const page = state?.page;
   const active =
     state &&
@@ -22,15 +20,7 @@ export function App() {
   // The displayed Space's color tints the sidebar.
   const tint = space && ({ "--space": COLORS[space.color] } as CSSProperties);
   return (
-    <nav
-      className="sidebar"
-      style={tint}
-      onPointerDown={onPointerDown}
-      onWheel={(event) => {
-        const command = trackSwipe(event.deltaX, event.deltaY, event.timeStamp);
-        if (command) send(command);
-      }}
-    >
+    <nav className="sidebar" style={tint} onPointerDown={onPointerDown}>
       <div className="toolbar">
         <button
           type="button"
@@ -114,6 +104,18 @@ export function App() {
       <div className="drop-indicator" ref={indicator} />
     </nav>
   );
+}
+
+function useSwipes() {
+  useEffect(() => {
+    const track = swipeTracker();
+    const listener = (event: Event) => {
+      const command = track((event as CustomEvent<Gesture>).detail);
+      if (command) send(command);
+    };
+    addEventListener("arbalette:swipe", listener);
+    return () => removeEventListener("arbalette:swipe", listener);
+  }, []);
 }
 
 function tabs(items: Item[]): Tab[] {

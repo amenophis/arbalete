@@ -88,6 +88,8 @@ thread_local! {
     static HISTORIES: RefCell<HashMap<ProfileId, History>> = RefCell::default();
     /// Browsers not closed yet: the app quits when the last one closes.
     static OPEN_BROWSERS: Cell<usize> = const { Cell::new(0) };
+    #[cfg(target_os = "macos")]
+    static SWIPE: RefCell<crate::swipe::Tracker> = RefCell::default();
 }
 
 /// The sidebar sits beside the page, or is hidden: then a strip at the window's left edge
@@ -887,6 +889,34 @@ pub fn run(command: Command) {
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
         (_, None) => {}
+    }
+}
+
+/// Whether a point at `x` from the window's left edge is over the sidebar, shown or revealed.
+#[cfg(target_os = "macos")]
+pub fn is_over_sidebar(x: f64) -> bool {
+    SIDEBAR_MODE.get() != SidebarMode::Hidden && x < f64::from(SIDEBAR_WIDTH)
+}
+
+/// Sends the swipes among the window's scroll events to the sidebar the window shows.
+#[cfg(target_os = "macos")]
+pub fn scroll(scroll: crate::swipe::Scroll) {
+    use crate::swipe::Swipe;
+    match SWIPE.with_borrow_mut(|tracker| tracker.track(scroll)) {
+        Some(Swipe::Gesture(gesture)) => {
+            let view = if SIDEBAR_MODE.get() == SidebarMode::Revealed {
+                &REVEAL_VIEW
+            } else {
+                &SIDEBAR
+            };
+            let detail = serde_json::to_string(&gesture).expect("a gesture");
+            dispatch(
+                view,
+                &format!(r#"new CustomEvent("arbalette:swipe", {{ detail: {detail} }})"#),
+            );
+        }
+        Some(Swipe::Step(next)) => show_found_space(|s| s.next_space(next)),
+        None => {}
     }
 }
 

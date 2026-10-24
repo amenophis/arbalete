@@ -559,32 +559,23 @@ try {
     `e2e.send("space/number/2")`,
     `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"`,
   );
-  // A swipe is a burst of mostly horizontal wheel events; a pause ends it.
-  const swipe = (deltaX) => `(() => {
-    const target = document.querySelector(".scroll");
-    for (let i = 0; i < 20; i++) {
-      target.dispatchEvent(new WheelEvent("wheel", { deltaX: ${deltaX}, bubbles: true }));
-    }
+  // The app sends a trackpad swipe, from touch to lift, as arbalette:swipe events: `dx` is how
+  // far the content would scroll, in points (app/src/swipe.rs).
+  const swipe = (dx) => `(() => {
+    const send = (phase, dx, time) =>
+      dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, time } }));
+    send("begin", ${dx}, 0);
+    for (let i = 1; i < 20; i++) send("move", ${dx}, i * 10);
+    send("end", 0, 200);
   })()`;
-  const pause = `new Promise((resolve) => setTimeout(resolve, 400))`;
   await check(
-    "a leftward swipe in the sidebar shows the next Space",
-    swipe(30),
-    `e2e.spaceIcons()[2].getAttribute("aria-current") === "true"`,
-  );
-  await check(
-    "the swipe switches Space once for the whole gesture",
-    pause,
-    `e2e.spaceIcons()[2].getAttribute("aria-current") === "true"`,
-  );
-  await check(
-    "a rightward swipe shows the previous Space again",
+    "a swipe moving the content left shows the next Space",
     swipe(-30),
-    `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"`,
+    `e2e.spaceIcons()[2].getAttribute("aria-current") === "true"`,
   );
   await check(
-    "that swipe also switches only once",
-    pause,
+    "a swipe moving the content right shows the previous Space again",
+    swipe(30),
     `e2e.spaceIcons()[1].getAttribute("aria-current") === "true"`,
   );
 } finally {

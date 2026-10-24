@@ -1,28 +1,20 @@
-// A pause this long between wheel events ends a gesture, the trackpad's momentum included.
-export const GESTURE_END_MS = 150;
-// How far, in pixels, a horizontal swipe goes before it switches Space.
+// How far, in points, a swipe goes before it switches Space.
 export const SWIPE_DISTANCE = 80;
 
 export type SwipeCommand = "space/next" | "space/previous";
 
-// A two-finger swipe on the trackpad reaches the page as wheel events. Mostly horizontal ones add
-// up until they pass the distance, which switches Space once for the whole gesture: the Space
-// after the displayed one when the fingers move left, as with pages, the one before when they
-// move right. Mostly vertical ones are left to scroll the tabs.
+// A horizontal swipe on the trackpad, from touch to lift, sent by the app as `arbalette:swipe`
+// events (Gesture in app/src/swipe.rs): `dx` is how far the content would scroll, in points.
+export type Gesture = { phase: "begin" | "move" | "end"; dx: number; time: number };
+
+// A swipe that goes far enough switches Space once the fingers lift: the Space after the displayed
+// one when the content moves left, as with pages, the one before when it moves right.
 export function swipeTracker() {
   let distance = 0;
-  let switched = false;
-  let last = Number.NEGATIVE_INFINITY;
-  return (deltaX: number, deltaY: number, time: number): SwipeCommand | null => {
-    if (time - last > GESTURE_END_MS) {
-      distance = 0;
-      switched = false;
-    }
-    last = time;
-    if (switched || Math.abs(deltaX) <= Math.abs(deltaY)) return null;
-    distance += deltaX;
-    if (Math.abs(distance) < SWIPE_DISTANCE) return null;
-    switched = true;
-    return distance > 0 ? "space/next" : "space/previous";
+  return ({ phase, dx }: Gesture): SwipeCommand | null => {
+    if (phase === "begin") distance = 0;
+    distance += dx;
+    if (phase !== "end" || Math.abs(distance) < SWIPE_DISTANCE) return null;
+    return distance < 0 ? "space/next" : "space/previous";
   };
 }
