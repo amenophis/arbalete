@@ -1,5 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
-import { mix, revealOnHover, windowColors } from "./bridge";
+import { followDocking, mix, revealOnHover, windowColors } from "./bridge";
 
 const fetch = vi.fn();
 
@@ -13,8 +13,28 @@ test("reveals the sidebar while the pointer is over it", () => {
   revealOnHover(element);
   element.dispatchEvent(new MouseEvent("mouseenter"));
   expect(fetch).toHaveBeenLastCalledWith("/command/sidebar/reveal", { method: "POST" });
-  element.dispatchEvent(new MouseEvent("mouseleave"));
+  element.dispatchEvent(new MouseEvent("mouseleave", { clientX: 300 }));
   expect(fetch).toHaveBeenLastCalledWith("/command/sidebar/conceal", { method: "POST" });
+});
+
+test("keeps the revealed sidebar while the pointer leaves it towards the window's edge", () => {
+  const element = document.createElement("div");
+  revealOnHover(element);
+  element.dispatchEvent(new MouseEvent("mouseleave", { clientX: -2 }));
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("slides the sidebar's content out as it hides, and back at once as it docks", () => {
+  const root = document.createElement("div");
+  followDocking(root);
+  const docked = (docked: boolean, slide: boolean) =>
+    dispatchEvent(new CustomEvent("arbalette:docked", { detail: { docked, slide } }));
+  docked(false, true);
+  expect(root.hasAttribute("data-undocked")).toBe(true);
+  expect(root.hasAttribute("data-instant")).toBe(false);
+  docked(true, false);
+  expect(root.hasAttribute("data-undocked")).toBe(false);
+  expect(root.hasAttribute("data-instant")).toBe(true);
 });
 
 test("mixes a share of a color into another, like color-mix in srgb", () => {

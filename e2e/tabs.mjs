@@ -329,10 +329,16 @@ try {
     `document.visibilityState === "hidden"`,
   );
   await check(
-    "the page then takes the window's width within its margins",
+    "the page then takes the window's width within its margins, 9 pt on all four sides",
     ``,
-    `innerWidth === ${width} && screenX === ${frame.x + 9}`,
+    `innerWidth === ${width} && screenX === ${frame.x + 9} && screenY === ${frame.y + 9}
+      && innerHeight === ${frame.height - 2 * 9}`,
     content,
+  );
+  await check(
+    "the hidden sidebar's content slid out to the left",
+    ``,
+    `document.documentElement.hasAttribute("data-undocked")`,
   );
   await check(
     "the sidebar hidden, a strip of the revealed sidebar lines the window's left edge",
@@ -342,10 +348,13 @@ try {
   );
   const mouse = (x) => reveal.call("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: 200 });
   await mouse(2);
+  // Floating 4 pt from the window's edges (FLOAT_INSET in shell.rs).
+  const floating = `screenX === ${frame.x + 4} && screenY === ${frame.y + 4} && innerWidth === 260
+    && innerHeight === ${frame.height - 2 * 4}`;
   await check(
-    "the pointer at the window's left edge reveals the sidebar above the page",
+    "the pointer at the window's left edge reveals the sidebar floating above the page",
     ``,
-    `innerWidth === 260 && document.querySelector(".space-page:not([inert])").querySelectorAll(".today .tab-row").length > 0`,
+    `${floating} && document.querySelector(".space-page:not([inert])").querySelectorAll(".today .tab-row").length > 0`,
     reveal,
   );
   await check("the revealed sidebar does not resize the page", ``, `innerWidth === ${width}`, content);
@@ -359,6 +368,11 @@ try {
     })()`,
     reveal,
   );
+  await mouse(-2);
+  await sleep(200);
+  await check("the pointer leaving the revealed sidebar towards the window's edge keeps it", ``, floating, reveal);
+  // Back over the sidebar on its way to the page.
+  await mouse(100);
   await mouse(600);
   await check("the pointer leaving the revealed sidebar hides it", ``, `innerWidth === 4`, reveal);
   await check(
@@ -367,6 +381,34 @@ try {
     `document.visibilityState === "visible" && e2e.current() === e2e.rows()[1]`,
   );
   await check("the revealed sidebar is hidden with it", ``, `document.visibilityState === "hidden"`, reveal);
+  await check(
+    "the page makes room for the sidebar again",
+    ``,
+    `innerWidth === ${width - 260} && screenX === ${frame.x + 260 + 9}`,
+    content,
+  );
+  await check(
+    "the shown sidebar's content slid back in",
+    ``,
+    `!document.documentElement.hasAttribute("data-undocked")
+      && getComputedStyle(document.querySelector(".toolbar")).transform === "none"`,
+  );
+  await check("the sidebar toggle command hides the sidebar once more", `e2e.send("sidebar/toggle")`, `true`);
+  await check("the strip lines the window's edge again", ``, `innerWidth === 4`, reveal);
+  await mouse(2);
+  await check("the pointer reveals the sidebar again", ``, floating, reveal);
+  await check(
+    "the sidebar toggle command docks the revealed sidebar",
+    `e2e.send("sidebar/toggle")`,
+    `document.visibilityState === "visible" && innerWidth === 260 && screenX === ${frame.x}`,
+  );
+  await check("the revealed sidebar is hidden once docked", ``, `document.visibilityState === "hidden"`, reveal);
+  await check(
+    "the page makes room for the docked sidebar",
+    ``,
+    `innerWidth === ${width - 260} && screenX === ${frame.x + 260 + 9}`,
+    content,
+  );
 
   // Selects a tab by id and checks a condition in its page once loaded and shown.
   async function checkPage(description, tab, condition) {
@@ -640,6 +682,22 @@ try {
       space.color === "orange"
     );
   });
+  // The sidebar stays visible to DevTools with focus emulation: the floating one shows instead.
+  await check(
+    "the sidebar toggle beside an empty Space's panel floats the sidebar, inset from the window's edges",
+    `e2e.send("sidebar/toggle")`,
+    `document.visibilityState === "visible" && ${floating}`,
+    reveal,
+  );
+  await mouse(600);
+  await sleep(200);
+  await check("the pointer leaving the floating sidebar keeps it", ``, `document.visibilityState === "visible" && ${floating}`, reveal);
+  await check(
+    "the sidebar toggle docks the floating sidebar",
+    `e2e.send("sidebar/toggle")`,
+    `document.visibilityState === "visible" && innerWidth === 260`,
+  );
+  await check("the floating sidebar is hidden once docked", ``, `document.visibilityState === "hidden"`, reveal);
   await check(
     "switching Space tints the window with that Space's color, the panel gone",
     `e2e.spaceIcons()[0].click()`,

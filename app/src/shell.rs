@@ -19,7 +19,7 @@ use std::collections::hash_map::Entry;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, LocalKey};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The UI is served by the app itself under this origin.
 const UI_ORIGIN: &str = "https://arbalette.ui/";
@@ -37,6 +37,21 @@ const WINDOW_COLOR: u32 = 0xff1b_0e1f;
 /// The strip along the window's left edge that reveals the hidden sidebar when the pointer
 /// reaches it. Views cannot be transparent, so it shows the sidebar's background.
 const EDGE_WIDTH: i32 = 4;
+
+/// How far the floating sidebar sits from the window's edges.
+const FLOAT_INSET: i32 = 4;
+
+/// How long the sidebar's moves last, in milliseconds: hiding or showing it, the card following;
+/// the revealed sidebar floating in, with a spring, and out; and docking, from above the page or
+/// beside an empty Space's panel.
+const HIDE_DURATION: u32 = 85;
+const REVEAL_DURATION: u32 = 250;
+const CONCEAL_DURATION: u32 = 90;
+const DOCK_DURATION: u32 = 70;
+const FLOATING_DOCK_DURATION: u32 = 50;
+
+/// The time between two steps of a native slide: about a frame.
+const FRAME_MS: i64 = 8;
 
 /// The overlay's size: one text field for now (ui/src/Overlay.tsx).
 const OVERLAY_SIZE: Size = Size {
@@ -91,6 +106,8 @@ thread_local! {
     /// The first launch shows the import assistant with the window, instead of the start page.
     static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
+    /// Under way while the sidebar moves to its mode.
+    static SLIDE: RefCell<Option<Slide>> = const { RefCell::new(None) };
     /// The sidebar's draggable regions, which move the window while the sidebar is shown, with
     /// the margins around the card.
     static DRAG_REGIONS: RefCell<Vec<DraggableRegion>> = const { RefCell::new(Vec::new()) };
@@ -108,12 +125,78 @@ thread_local! {
 }
 
 /// The sidebar sits beside the page, or is hidden: then a strip at the window's left edge
-/// reveals it above the page while the pointer is over it. For this session only.
-#[derive(Clone, Copy, PartialEq)]
+/// reveals it above the page while the pointer is over it. Beside an empty Space's panel, it
+/// floats instead of hiding. For this session only.
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum SidebarMode {
     Shown,
     Hidden,
     Revealed,
+    Floating,
+}
+
+impl SidebarMode {
+    /// Where the card and the revealed sidebar stand in this mode, in a window of `size`. While
+    /// the sidebar is docked, the revealed one's place is the docked one's, which it docks into.
+    fn layout(self, size: &Size) -> Layout {
+        let left = match self {
+            SidebarMode::Shown | SidebarMode::Floating => SIDEBAR_WIDTH + CARD_MARGIN,
+            SidebarMode::Hidden | SidebarMode::Revealed => CARD_MARGIN,
+        };
+        let card = Rect {
+            x: left,
+            y: CARD_MARGIN,
+            width: size.width - left - CARD_MARGIN,
+            height: size.height - 2 * CARD_MARGIN,
+        };
+        let reveal = match self {
+            SidebarMode::Shown => Rect {
+                x: 0,
+                y: 0,
+                width: SIDEBAR_WIDTH,
+                height: size.height,
+            },
+            SidebarMode::Hidden => Rect {
+                x: 0,
+                y: 0,
+                width: EDGE_WIDTH,
+                height: size.height,
+            },
+            SidebarMode::Revealed | SidebarMode::Floating => Rect {
+                x: FLOAT_INSET,
+                y: FLOAT_INSET,
+                width: SIDEBAR_WIDTH,
+                height: size.height - 2 * FLOAT_INSET,
+            },
+        };
+        Layout { card, reveal }
+    }
+
+    /// Where the margins that move the window start: past the docked sidebar, which has its own
+    /// drag areas, or at the window's edge.
+    fn margins_start(self) -> i32 {
+        if self == SidebarMode::Shown {
+            SIDEBAR_WIDTH
+        } else {
+            0
+        }
+    }
+}
+
+/// Where the card and the revealed sidebar stand.
+#[derive(Clone, Debug)]
+struct Layout {
+    card: Rect,
+    reveal: Rect,
+}
+
+/// The card, and the revealed sidebar when it docks, on their way to the sidebar's mode.
+struct Slide {
+    from: Layout,
+    start: Instant,
+    duration: Duration,
+    /// The revealed sidebar grows into the docked one's place, losing its floating look.
+    docking: bool,
 }
 
 /// How many closed tabs the UI lists, the last closed first: the state weighs on every update.
@@ -289,54 +372,227 @@ fn show_overlay(visible: bool) {
     }
 }
 
+/// Moves the sidebar to `mode`. The views it shows on the way are shown first, the others hidden
+/// once it gets there (settle). The card and the revealed sidebar slide natively, frame by frame;
+/// the revealed sidebar floats in and out in the compositor, which clips it by its own window.
 fn set_sidebar(mode: SidebarMode) {
-    SIDEBAR_MODE.set(mode);
-    let shown = mode == SidebarMode::Shown;
+    let before = SIDEBAR_MODE.replace(mode);
+    let (Some(size), Some(card), Some(reveal)) = (
+        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+        CARD.with_borrow(Clone::clone),
+        REVEAL.with_borrow(Clone::clone),
+    ) else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    let duration = if crate::mac::reduce_motion() {
+        0
+    } else {
+        slide_duration(before, mode)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let duration = 0;
+    let docked = mode == SidebarMode::Shown;
+    if docked && let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+        sidebar.set_visible(1);
+    }
+    if docked != (before == SidebarMode::Shown) {
+        let slide = duration > 0 && matches!(before, SidebarMode::Shown | SidebarMode::Hidden);
+        let detail = json!({ "docked": docked, "slide": slide });
+        dispatch(
+            &SIDEBAR,
+            &format!(r#"new CustomEvent("arbalette:docked", {{ detail: {detail} }})"#),
+        );
+    }
+    let floating = |mode| matches!(mode, SidebarMode::Revealed | SidebarMode::Floating);
+    #[cfg(target_os = "macos")]
+    if let Some(view) = reveal_window() {
+        let seconds = f64::from(duration) / 1000.0;
+        let width = f64::from(SIDEBAR_WIDTH);
+        match (before, mode) {
+            (SidebarMode::Hidden, SidebarMode::Revealed) => {
+                let positions = crate::motion::positions(crate::motion::spring, -width, 0.0, 30);
+                crate::mac::slide(view, &positions, seconds);
+            }
+            (SidebarMode::Revealed, SidebarMode::Hidden) => {
+                let positions = crate::motion::positions(crate::motion::ease_out, 0.0, -width, 30);
+                crate::mac::slide(view, &positions, seconds);
+            }
+            _ => {}
+        }
+        if floating(mode) && !floating(before) {
+            crate::mac::float(view, 1.0);
+        }
+    }
+    if floating(mode) && !floating(before) {
+        reveal.set_bounds(Some(&mode.layout(&size).reveal));
+        reveal.set_visible(1);
+    }
+    let from = Layout {
+        card: card.bounds(),
+        reveal: reveal.bounds(),
+    };
+    let slide = Slide {
+        from,
+        start: Instant::now(),
+        duration: Duration::from_millis(duration.into()),
+        docking: docked && floating(before),
+    };
+    if SLIDE.replace(Some(slide)).is_none() {
+        step_slide();
+    }
+}
+
+/// How long the sidebar takes from one mode to another, in milliseconds; 0 for at once.
+fn slide_duration(from: SidebarMode, to: SidebarMode) -> u32 {
+    match (from, to) {
+        (SidebarMode::Shown, SidebarMode::Hidden) | (SidebarMode::Hidden, SidebarMode::Shown) => {
+            HIDE_DURATION
+        }
+        (SidebarMode::Hidden, SidebarMode::Revealed) => REVEAL_DURATION,
+        (SidebarMode::Revealed, SidebarMode::Hidden) => CONCEAL_DURATION,
+        (SidebarMode::Revealed, SidebarMode::Shown) => DOCK_DURATION,
+        (SidebarMode::Floating, SidebarMode::Shown) => FLOATING_DOCK_DURATION,
+        _ => 0,
+    }
+}
+
+/// The mode the sidebar toggle leads to. A Space without a tab shows an empty panel, which has
+/// nothing to grow into: the sidebar floats beside it instead of hiding.
+fn toggled(mode: SidebarMode, has_tab: bool) -> SidebarMode {
+    match mode {
+        SidebarMode::Shown if has_tab => SidebarMode::Hidden,
+        SidebarMode::Shown => SidebarMode::Floating,
+        _ => SidebarMode::Shown,
+    }
+}
+
+/// Moves the card, and the revealed sidebar while it docks, one frame further, until the slide
+/// ends.
+fn step_slide() {
+    let Some((from, start, duration, docking)) = SLIDE.with_borrow(|slide| {
+        let slide = slide.as_ref()?;
+        Some((
+            slide.from.clone(),
+            slide.start,
+            slide.duration,
+            slide.docking,
+        ))
+    }) else {
+        return;
+    };
+    let elapsed = start.elapsed().as_secs_f64();
+    let progress = if duration.is_zero() {
+        1.0
+    } else {
+        elapsed / duration.as_secs_f64()
+    };
+    let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
+    let (Some(size), true) = (size, progress < 1.0) else {
+        SLIDE.set(None);
+        settle_sidebar();
+        return;
+    };
+    let eased = crate::motion::ease_out(progress);
+    let to = SIDEBAR_MODE.get().layout(&size);
+    if let Some(card) = CARD.with_borrow(Clone::clone) {
+        card.set_bounds(Some(&lerp_rect(&from.card, &to.card, eased)));
+    }
+    if docking && let Some(reveal) = REVEAL.with_borrow(Clone::clone) {
+        reveal.set_bounds(Some(&lerp_rect(&from.reveal, &to.reveal, eased)));
+        #[cfg(target_os = "macos")]
+        if let Some(view) = reveal_window() {
+            crate::mac::float(view, 1.0 - eased);
+        }
+    }
+    post_delayed_task(ThreadId::UI, Some(&mut StepSlide::new()), FRAME_MS);
+}
+
+wrap_task! {
+    struct StepSlide {}
+
+    impl Task {
+        fn execute(&self) {
+            step_slide();
+        }
+    }
+}
+
+/// `t` of the way from one rectangle to another.
+fn lerp_rect(from: &Rect, to: &Rect, t: f64) -> Rect {
+    use crate::motion::lerp;
+    Rect {
+        x: lerp(from.x, to.x, t),
+        y: lerp(from.y, to.y, t),
+        width: lerp(from.width, to.width, t),
+        height: lerp(from.height, to.height, t),
+    }
+}
+
+/// Shows the views of the sidebar's mode where it wants them, and hides the others.
+fn settle_sidebar() {
+    let mode = SIDEBAR_MODE.get();
+    let docked = mode == SidebarMode::Shown;
     if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
-        sidebar.set_visible(shown.into());
+        sidebar.set_visible(docked.into());
     }
     place_card();
     place_reveal();
     update_drag_regions();
     #[cfg(target_os = "macos")]
-    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
-        crate::mac::sidebar_shown(window.window_handle(), shown);
+    {
+        if let Some(view) = reveal_window() {
+            crate::mac::slide(view, &[], 0.0);
+            let floating = matches!(mode, SidebarMode::Revealed | SidebarMode::Floating);
+            crate::mac::float(view, if floating { 1.0 } else { 0.0 });
+        }
+        if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+            crate::mac::sidebar_shown(window.window_handle(), docked);
+        }
+    }
+}
+
+/// The revealed sidebar's window, once its browser is created.
+#[cfg(target_os = "macos")]
+fn reveal_window() -> Option<*mut std::ffi::c_void> {
+    let browser = REVEAL_VIEW.with_borrow(|view| view.as_ref()?.browser())?;
+    Some(browser.host()?.window_handle())
+}
+
+/// The sidebar the window shows: the docked one, or the one above the page.
+fn shown_sidebar() -> &'static LocalKey<RefCell<Option<BrowserView>>> {
+    match SIDEBAR_MODE.get() {
+        SidebarMode::Revealed | SidebarMode::Floating => &REVEAL_VIEW,
+        SidebarMode::Shown | SidebarMode::Hidden => &SIDEBAR,
     }
 }
 
 /// The window moves by its margins around the card, and by the sidebar's drag areas while it is
-/// shown. CEF applies the regions in order, a region that is not draggable cutting out of the
+/// docked. CEF applies the regions in order, a region that is not draggable cutting out of the
 /// ones before: the sidebar's come last, so its controls stay clickable.
 fn update_drag_regions() {
     let Some(window) = WINDOW.with_borrow(Clone::clone) else {
         return;
     };
-    let shown = SIDEBAR_MODE.get() == SidebarMode::Shown;
-    let mut regions = margin_regions(window.size(), card_left(shown));
-    if shown {
+    let mode = SIDEBAR_MODE.get();
+    let size = window.size();
+    let mut regions = margin_regions(&size, &mode.layout(&size).card, mode.margins_start());
+    if mode == SidebarMode::Shown {
         regions.extend(DRAG_REGIONS.with_borrow(Clone::clone));
     }
     window.set_draggable_regions(Some(&regions));
 }
 
-/// The card's left edge, past the sidebar while it is shown.
-fn card_left(shown: bool) -> i32 {
-    if shown {
-        SIDEBAR_WIDTH + CARD_MARGIN
-    } else {
-        CARD_MARGIN
-    }
-}
-
-/// The four margins around the card of a window of `size`, the card starting at `left`.
-fn margin_regions(size: Size, left: i32) -> Vec<DraggableRegion> {
+/// The four margins around the `card` of a window of `size`, from `start`: the docked sidebar's
+/// edge, or the window's.
+fn margin_regions(size: &Size, card: &Rect, start: i32) -> Vec<DraggableRegion> {
     let (width, height) = (size.width, size.height);
-    let start = left - CARD_MARGIN;
+    let (right, bottom) = (card.x + card.width, card.y + card.height);
     [
-        (start, 0, width - start, CARD_MARGIN),
-        (start, height - CARD_MARGIN, width - start, CARD_MARGIN),
-        (start, 0, CARD_MARGIN, height),
-        (width - CARD_MARGIN, 0, CARD_MARGIN, height),
+        (start, 0, width - start, card.y),
+        (start, bottom, width - start, height - bottom),
+        (start, 0, card.x - start, height),
+        (right, 0, width - right, height),
     ]
     .into_iter()
     .map(|(x, y, width, height)| DraggableRegion {
@@ -351,20 +607,14 @@ fn margin_regions(size: Size, left: i32) -> Vec<DraggableRegion> {
     .collect()
 }
 
-/// Insets the card from the window's edges, and from the sidebar while it is shown.
+/// Insets the card from the window's edges, and from the sidebar while it is docked or floating.
 fn place_card() {
     let Some(card) = CARD.with_borrow(Clone::clone) else {
         return;
     };
     let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
     let Some(size) = size else { return };
-    let left = card_left(SIDEBAR_MODE.get() == SidebarMode::Shown);
-    card.set_bounds(Some(&Rect {
-        x: left,
-        y: CARD_MARGIN,
-        width: size.width - left - CARD_MARGIN,
-        height: size.height - 2 * CARD_MARGIN,
-    }));
+    card.set_bounds(Some(&SIDEBAR_MODE.get().layout(&size).card));
 }
 
 /// The panel holding the content views.
@@ -372,24 +622,16 @@ fn card_panel() -> Option<Panel> {
     CARD.with_borrow(|card| card.as_ref()?.contents_view()?.as_panel())
 }
 
-/// Places the revealed sidebar, or the strip that reveals it, along the window's left edge.
+/// Places the revealed sidebar above the page, or the strip that reveals it along the window's
+/// left edge.
 fn place_reveal() {
     let Some(reveal) = REVEAL.with_borrow(Clone::clone) else {
         return;
     };
     let mode = SIDEBAR_MODE.get();
-    let height = WINDOW.with_borrow(|window| window.as_ref().map_or(0, |w| w.size().height));
-    let width = if mode == SidebarMode::Revealed {
-        SIDEBAR_WIDTH
-    } else {
-        EDGE_WIDTH
-    };
-    reveal.set_bounds(Some(&Rect {
-        x: 0,
-        y: 0,
-        width,
-        height,
-    }));
+    let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
+    let Some(size) = size else { return };
+    reveal.set_bounds(Some(&mode.layout(&size).reveal));
     reveal.set_visible((mode != SidebarMode::Shown).into());
 }
 
@@ -730,7 +972,7 @@ fn focus_sidebar() {
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
         window.activate();
     }
-    if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+    if let Some(sidebar) = shown_sidebar().with_borrow(Clone::clone) {
         sidebar.request_focus();
     }
 }
@@ -967,10 +1209,10 @@ pub fn run(command: Command) {
         (Command::PreviousSpace, _) => show_found_space(|s| s.next_space(false)),
         (Command::ShowOverlay, _) => show_overlay(true),
         (Command::HideOverlay, _) => show_overlay(false),
-        (Command::ToggleSidebar, _) => set_sidebar(match SIDEBAR_MODE.get() {
-            SidebarMode::Shown => SidebarMode::Hidden,
-            _ => SidebarMode::Shown,
-        }),
+        (Command::ToggleSidebar, _) => {
+            let has_tab = STATE.with_borrow(|state| state.sidebar.displayed().selected.is_some());
+            set_sidebar(toggled(SIDEBAR_MODE.get(), has_tab));
+        }
         (Command::RevealSidebar, _) if SIDEBAR_MODE.get() == SidebarMode::Hidden => {
             set_sidebar(SidebarMode::Revealed);
         }
@@ -1047,11 +1289,7 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
     use crate::swipe::Swipe;
     match SWIPE.with_borrow_mut(|tracker| tracker.track(scroll)) {
         Some(Swipe::Gesture(gesture)) => {
-            let view = if SIDEBAR_MODE.get() == SidebarMode::Revealed {
-                &REVEAL_VIEW
-            } else {
-                &SIDEBAR
-            };
+            let view = shown_sidebar();
             let detail = serde_json::to_string(&gesture).expect("a gesture");
             dispatch(
                 view,
@@ -1122,9 +1360,12 @@ wrap_window_delegate! {
         }
 
         // The card, the revealed sidebar and the margins follow the window's size.
+        // A slide places them on its next step.
         fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
-            place_card();
-            place_reveal();
+            if SLIDE.with_borrow(Option::is_none) {
+                place_card();
+                place_reveal();
+            }
             update_drag_regions();
         }
     }
@@ -1538,32 +1779,38 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARD_MARGIN, DraggableRegion, SIDEBAR_WIDTH, Size, UiState, card_left, margin_regions,
-        ui_file, ui_path,
+        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, Rect, SIDEBAR_WIDTH, SidebarMode,
+        Size, UiState, lerp_rect, margin_regions, slide_duration, toggled, ui_file, ui_path,
     };
 
-    #[test]
-    fn the_margins_around_the_card_move_the_window_without_the_sidebar() {
-        let regions = margin_regions(SIZE, card_left(false));
-        let m = CARD_MARGIN;
-        assert_eq!(
-            bounds(&regions),
-            [
-                (0, 0, 1000, m),
-                (0, 600 - m, 1000, m),
-                (0, 0, m, 600),
-                (1000 - m, 0, m, 600)
-            ]
-        );
+    fn rect(rect: &Rect) -> (i32, i32, i32, i32) {
+        (rect.x, rect.y, rect.width, rect.height)
+    }
+
+    fn regions(mode: SidebarMode) -> Vec<(i32, i32, i32, i32)> {
+        let regions = margin_regions(&SIZE, &mode.layout(&SIZE).card, mode.margins_start());
         assert!(regions.iter().all(|region| region.draggable == 1));
+        bounds(&regions)
     }
 
     #[test]
-    fn the_margins_start_past_the_sidebar_while_it_is_shown() {
-        let regions = margin_regions(SIZE, card_left(true));
+    fn the_margins_around_the_card_move_the_window_without_the_sidebar() {
+        let m = CARD_MARGIN;
+        let margins = [
+            (0, 0, 1000, m),
+            (0, 600 - m, 1000, m),
+            (0, 0, m, 600),
+            (1000 - m, 0, m, 600),
+        ];
+        assert_eq!(regions(SidebarMode::Hidden), margins);
+        assert_eq!(regions(SidebarMode::Revealed), margins);
+    }
+
+    #[test]
+    fn the_margins_start_past_the_sidebar_while_it_is_docked() {
         let (m, s) = (CARD_MARGIN, SIDEBAR_WIDTH);
         assert_eq!(
-            bounds(&regions),
+            regions(SidebarMode::Shown),
             [
                 (s, 0, 1000 - s, m),
                 (s, 600 - m, 1000 - s, m),
@@ -1571,7 +1818,92 @@ mod tests {
                 (1000 - m, 0, m, 600)
             ]
         );
-        assert!(regions.iter().all(|region| region.draggable == 1));
+    }
+
+    #[test]
+    fn the_window_moves_from_around_the_floating_sidebar() {
+        let (m, s) = (CARD_MARGIN, SIDEBAR_WIDTH);
+        assert_eq!(
+            regions(SidebarMode::Floating),
+            [
+                (0, 0, 1000, m),
+                (0, 600 - m, 1000, m),
+                (0, 0, s + m, 600),
+                (1000 - m, 0, m, 600)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_card_keeps_its_margin_on_all_sides_without_the_sidebar() {
+        let m = CARD_MARGIN;
+        let card = (m, m, 1000 - 2 * m, 600 - 2 * m);
+        assert_eq!(rect(&SidebarMode::Hidden.layout(&SIZE).card), card);
+        // The revealed sidebar floats above the page without resizing it.
+        assert_eq!(rect(&SidebarMode::Revealed.layout(&SIZE).card), card);
+        let docked = (
+            SIDEBAR_WIDTH + m,
+            m,
+            1000 - SIDEBAR_WIDTH - 2 * m,
+            600 - 2 * m,
+        );
+        assert_eq!(rect(&SidebarMode::Shown.layout(&SIZE).card), docked);
+        // An empty Space's panel stays where it is while the sidebar floats beside it.
+        assert_eq!(rect(&SidebarMode::Floating.layout(&SIZE).card), docked);
+    }
+
+    #[test]
+    fn the_floating_sidebar_is_inset_from_the_window_edges() {
+        let i = FLOAT_INSET;
+        let floating = (i, i, SIDEBAR_WIDTH, 600 - 2 * i);
+        assert_eq!(rect(&SidebarMode::Revealed.layout(&SIZE).reveal), floating);
+        assert_eq!(rect(&SidebarMode::Floating.layout(&SIZE).reveal), floating);
+        assert_eq!(
+            rect(&SidebarMode::Hidden.layout(&SIZE).reveal),
+            (0, 0, EDGE_WIDTH, 600)
+        );
+        // It docks into the docked sidebar's place.
+        let docked = (0, 0, SIDEBAR_WIDTH, 600);
+        assert_eq!(rect(&SidebarMode::Shown.layout(&SIZE).reveal), docked);
+    }
+
+    #[test]
+    fn the_toggle_hides_the_sidebar_beside_a_page_and_floats_it_beside_an_empty_panel() {
+        assert_eq!(toggled(SidebarMode::Shown, true), SidebarMode::Hidden);
+        assert_eq!(toggled(SidebarMode::Shown, false), SidebarMode::Floating);
+        for mode in [
+            SidebarMode::Hidden,
+            SidebarMode::Revealed,
+            SidebarMode::Floating,
+        ] {
+            assert_eq!(toggled(mode, true), SidebarMode::Shown);
+            assert_eq!(toggled(mode, false), SidebarMode::Shown);
+        }
+    }
+
+    #[test]
+    fn the_sidebar_slides_quickly_and_floats_beside_an_empty_panel_at_once() {
+        use SidebarMode::{Floating, Hidden, Revealed, Shown};
+        assert_eq!(slide_duration(Shown, Hidden), slide_duration(Hidden, Shown));
+        assert!((80..=90).contains(&slide_duration(Shown, Hidden)));
+        assert!(slide_duration(Hidden, Revealed) > slide_duration(Revealed, Hidden));
+        assert!(slide_duration(Revealed, Shown) < slide_duration(Shown, Hidden));
+        assert!(slide_duration(Floating, Shown) > 0);
+        assert_eq!(slide_duration(Shown, Floating), 0);
+    }
+
+    #[test]
+    fn interpolates_rectangles() {
+        let from = Rect {
+            x: 269,
+            y: 9,
+            width: 722,
+            height: 582,
+        };
+        let to = SidebarMode::Hidden.layout(&SIZE).card;
+        assert_eq!(rect(&lerp_rect(&from, &to, 0.0)), rect(&from));
+        assert_eq!(rect(&lerp_rect(&from, &to, 0.5)), (139, 9, 852, 582));
+        assert_eq!(rect(&lerp_rect(&from, &to, 1.0)), rect(&to));
     }
 
     const SIZE: Size = Size {

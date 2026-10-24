@@ -1,6 +1,7 @@
 mod command;
 #[cfg(target_os = "macos")]
 mod mac;
+mod motion;
 mod shell;
 #[cfg(target_os = "macos")]
 mod swipe;
