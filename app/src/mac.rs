@@ -54,6 +54,11 @@ define_class!(
             crate::shell::run(Command::Reopen);
         }
 
+        #[unsafe(method(arbaletteTogglePin:))]
+        fn toggle_pin(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Pin(None));
+        }
+
         #[unsafe(method(arbaletteBack:))]
         fn back(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Back);
@@ -135,6 +140,12 @@ pub fn setup_menu() {
                     ns_string!("Reopen Closed Tab"),
                     sel!(arbaletteReopenTab:),
                     ns_string!("T"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Pin or Unpin Tab"),
+                    sel!(arbaletteTogglePin:),
+                    ns_string!("d"),
                 ),
             ],
         ),

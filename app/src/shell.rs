@@ -219,7 +219,8 @@ fn select_tab(id: NodeId) {
 }
 
 /// Closes a tab; closing the selected one shows the next tab, or the overlay when none is left.
-/// A favorite stays in the favorites: closing it only deselects it.
+/// Favorites and pinned tabs stay where they are: closing one deselects it and takes it back to
+/// its saved url, and it cannot be reopened since it was never removed.
 fn close_tab(tab: Option<NodeId>) {
     let (selected, tab) = STATE.with_borrow_mut(|state| {
         let selected = state.sidebar.spaces()[0].selected;
@@ -229,13 +230,12 @@ fn close_tab(tab: Option<NodeId>) {
         (selected, tab)
     });
     let Some(tab) = tab else { return };
-    let next = if STATE.with_borrow(|state| state.sidebar.is_favorite(tab)) {
-        if selected != Some(tab) {
-            return;
-        }
+    let stays =
+        STATE.with_borrow(|state| state.sidebar.is_favorite(tab) || state.sidebar.is_pinned(tab));
+    let next = if stays {
         update_sidebar(|sidebar| {
             let home = sidebar.spaces()[0].id;
-            sidebar.close_favorite(home, tab).expect("the first Space")
+            sidebar.close_in_place(home, tab).expect("the first Space")
         })
     } else {
         let next = STATE.with_borrow_mut(|state| {
@@ -244,11 +244,11 @@ fn close_tab(tab: Option<NodeId>) {
             state.sidebar.next_after_close(tab)
         });
         update_sidebar(|sidebar| sidebar.remove(tab)).expect("an open tab");
-        if selected != Some(tab) {
-            return;
-        }
         next
     };
+    if selected != Some(tab) {
+        return;
+    }
     match next {
         Some(next) => select_tab(next),
         None => {
@@ -256,6 +256,18 @@ fn close_tab(tab: Option<NodeId>) {
             show_overlay(true);
         }
     }
+}
+
+/// Pins or unpins a tab, or the selected one.
+fn toggle_pin(tab: Option<NodeId>) {
+    update_sidebar(|sidebar| {
+        let home = &sidebar.spaces()[0];
+        let (home, tab) = (home.id, tab.or(home.selected));
+        if let Some(tab) = tab {
+            // Like a selection, an unknown tab from the UI is ignored.
+            let _ = sidebar.toggle_pin(home, tab);
+        }
+    });
 }
 
 fn reopen_tab() {
@@ -291,6 +303,7 @@ pub fn run(command: Command) {
         }
         (Command::Close(tab), _) => close_tab(tab),
         (Command::Reopen, _) => reopen_tab(),
+        (Command::Pin(tab), _) => toggle_pin(tab),
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
