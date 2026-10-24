@@ -1,6 +1,6 @@
-//! Writes the performance prototype's session: 6 favorites, then 5 Spaces of 100 tabs, half of them
-//! in folders. The last 2 Spaces belong to a second profile, to check that profiles keep their web
-//! data apart.
+//! Writes the performance prototype's session: 5 Spaces of 100 tabs, half of them in folders, and 6
+//! favorites. The last 2 Spaces belong to a second profile with 2 favorites of its own, to check
+//! that profiles keep their web data and their favorites apart.
 //!
 //! Usage: `cargo run -p arbalette-core --example bench-session -- <data dir>`, then run the app with
 //! `ARBALETTE_DATA_DIR=<data dir>`.
@@ -9,6 +9,7 @@ use arbalette_core::{sidebar::Sidebar, store};
 use std::path::PathBuf;
 
 const FAVORITES: usize = 6;
+const WORK_FAVORITES: usize = 2;
 const SPACES: usize = 5;
 const WORK_SPACES: usize = 2;
 const FOLDERS: usize = 5;
@@ -56,14 +57,19 @@ fn main() {
             open(&mut sidebar);
         }
     }
-    let home = sidebar.spaces()[0].id;
-    let favorites = sidebar.profiles()[0].favorites;
-    for index in 1..=FAVORITES {
-        let url = format!("https://example.com/?favorite={index}");
-        let tab = sidebar.open_tab(home, &url).unwrap();
-        sidebar.tab_mut(tab).unwrap().title = format!("Favorite {index}");
-        sidebar.move_node(tab, favorites, usize::MAX).unwrap();
-        count += 1;
+    let work_space = sidebar.spaces()[SPACES - 1].id;
+    for (space, favorites, name) in [
+        (sidebar.spaces()[0].id, FAVORITES, "favorite"),
+        (work_space, WORK_FAVORITES, "work-favorite"),
+    ] {
+        let root = sidebar.favorites_of(space).unwrap();
+        for index in 1..=favorites {
+            let url = format!("https://example.com/?{name}={index}");
+            let tab = sidebar.open_tab(space, &url).unwrap();
+            sidebar.tab_mut(tab).unwrap().title = format!("Favorite {index}");
+            sidebar.move_node(tab, root, usize::MAX).unwrap();
+            count += 1;
+        }
     }
     let home = sidebar.spaces()[0].clone();
     let first = sidebar.node(home.today).unwrap().children[0];

@@ -81,18 +81,14 @@ struct UiState {
 }
 
 impl UiState {
-    /// Sent whole to the UI on every change: the displayed Space's tabs, and the favorites of the
-    /// first Space's profile for now. `roots` names the sections' containers, which the UI moves
-    /// nodes into.
+    /// Sent whole to the UI on every change: the displayed Space's tabs and its profile's
+    /// favorites. `roots` names the sections' containers, which the UI moves nodes into.
     fn to_json(&self) -> serde_json::Value {
-        let home = &self.sidebar.spaces()[0];
-        let profile = self
-            .sidebar
-            .profiles()
-            .iter()
-            .find(|p| p.id == home.profile);
-        let favorites = profile.expect("a known profile").favorites;
         let space = self.sidebar.displayed();
+        let favorites = self
+            .sidebar
+            .favorites_of(space.id)
+            .expect("a known profile");
         json!({
             "page": self.page,
             "roots": { "favorites": favorites, "pinned": space.pinned, "today": space.today },
@@ -563,10 +559,7 @@ pub fn run(command: Command) {
         (Command::Select(id), _) => select_tab(id),
         (Command::NextTab, _) => select_found(|s| s.next_tab(s.displayed().id, true)),
         (Command::PreviousTab, _) => select_found(|s| s.next_tab(s.displayed().id, false)),
-        // The sidebar shows the favorites of the first Space's profile.
-        (Command::Favorite(number), _) => {
-            select_found(|s| s.favorite(s.spaces()[0].id, number));
-        }
+        (Command::Favorite(number), _) => select_found(|s| s.favorite(s.displayed().id, number)),
         (Command::ShowSpace(id), _) => show_space(id),
         (Command::SpaceNumber(number), _) => show_found_space(|s| s.space_at(number)),
         (Command::NextSpace, _) => show_found_space(|s| s.next_space(true)),
@@ -1119,7 +1112,7 @@ mod tests {
     }
 
     #[test]
-    fn sends_the_favorites_of_the_first_space() {
+    fn sends_the_favorites_of_the_displayed_space_s_profile() {
         let mut state = UiState::default();
         let home = state.sidebar.spaces()[0].id;
         let favorites = state.sidebar.profiles()[0].favorites;
@@ -1132,6 +1125,16 @@ mod tests {
         assert_eq!(json["favorites"][0]["url"], "https://example.com/");
         assert_eq!(json["favorites"][0]["id"], serde_json::json!(tab));
         assert_eq!(json["today"], serde_json::json!([]));
+        state.sidebar.create_profile("Work").unwrap();
+        let office = state.sidebar.spaces()[1].id;
+        state.sidebar.display(office).unwrap();
+        let json = state.to_json();
+        assert_eq!(json["favorites"], serde_json::json!([]));
+        let work_favorites = state.sidebar.profiles()[1].favorites;
+        assert_eq!(
+            json["roots"]["favorites"],
+            serde_json::json!(work_favorites)
+        );
     }
 
     #[test]
