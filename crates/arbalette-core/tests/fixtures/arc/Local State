@@ -1,0 +1,9 @@
+{
+  "profile": {
+    "info_cache": {
+      "Default": { "name": "Personal" },
+      "Profile 1": { "name": "Work" }
+    },
+    "profiles_order": ["Default", "Profile 1"]
+  }
+}

@@ -152,13 +152,15 @@ Windows):
 
 | Data | Source | Conversion |
 |---|---|---|
-| Sidebar: Spaces, Favorites, pinned and today's tabs, folders | `StorableSidebar.json`: a flat map of items linked by `parentID` / `childrenIds`, `spaceModels`, `orderedSpaceIDs`, `topAppsContainerIDs` (Favorites, one container per profile) | Profiles, Spaces and node tree; split views become separate tabs at first |
-| Profiles | Each Space references a profile (default, or custom with a `directoryBasename`); names and colors in `User Data/Local State` | One Arbalette profile per Arc profile |
-| Archive | `StorableArchiveItems.json` | Arbalette archive |
+| Sidebar: Spaces, Favorites, pinned and today's tabs, folders | `StorableSidebar.json`, `sidebar.containers`: the entry with `items`, `spaces` and `topAppsContainerIDs`, each a flat array alternating keys (ids) and values. Items are linked by `parentID` / `childrenIds` and hold one kind in `data`: `tab` (`savedURL`, `savedTitle`; the item's `title` when renamed), `list` (a folder), `splitView` (its tabs as children), `itemContainer` (a root). A Space's `containerIDs` alternates `pinned` / `unpinned` and their root; its `customInfo` holds `iconType` (`emoji_v2`, or a named `icon`) and `windowTheme`. `topAppsContainerIDs` alternates a profile and its Favorites root. `spaces` is read in its own order; `sidebarSyncState` and `firebaseSyncState` are sync copies | Profiles, Spaces and node tree; split views become separate tabs at first |
+| Profiles | Each Space's `profile` is `{"default": true}` or `{"custom": {"_0": {"directoryBasename": …}}}`; names in `User Data/Local State` (`profile.info_cache.<directory>.name`), no colors there | One Arbalette profile per Arc profile |
+| Archive | `StorableArchive.json` | Arbalette archive |
 | Link routing rules | `StorableLinkRouting.json` | Rules; destinations that do not exist in Arbalette fall back to the profile's most recent Space |
 | History, bookmarks | `User Data/<directoryBasename>/History`, `Bookmarks` | Same as any Chromium browser (below) |
 
-These formats must be validated against real Arc data before the importer ships.
+The sidebar format was checked against a real Arc file; custom profiles, Space titles, the order of several Spaces
+and `windowTheme` (`primaryColorPalette.midTone`, components from 0 to 1) were absent from it and remain
+to be checked.
 
 ### From system browsers
 
