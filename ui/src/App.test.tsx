@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App, DOUBLE_CLICK_MS } from "./App";
-import type { Item, Page, Tab } from "./bridge";
+import type { Item, Page, Space, Tab } from "./bridge";
 
 const fetch = vi.fn();
 
@@ -43,7 +43,7 @@ const favorites: Tab[] = [
   { id: 11, url: "https://example.com/calendar", title: "", favicon: null },
 ];
 
-const spaces = [
+const spaces: Space[] = [
   { id: 13, title: "Home", emoji: null, color: "blue" },
   { id: 14, title: "work", emoji: null, color: "green" },
   { id: 15, title: "Travel", emoji: null, color: "red" },
@@ -140,6 +140,25 @@ test("marks the selected tab's close button as a dash, the others as a cross", (
   expect(close("Other").textContent).toBe("×");
   fireEvent.click(close("Example"));
   expect(fetch).toHaveBeenLastCalledWith("/command/close/3", { method: "POST" });
+});
+
+test("shows the displayed Space's name above its pinned tabs", () => {
+  render(<App />);
+  receive({});
+  const header = shown().getByRole("heading", { name: "Home" });
+  const pinned = shown().getByRole("button", { name: "Pinned" });
+  expect(header.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("shows a Space's emoji in its header", () => {
+  render(<App />);
+  spaces[0] = { ...spaces[0], emoji: "🏠" };
+  try {
+    receive({});
+    expect(shown().getByRole("heading", { name: "Home" }).textContent).toBe("🏠Home");
+  } finally {
+    spaces[0] = { ...spaces[0], emoji: null };
+  }
 });
 
 test("shows pinned tabs and folders above the divider and today's tabs", () => {

@@ -298,6 +298,28 @@ body {
   font-weight: 600;
 }
 
+/* The displayed Space's name above its pinned tabs. */
+.space-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 4px 0 0;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.55;
+}
+
+.space-dot {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
 .tab:hover,
 button.folder:hover {
   background: var(--hover);
