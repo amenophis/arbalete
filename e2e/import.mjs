@@ -187,7 +187,7 @@ try {
     "the sidebar shows the imported Spaces, and an imported tab of the first",
     ``,
     `e2e.spaces() === "Home,Space,Office,Chrome"
-      && document.querySelector(".url").textContent.startsWith("https://docs.example.com/guide")`,
+      && document.querySelector(".url").title.startsWith("https://docs.example.com/guide")`,
   );
   await check(
     sidebar,

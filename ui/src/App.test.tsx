@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App, DOUBLE_CLICK_MS } from "./App";
+import { App, DOUBLE_CLICK_MS, domain } from "./App";
 import type { Item, Page, Space, Tab } from "./bridge";
 
 const fetch = vi.fn();
@@ -105,11 +105,19 @@ test("sends the toolbar's commands to the app", () => {
 test("shows the active tab and the loading progress", () => {
   render(<App />);
   receive({ loading: true, progress: 0.4, canGoBack: false });
-  expect(screen.getByText("https://example.com/")).toBeDefined();
+  const url = screen.getByText("example.com");
+  expect(url.closest(".url")?.getAttribute("title")).toBe("https://example.com/");
   expect(screen.getByRole("progressbar", { name: "Loading" })).toBeDefined();
   expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", true);
   expect(screen.getByRole("button", { name: "Forward" })).toHaveProperty("disabled", false);
   expect(screen.getByRole("button", { name: "Example" }).getAttribute("aria-current")).toBe("page");
+});
+
+test("shows a page's domain in the url bar", () => {
+  expect(domain("https://www.wikipedia.org/wiki/Arrow")).toBe("wikipedia.org");
+  expect(domain("http://docs.example.com:8080/guide?q=1")).toBe("docs.example.com");
+  expect(domain("about:blank")).toBe("about:blank");
+  expect(domain("not a url")).toBe("not a url");
 });
 
 test("keeps the url bar without a selected tab", () => {
@@ -185,7 +193,7 @@ test("hides the tabs of collapsed folders", () => {
 test("selects and closes a tab inside a folder", () => {
   render(<App />);
   receive({}, 7);
-  expect(screen.getByText("https://example.net/docs")).toBeDefined();
+  expect(document.querySelector(".url")?.getAttribute("title")).toBe("https://example.net/docs");
   expect(screen.getByRole("button", { name: "Manual" }).getAttribute("aria-current")).toBe("page");
   fireEvent.click(screen.getByRole("button", { name: "Pinned" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/select/5", { method: "POST" });
@@ -202,7 +210,7 @@ test("shows the favorites as a grid of tiles named by their titles", () => {
   expect(mail.getAttribute("title")).toBe("Mail");
   expect(mail.textContent).toBe("");
   expect(mail.getAttribute("aria-current")).toBe("page");
-  expect(screen.getByText("https://example.com/mail")).toBeDefined();
+  expect(document.querySelector(".url")?.getAttribute("title")).toBe("https://example.com/mail");
   const calendar = screen.getByRole("button", { name: "https://example.com/calendar" });
   expect(calendar.getAttribute("aria-current")).toBeNull();
   expect(screen.queryByRole("button", { name: "Close Mail" })).toBeNull();

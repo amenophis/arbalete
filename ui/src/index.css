@@ -248,13 +248,18 @@ body {
 
 .url {
   position: relative;
-  min-height: 1lh;
-  margin-top: 8px;
-  padding: 6px 8px;
-  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 36px;
+  margin-top: 4px;
+  padding: 0 12px;
+  border-radius: 10px;
   background: var(--hover);
-  opacity: 0.8;
-  font-size: 12px;
+}
+
+.url .title {
+  opacity: 0.85;
 }
 
 .favorites {
@@ -398,7 +403,7 @@ button.folder:hover {
   background: var(--active);
 }
 
-/* Drawn over the url field's bottom edge, so that loading moves nothing. */
+/* Drawn over the url pill's bottom edge, inside its rounded corners, so that loading moves nothing. */
 .progress {
   position: absolute;
   left: 0;

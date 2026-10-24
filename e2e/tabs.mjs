@@ -167,7 +167,7 @@ try {
   await check(
     "selecting a favorite marks its tile aria-current and shows its url",
     `e2e.tile = e2e.tiles()[1]; e2e.tile.click()`,
-    `e2e.tile.getAttribute("aria-current") === "page" && document.querySelector(".url")?.textContent.includes("favorite=2")`,
+    `e2e.tile.getAttribute("aria-current") === "page" && document.querySelector(".url")?.title.includes("favorite=2")`,
   );
   await check(
     "closing the selected favorite with the close command keeps its tile and deselects it",
@@ -178,7 +178,7 @@ try {
   await check(
     "the pin command moves the selected tab to the end of the pinned tabs",
     `e2e.pinnedRows = () => [...e2e.page().querySelectorAll(".pinned > .tab-row")];
-     e2e.saved = document.querySelector(".url").textContent; e2e.count = e2e.rows().length; e2e.send("pin")`,
+     e2e.saved = document.querySelector(".url").title; e2e.count = e2e.rows().length; e2e.send("pin")`,
     `e2e.current() === e2e.pinnedRows().at(-1) && e2e.rows().length === e2e.count - 1 && e2e.above(e2e.current())`,
   );
   await check(
