@@ -1,4 +1,4 @@
-// Checks selecting, closing and reopening tabs in the real app, through the sidebar page.
+// Checks the sidebar sections, and selecting, closing and reopening tabs, in the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -10,10 +10,11 @@ if (!dataDir) throw new Error("usage: node e2e/tabs.mjs <data dir>");
 const app = launch(dataDir);
 try {
   const sidebar = await connect(SIDEBAR);
-  await sidebar.eval(waitFor(`document.querySelectorAll(".tabs .tab-row").length >= 10`));
+  await sidebar.eval(waitFor(`document.querySelectorAll(".today .tab-row").length >= 10`));
   await sidebar.eval(`window.e2e = {
-    rows: () => [...document.querySelectorAll(".tabs .tab-row")],
-    current: () => document.querySelector(".tabs .tab[aria-current]")?.closest(".tab-row"),
+    rows: () => [...document.querySelectorAll(".today .tab-row")],
+    current: () => document.querySelector(".tab[aria-current]")?.closest(".tab-row"),
+    above: (element) => !!(element.compareDocumentPosition(document.querySelector(".divider")) & Node.DOCUMENT_POSITION_FOLLOWING),
     send: (command) => fetch("/command/" + command, { method: "POST" }).then(() => {}),
   }`);
 
@@ -27,6 +28,17 @@ try {
     console.log(`ok - ${description}`);
   }
 
+  // The benchmark session pins 5 folders of 10 tabs (crates/arbalette-core/examples/bench-session.rs).
+  await check(
+    "the pinned section shows its folders and their tabs above the divider",
+    ``,
+    `(() => {
+      const folders = [...document.querySelectorAll(".pinned .folder")];
+      const tabs = folders[0]?.parentElement.querySelectorAll(".folder-tabs .tab-row") ?? [];
+      return folders.length === 5 && folders[0].textContent.includes("Folder 1") && tabs.length === 10
+        && e2e.above(folders[0]) && e2e.above(tabs[9]) && !e2e.above(e2e.rows()[0]);
+    })()`,
+  );
   await check(
     "selecting a tab marks it aria-current",
     `e2e.picked = e2e.rows()[2]; e2e.picked.querySelector(".tab").click()`,
@@ -57,6 +69,11 @@ try {
     "the reopen command brings the last closed tab back",
     `e2e.count = e2e.rows().length; e2e.send("reopen")`,
     `e2e.rows().length === e2e.count + 1 && e2e.current() === e2e.rows().at(-1) && e2e.current().textContent === e2e.opened.textContent`,
+  );
+  await check(
+    "selecting a pinned tab inside a folder marks it aria-current",
+    `e2e.picked = document.querySelectorAll(".pinned .folder-tabs .tab-row")[13]; e2e.picked.querySelector(".tab").click()`,
+    `e2e.current() === e2e.picked`,
   );
 } finally {
   app.kill();

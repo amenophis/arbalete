@@ -58,10 +58,10 @@ async function stateUpdate() {
     fetch("/command/ready", { method: "POST" });
   });
   const title = `Renamed ${Math.random()}`;
-  state.tabs[0] = { ...state.tabs[0], title };
+  state.today[0] = { ...state.today[0], title };
   const start = performance.now();
   dispatchEvent(new CustomEvent("arbalette:state", { detail: state }));
-  const tabs = document.querySelector(".tabs");
+  const tabs = document.querySelector(".today");
   // React may render during the dispatch, before an observer could see the change.
   if (!tabs.textContent.includes(title)) {
     await new Promise((resolve) => {

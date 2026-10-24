@@ -8,7 +8,8 @@ export function send(command: string) {
 // Sent whole by the app on every change (UiState in app/src/shell.rs).
 export type State = {
   page: Page;
-  tabs: Tab[];
+  pinned: Item[];
+  today: Item[];
   active: number | null;
 };
 
@@ -17,6 +18,15 @@ export type Page = {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+};
+
+export type Item = Tab | Folder;
+
+export type Folder = {
+  id: number;
+  title: string;
+  expanded: boolean;
+  children: Item[];
 };
 
 export type Tab = {

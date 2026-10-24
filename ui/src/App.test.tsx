@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
-import type { Page, Tab } from "./bridge";
+import type { Item, Page, Tab } from "./bridge";
 
 const fetch = vi.fn();
 
@@ -12,15 +12,32 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-const tabs: Tab[] = [
+const today: Tab[] = [
   { id: 3, url: "https://example.com/", title: "Example", favicon: null },
   { id: 4, url: "https://example.org/", title: "Other", favicon: null },
+];
+
+const pinned: Item[] = [
+  { id: 5, url: "https://example.net/", title: "Pinned", favicon: null },
+  {
+    id: 6,
+    title: "Docs",
+    expanded: true,
+    children: [{ id: 7, url: "https://example.net/docs", title: "Manual", favicon: null }],
+  },
+  {
+    id: 8,
+    title: "Archive",
+    expanded: false,
+    children: [{ id: 9, url: "https://example.net/old", title: "Old", favicon: null }],
+  },
 ];
 
 function receive(page: Partial<Page>, active = 3) {
   const detail = {
     page: { progress: 1, loading: false, canGoBack: true, canGoForward: true, ...page },
-    tabs,
+    pinned,
+    today,
     active,
   };
   act(() => {
@@ -67,4 +84,34 @@ test("closes a tab", () => {
   receive({});
   fireEvent.click(screen.getByRole("button", { name: "Close Other" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/close/4", { method: "POST" });
+});
+
+test("shows pinned tabs and folders above the divider and today's tabs", () => {
+  render(<App />);
+  receive({});
+  const divider = screen.getByRole("separator");
+  const above = (element: HTMLElement) =>
+    Boolean(element.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(above(screen.getByRole("button", { name: "Pinned" }))).toBe(true);
+  expect(above(screen.getByText("Docs"))).toBe(true);
+  expect(above(screen.getByRole("button", { name: "Manual" }))).toBe(true);
+  expect(above(screen.getByRole("button", { name: "Example" }))).toBe(false);
+});
+
+test("hides the tabs of collapsed folders", () => {
+  render(<App />);
+  receive({});
+  expect(screen.getByText("Archive")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Old" })).toBeNull();
+});
+
+test("selects and closes a tab inside a folder", () => {
+  render(<App />);
+  receive({}, 7);
+  expect(screen.getByText("https://example.net/docs")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Manual" }).getAttribute("aria-current")).toBe("page");
+  fireEvent.click(screen.getByRole("button", { name: "Pinned" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/select/5", { method: "POST" });
+  fireEvent.click(screen.getByRole("button", { name: "Close Manual" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/close/7", { method: "POST" });
 });
