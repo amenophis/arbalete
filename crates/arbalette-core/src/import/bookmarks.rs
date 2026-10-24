@@ -76,7 +76,8 @@ fn add_folder(
     Ok(())
 }
 
-/// Favorites hold only tabs: a folder hands them its links.
+/// Favorites hold only tabs: a folder hands them its links. Links beyond the favorites' limit
+/// are left out.
 fn add_links(
     sidebar: &mut Sidebar,
     parent: NodeId,
@@ -85,7 +86,10 @@ fn add_links(
     for bookmark in bookmarks {
         match bookmark {
             Bookmark::Link { title: name, url } => {
-                sidebar.add_tab(parent, url, title(name, url))?;
+                match sidebar.add_tab(parent, url, title(name, url)) {
+                    Err(sidebar::Error::FavoritesFull) => return Ok(()),
+                    added => added?,
+                };
             }
             Bookmark::Folder(folder) => add_links(sidebar, parent, &folder.children)?,
         }
@@ -190,6 +194,23 @@ mod tests {
             ]
         );
         assert_eq!(content(&sidebar, space.today).len(), 1);
+    }
+
+    #[test]
+    fn leaves_out_the_bar_links_beyond_the_favorites_limit() {
+        let (mut sidebar, space) = setup();
+        let links = (0..20).map(|i| link("", &format!("https://{i}.example.com/")));
+        let bookmarks = Bookmarks {
+            bar: folder("Bookmarks bar", links.collect()),
+            others: vec![folder(
+                "Other bookmarks",
+                vec![link("News", "https://news.example.net/")],
+            )],
+        };
+        add(&mut sidebar, space, &bookmarks, Bar::Favorites).unwrap();
+        let favorites = content(&sidebar, sidebar.favorites_of(space).unwrap());
+        assert_eq!(favorites.len(), crate::sidebar::MAX_FAVORITES);
+        assert_eq!(content(&sidebar, sidebar.spaces()[0].pinned).len(), 2);
     }
 
     #[test]

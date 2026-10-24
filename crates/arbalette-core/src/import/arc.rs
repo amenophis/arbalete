@@ -126,7 +126,8 @@ impl<'a> Import<'a> {
         if let Some(url) = data["tab"]["savedURL"].as_str() {
             // The title the user gave the tab, else the page's.
             let title = text(&item["title"]).or(text(&data["tab"]["savedTitle"]));
-            // The parent is a container or a folder: adding a tab cannot fail.
+            // The parent is a container or a folder: only full favorites refuse the tab, which is
+            // then left out.
             let _ = self.sidebar.add_tab(parent, url, title.unwrap_or(url));
         } else if data.get("list").is_some() {
             let title = text(&item["title"]).unwrap_or("Folder");
