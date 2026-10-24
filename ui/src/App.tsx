@@ -1,4 +1,4 @@
-import { type KeyboardEvent, memo } from "react";
+import { type KeyboardEvent, memo, useRef } from "react";
 import { type Item, send, type Tab, useAppState, useRenaming } from "./bridge";
 
 export function App() {
@@ -133,6 +133,9 @@ function Items({
   );
 }
 
+// How long a click waits for a second one, which would make it a double click.
+export const DOUBLE_CLICK_MS = 250;
+
 // A click collapses or expands the folder, a double click edits its title. Enter and leaving the
 // field save the title, unless it is blank; Escape keeps the old one.
 const FolderRow = memo(function FolderRow({
@@ -153,14 +156,26 @@ const FolderRow = memo(function FolderRow({
       {expanded ? "▾" : "▸"}
     </span>
   );
+  const toggle = useRef<ReturnType<typeof setTimeout>>(undefined);
   if (!renaming) {
     return (
       <button
         type="button"
         className="folder"
         aria-expanded={expanded}
-        onClick={() => send(`toggle/${id}`)}
-        onDoubleClick={() => onRename(id)}
+        // A mouse click waits to know it does not start a double click, so renaming does not
+        // collapse or expand the folder; the keyboard toggles at once.
+        onClick={(event) => {
+          clearTimeout(toggle.current);
+          if (event.detail > 1) return;
+          const run = () => send(`toggle/${id}`);
+          if (event.detail === 0) run();
+          else toggle.current = setTimeout(run, DOUBLE_CLICK_MS);
+        }}
+        onDoubleClick={() => {
+          clearTimeout(toggle.current);
+          onRename(id);
+        }}
       >
         {arrow}
         <span className="title">{title}</span>

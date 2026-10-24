@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App } from "./App";
+import { App, DOUBLE_CLICK_MS } from "./App";
 import type { Item, Page, Tab } from "./bridge";
 
 const fetch = vi.fn();
@@ -156,14 +156,32 @@ test("hides the favorites when there are none", () => {
 });
 
 test("collapses and expands a folder with a click", () => {
+  vi.useFakeTimers();
   render(<App />);
   receive({});
   const docs = screen.getByRole("button", { name: "Docs" });
   expect(docs.getAttribute("aria-expanded")).toBe("true");
-  fireEvent.click(docs);
+  fireEvent.click(docs, { detail: 1 });
+  vi.advanceTimersByTime(DOUBLE_CLICK_MS);
   expect(fetch).toHaveBeenLastCalledWith("/command/toggle/6", { method: "POST" });
-  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+  fireEvent.click(screen.getByRole("button", { name: "Archive" }), { detail: 0 });
   expect(fetch).toHaveBeenLastCalledWith("/command/toggle/8", { method: "POST" });
+  vi.useRealTimers();
+});
+
+test("renames a folder with a double click without collapsing it", () => {
+  vi.useFakeTimers();
+  render(<App />);
+  receive({});
+  fetch.mockClear();
+  const docs = screen.getByRole("button", { name: "Docs" });
+  fireEvent.click(docs, { detail: 1 });
+  fireEvent.click(docs, { detail: 2 });
+  fireEvent.doubleClick(docs);
+  vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole("textbox", { name: "Folder name" })).toBeDefined();
+  vi.useRealTimers();
 });
 
 test("creates a folder from the divider", () => {
