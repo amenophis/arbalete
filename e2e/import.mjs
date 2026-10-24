@@ -6,12 +6,14 @@
 // imported.
 // Usage: `mise run e2e`, with an empty directory outside the repository.
 
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { connect, IMPORT, launch, pages, SIDEBAR, waitFor } from "./devtools.mjs";
+import { png } from "./png.mjs";
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node e2e/import.mjs <empty dir>");
@@ -23,6 +25,21 @@ const support = join(home, "Library/Application Support");
 const arc = join(support, "Arc");
 cpSync(resolve("crates/arbalette-core/tests/fixtures/arc"), arc, { recursive: true });
 for (const profile of ["Default", "Profile 1"]) mkdirSync(join(arc, "User Data", profile));
+// Arc's icons: the one it cached for the sidebar item "doc-guide", named after the md5 of its id
+// in uppercase, and the one Chromium's database of the profile has for the news page.
+mkdirSync(join(arc, "SidebarItemsFaviconCache"));
+const itemKey = createHash("md5").update("DOC-GUIDE").digest("hex");
+writeFileSync(join(arc, "SidebarItemsFaviconCache", itemKey), png(32, [0x3e, 0x7b, 0xfa]));
+const arcFavicons = new DatabaseSync(join(arc, "User Data/Default/Favicons"));
+arcFavicons.exec(`
+  CREATE TABLE icon_mapping (id INTEGER PRIMARY KEY, page_url TEXT, icon_id INTEGER);
+  CREATE TABLE favicon_bitmaps (id INTEGER PRIMARY KEY, icon_id INTEGER, width INTEGER, height INTEGER, image_data BLOB);
+  INSERT INTO icon_mapping (page_url, icon_id) VALUES ('https://news.example.net/', 1);
+`);
+arcFavicons
+  .prepare("INSERT INTO favicon_bitmaps (icon_id, width, height, image_data) VALUES (1, 16, 16, ?)")
+  .run(png(16, [0xe5, 0x48, 0x4d]));
+arcFavicons.close();
 const chrome = join(support, "Google/Chrome");
 mkdirSync(join(chrome, "Default"), { recursive: true });
 writeFileSync(
@@ -194,6 +211,18 @@ try {
     "the first Space shows its imported pinned folder and the favorites of its profile",
     ``,
     `e2e.page().querySelector(".pinned .folder")?.textContent.includes("Docs") && e2e.tiles().split(",").length === 2`,
+  );
+  await check(
+    sidebar,
+    "imported tabs show the icons Arc had for them, and the others a placeholder",
+    ``,
+    `(() => {
+      const icons = [...e2e.page().querySelectorAll(".pinned .tab-row")].map((row) => {
+        const img = row.querySelector("img.favicon");
+        return img?.src.startsWith("https://arbalette.ui/favicon/") && img.complete && img.naturalWidth > 0;
+      });
+      return icons.filter(Boolean).length === 2 && icons.length === 3;
+    })()`,
   );
   await sidebar.eval(`e2e.urlHeight = document.querySelector(".url").offsetHeight`);
   await check(

@@ -33,6 +33,17 @@ fn history(db: &Connection) -> rusqlite::Result<Vec<Entry>> {
     )
 }
 
+/// The largest icon a profile's `Favicons` database has for a page, as a PNG image.
+pub fn favicon(db: &Connection, page_url: &str) -> Option<Vec<u8>> {
+    let mut query = db
+        .prepare_cached(
+            "SELECT b.image_data FROM icon_mapping m JOIN favicon_bitmaps b ON b.icon_id = m.icon_id
+             WHERE m.page_url = ?1 ORDER BY b.width DESC LIMIT 1",
+        )
+        .ok()?;
+    query.query_row([page_url], |row| row.get(0)).ok()
+}
+
 /// Reads the profile's `Bookmarks` file. A profile that has never saved a bookmark has none.
 pub fn read_bookmarks(profile: &Path) -> Result<Bookmarks, Error> {
     match fs::read_to_string(profile.join("Bookmarks")) {

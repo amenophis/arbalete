@@ -3,7 +3,9 @@
 //! The format is described in docs/PLAN.md, section 4. Items Arbalette has no equivalent for, or
 //! that are malformed, are skipped: one odd item must not stop the import of the others.
 
+use super::{Copy, chromium};
 use crate::sidebar::{Color, NodeId, ProfileId, Sidebar};
+use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::{fs, io, path::Path};
@@ -16,6 +18,41 @@ pub fn read(dir: &Path) -> io::Result<Option<String>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// The icons of the tabs in `StorableSidebar.json`, by saved url: the one Arc cached for the
+/// sidebar item in its data directory `dir`, `SidebarItemsFaviconCache/<md5 of the item's id in
+/// uppercase>`, else the largest one the profile's `Favicons` database, in `profile`, has for the
+/// page. Icons are a bonus: what cannot be read is skipped.
+pub fn favicons(dir: &Path, profile: &Path, storable_sidebar: &str) -> HashMap<String, Vec<u8>> {
+    let mut favicons = HashMap::new();
+    let Ok(json) = serde_json::from_str::<Value>(storable_sidebar) else {
+        return favicons;
+    };
+    let copy = Copy::of(&profile.join("Favicons")).ok().flatten();
+    let db = copy
+        .as_ref()
+        .and_then(|copy| Connection::open(copy.file()).ok());
+    let containers = json["sidebar"]["containers"].as_array();
+    let items = containers
+        .into_iter()
+        .flatten()
+        .flat_map(|c| pairs(&c["items"]));
+    for (id, item) in items {
+        let (Some(id), Some(url)) = (id.as_str(), item["data"]["tab"]["savedURL"].as_str()) else {
+            continue;
+        };
+        if favicons.contains_key(url) {
+            continue;
+        }
+        let key = format!("{:x}", md5::compute(id.to_uppercase()));
+        let cached = fs::read(dir.join("SidebarItemsFaviconCache").join(key)).ok();
+        let png = cached.or_else(|| chromium::favicon(db.as_ref()?, url));
+        if let Some(png) = png {
+            favicons.insert(url.to_string(), png);
+        }
+    }
+    favicons
 }
 
 /// Adds the Spaces and the favorites of one Arc profile, the one in `User Data/<directory>`, to
@@ -337,6 +374,45 @@ mod tests {
         assert!(content(&sidebar, space.today).is_empty());
         let favorites = sidebar.profiles()[0].favorites;
         assert_eq!(content(&sidebar, favorites), ["https://example.com/"]);
+    }
+
+    #[test]
+    fn finds_the_icon_arc_cached_for_an_item_else_the_largest_of_the_page() {
+        let dir = crate::import::TestDir::new("arc-favicons");
+        let json = json!({ "sidebar": { "containers": [{ "items": [
+            "cached-tab", { "data": { "tab": { "savedURL": "https://a.example/" } } },
+            "other-tab", { "data": { "tab": { "savedURL": "https://b.example/" } } },
+            "unknown-tab", { "data": { "tab": { "savedURL": "https://c.example/" } } },
+        ] }] } });
+        // The md5 of "CACHED-TAB".
+        dir.write(
+            "SidebarItemsFaviconCache/0e0a3fea1eaecfa272e5ea443ca2f915",
+            "cached",
+        );
+        dir.dir("User Data/Default");
+        let db = Connection::open(dir.0.join("User Data/Default/Favicons")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE icon_mapping (id INTEGER PRIMARY KEY, page_url TEXT, icon_id INTEGER);
+             CREATE TABLE favicon_bitmaps (id INTEGER PRIMARY KEY, icon_id INTEGER, width INTEGER,
+                 height INTEGER, image_data BLOB);
+             INSERT INTO icon_mapping (page_url, icon_id) VALUES
+                 ('https://a.example/', 1), ('https://b.example/', 2);
+             INSERT INTO favicon_bitmaps (icon_id, width, height, image_data) VALUES
+                 (1, 16, 16, CAST('a' AS BLOB)), (2, 16, 16, CAST('small' AS BLOB)),
+                 (2, 32, 32, CAST('large' AS BLOB));",
+        )
+        .unwrap();
+        drop(db);
+        let favicons = favicons(&dir.0, &dir.0.join("User Data/Default"), &json.to_string());
+        let mut favicons: Vec<_> = favicons.into_iter().collect();
+        favicons.sort();
+        assert_eq!(
+            favicons,
+            [
+                ("https://a.example/".to_string(), b"cached".to_vec()),
+                ("https://b.example/".to_string(), b"large".to_vec()),
+            ]
+        );
     }
 
     #[test]

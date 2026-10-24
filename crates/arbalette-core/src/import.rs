@@ -12,6 +12,7 @@ use crate::sidebar::{ProfileId, Sidebar, SpaceId};
 use bookmarks::{Bar, Bookmarks};
 use browsers::{Browser, Family};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,8 +40,11 @@ pub struct Source {
     name: String,
     /// The browser and profile, for errors.
     label: String,
-    data: Result<(Data, Vec<Entry>), String>,
+    data: Result<(Data, Vec<Entry>, Favicons), String>,
 }
+
+/// The icons found for pages, by url, as PNG images.
+type Favicons = HashMap<String, Vec<u8>>;
 
 #[derive(Debug)]
 enum Data {
@@ -54,6 +58,9 @@ enum Data {
 pub struct Imported {
     /// The visits to add to each profile's history.
     pub histories: Vec<(ProfileId, Vec<Entry>)>,
+    /// The icons to cache for each profile (crate::favicon), by source, as PNG images: the
+    /// imported tabs show them.
+    pub favicons: Vec<(ProfileId, Favicons)>,
     /// One message per browser profile that could not be read, fully or in part.
     pub errors: Vec<String>,
 }
@@ -89,17 +96,45 @@ pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
             profile,
             name: &source.name,
         };
-        let added = source.data.and_then(|(data, history)| {
+        let added = source.data.and_then(|(data, history, favicons)| {
             add(sidebar, data, target, source.choice.bar)?;
-            Ok(history)
+            Ok((history, show_favicons(sidebar, profile, favicons)))
         });
         match added {
-            Ok(history) => imported.histories.push((profile, history)),
+            Ok((history, favicons)) => {
+                imported.histories.push((profile, history));
+                imported.favicons.push((profile, favicons));
+            }
             Err(error) => imported.errors.push(format!("{}: {error}", source.label)),
         }
         target.space(sidebar);
     }
     imported
+}
+
+/// Gives the profile's tabs without an icon the one found for their url, the url naming its
+/// source, and returns the icons they show.
+fn show_favicons(sidebar: &mut Sidebar, profile: ProfileId, mut found: Favicons) -> Favicons {
+    let tabs: Vec<_> = sidebar
+        .tabs()
+        .filter(|(id, tab)| {
+            tab.favicon.is_none()
+                && found.contains_key(&tab.url)
+                && sidebar.profile_of(*id) == Some(profile)
+        })
+        .map(|(id, _)| id)
+        .collect();
+    let mut shown = Favicons::new();
+    for id in tabs {
+        let Some(tab) = sidebar.tab_mut(id) else {
+            continue;
+        };
+        tab.favicon = Some(tab.url.clone());
+        if let Some(png) = found.remove(&tab.url) {
+            shown.insert(tab.url.clone(), png);
+        }
+    }
+    shown
 }
 
 /// A new profile is named after its browser, and its browser profile when there are several.
@@ -129,14 +164,18 @@ impl Target<'_> {
     }
 }
 
-/// Reads a browser profile's sidebar or bookmarks, and its history.
-fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>), String> {
+/// Reads a browser profile's sidebar or bookmarks, its history and the icons of its tabs.
+fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>, Favicons), String> {
+    let mut favicons = Favicons::new();
     let data = match family {
         Family::Arc => {
             // Arc's data directory holds `User Data`, which holds its profiles.
             let dir = path.parent().and_then(Path::parent).unwrap_or(path);
             let directory = path.file_name().and_then(|name| name.to_str());
             let sidebar = arc::read(dir).map_err(debug)?;
+            if let Some(json) = &sidebar {
+                favicons = arc::favicons(dir, path, json);
+            }
             Data::Arc(sidebar, directory.unwrap_or_default().to_string())
         }
         Family::Chromium => Data::Bookmarks(chromium::read_bookmarks(path).map_err(debug)?),
@@ -148,7 +187,7 @@ fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>), Strin
         Family::Firefox => firefox::read_history(path).map_err(debug),
         Family::Safari => safari::read_history(path).map_err(debug),
     };
-    Ok((data, history?))
+    Ok((data, history?, favicons))
 }
 
 /// Adds a browser profile's sidebar or bookmarks to `target`.
@@ -412,6 +451,30 @@ mod tests {
         assert_eq!(favorites, ["https://mail.example.com/"]);
         assert_eq!(imported.histories.len(), 1);
         assert_eq!(imported.histories[0].1.len(), 1);
+    }
+
+    #[test]
+    fn gives_the_tabs_of_the_profile_the_icon_found_for_their_url() {
+        let mut sidebar = Sidebar::default();
+        let profile = sidebar.profiles()[0].id;
+        let other = sidebar.add_profile("Other");
+        sidebar.add_space("Other", other).unwrap();
+        let [today, other_today] = [0, 1].map(|i| sidebar.spaces()[i].today);
+        let favorites = sidebar.profiles()[0].favorites;
+        let tabs = [today, favorites, other_today]
+            .map(|parent| sidebar.add_tab(parent, "https://a.example/", "A").unwrap());
+        let found = Favicons::from([
+            ("https://a.example/".to_string(), b"a".to_vec()),
+            ("https://unused.example/".to_string(), b"b".to_vec()),
+        ]);
+        let shown = show_favicons(&mut sidebar, profile, found);
+        assert_eq!(
+            shown,
+            Favicons::from([("https://a.example/".to_string(), b"a".to_vec())])
+        );
+        let favicons = tabs.map(|tab| sidebar.tab_mut(tab).unwrap().favicon.clone());
+        let a = Some("https://a.example/".to_string());
+        assert_eq!(favicons, [a.clone(), a, None]);
     }
 
     #[test]
