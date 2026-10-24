@@ -272,7 +272,7 @@ wrap_app! {
             if cfg!(debug_assertions) {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
             }
-            // Lets the benchmark script (perf/measure.mjs) drive the UI through DevTools.
+            // Lets the end-to-end check and the benchmark (e2e/devtools.mjs) drive the UI through DevTools.
             if let Ok(port) = std::env::var("ARBALETTE_DEBUG_PORT") {
                 command_line.append_switch_with_value(
                     Some(&CefString::from("remote-debugging-port")),

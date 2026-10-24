@@ -1,0 +1,63 @@
+// Checks selecting, closing and reopening tabs in the real app, through the sidebar page.
+// Usage: `mise run e2e`, which bundles the app and writes a session first.
+// Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
+
+import { connect, launch, SIDEBAR, waitFor } from "./devtools.mjs";
+
+const dataDir = process.argv[2];
+if (!dataDir) throw new Error("usage: node e2e/tabs.mjs <data dir>");
+
+const app = launch(dataDir);
+try {
+  const sidebar = await connect(SIDEBAR);
+  await sidebar.eval(waitFor(`document.querySelectorAll(".tabs .tab-row").length >= 10`));
+  await sidebar.eval(`window.e2e = {
+    rows: () => [...document.querySelectorAll(".tabs .tab-row")],
+    current: () => document.querySelector(".tabs .tab[aria-current]")?.closest(".tab-row"),
+    send: (command) => fetch("/command/" + command, { method: "POST" }).then(() => {}),
+  }`);
+
+  async function check(description, action, condition) {
+    await sidebar.eval(action);
+    try {
+      await sidebar.eval(waitFor(condition));
+    } catch (error) {
+      throw new Error(`not ok - ${description}\n  ${error.message}`);
+    }
+    console.log(`ok - ${description}`);
+  }
+
+  await check(
+    "selecting a tab marks it aria-current",
+    `e2e.picked = e2e.rows()[2]; e2e.picked.querySelector(".tab").click()`,
+    `e2e.current() === e2e.picked`,
+  );
+  await check(
+    "the close button of a tab removes its row",
+    `e2e.count = e2e.rows().length; e2e.closed = e2e.rows()[5]; e2e.closed.querySelector(".close").click()`,
+    `!e2e.closed.isConnected && e2e.rows().length === e2e.count - 1`,
+  );
+  await check(
+    "closing the selected tab with the close command selects its neighbor",
+    `e2e.next = e2e.picked.nextElementSibling; e2e.send("close")`,
+    `!e2e.picked.isConnected && e2e.current() === e2e.next`,
+  );
+  // The opened tab goes last: its neighbor is not its opener.
+  await check(
+    "the open command opens a tab after the others and selects it",
+    `e2e.opener = e2e.current(); e2e.count = e2e.rows().length; e2e.send("open/" + encodeURIComponent("about:blank"))`,
+    `e2e.rows().length === e2e.count + 1 && e2e.current() === e2e.rows().at(-1)`,
+  );
+  await check(
+    "closing a tab returns to the tab it was opened from",
+    `e2e.opened = e2e.current(); e2e.send("close")`,
+    `!e2e.opened.isConnected && e2e.current() === e2e.opener`,
+  );
+  await check(
+    "the reopen command brings the last closed tab back",
+    `e2e.count = e2e.rows().length; e2e.send("reopen")`,
+    `e2e.rows().length === e2e.count + 1 && e2e.current() === e2e.rows().at(-1) && e2e.current().textContent === e2e.opened.textContent`,
+  );
+} finally {
+  app.kill();
+}
