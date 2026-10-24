@@ -313,6 +313,7 @@ impl UiState {
                     "expanded": expanded,
                     "children": self.items(id),
                 })),
+                NodeKind::Split => Some(json!({ "id": id, "split": self.tabs(id) })),
                 NodeKind::Container => None,
             })
             .collect()
@@ -1448,6 +1449,9 @@ pub fn run(command: Command) {
         (Command::Move(id, parent, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.move_node(id, parent, index));
         }
+        (Command::Split(tab, target), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.split(tab, target));
+        }
         (Command::NewProfile, _) => new_profile(),
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
         (Command::RenameProfile(id, name), _) => {
@@ -2281,6 +2285,19 @@ mod tests {
             "https://example.com/"
         );
         assert_eq!(page["today"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn sends_a_split_with_its_two_tabs() {
+        let mut state = UiState::default();
+        let home = state.sidebar.spaces()[0].id;
+        let [a, b] = ["https://a.test/", "https://b.test/"]
+            .map(|url| state.sidebar.open_tab(home, url).unwrap());
+        let split = state.sidebar.split(b, a).unwrap();
+        let page = &state.to_json()["pages"][0];
+        assert_eq!(page["today"][0]["id"], serde_json::json!(split));
+        assert_eq!(page["today"][0]["split"][0]["id"], serde_json::json!(a));
+        assert_eq!(page["today"][0]["split"][1]["url"], "https://b.test/");
     }
 
     #[test]

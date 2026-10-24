@@ -1,8 +1,8 @@
 //! The sidebar: profiles, Spaces and the tree of tabs and folders each Space holds.
 //!
 //! Every profile has a root container for its favorites, shared by the Spaces attached to it. Every
-//! Space has two root containers: its pinned tabs and its "Today" tabs. Tabs and folders are nodes of
-//! a single tree, stored flat and linked by `parent` and `children`.
+//! Space has two root containers: its pinned tabs and its "Today" tabs. Tabs, folders and splits are
+//! nodes of a single tree, stored flat and linked by `parent` and `children`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -77,6 +77,9 @@ pub enum NodeKind {
         expanded: bool,
     },
     Tab(Tab),
+    /// Two tabs side by side in one row, its two children; it never holds fewer, nor goes into the
+    /// favorites.
+    Split,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -108,6 +111,8 @@ pub enum Error {
     RootNode,
     /// The browser always keeps a Space to open tabs in.
     LastSpace,
+    /// A split joins two different tabs, neither a favorite nor already in a split.
+    NotSplittable,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -413,16 +418,37 @@ impl Sidebar {
         if !self.is_tab(id) && self.profiles.iter().any(|p| p.favorites == parent) {
             return Err(Error::NotATab);
         }
-        let was_pinned = self.is_pinned(id);
-        self.children_mut(old_parent).retain(|child| *child != id);
-        let children = self.children_mut(parent);
-        children.insert(index.min(children.len()), id);
-        self.nodes.get_mut(&id).expect("checked by movable").parent = Some(parent);
-        let pinned = self.is_pinned(id);
-        if pinned != was_pinned {
-            self.save_urls(id, pinned);
-        }
+        self.place(id, old_parent, parent, index);
         Ok(())
+    }
+
+    /// Puts `tab` beside `target` in a split taking `target`'s place, `target` first. A tab moved
+    /// out of another split leaves its other tab alone in a row.
+    pub fn split(&mut self, tab: NodeId, target: NodeId) -> Result<NodeId, Error> {
+        self.check_tab(tab)?;
+        self.check_tab(target)?;
+        let parent = self.movable(target)?;
+        if tab == target || self.is_favorite(target) || self.in_split(target) {
+            return Err(Error::NotSplittable);
+        }
+        let index = self.nodes[&parent]
+            .children
+            .iter()
+            .position(|&id| id == target);
+        let split = self.insert(None, NodeKind::Split);
+        self.nodes.get_mut(&split).expect("just inserted").parent = Some(parent);
+        self.children_mut(parent)
+            .insert(index.expect("a child of its parent"), split);
+        self.place(target, parent, split, 0);
+        let from = self.movable(tab)?;
+        self.place(tab, from, split, 1);
+        Ok(split)
+    }
+
+    /// The row a tab shows in: its split, if any, else the tab itself.
+    pub fn row_of(&self, tab: NodeId) -> NodeId {
+        let parent = self.nodes.get(&tab).and_then(|node| node.parent);
+        parent.filter(|&p| self.is_split(p)).unwrap_or(tab)
     }
 
     /// The tab to show once `tab` is closed: the tab it was opened from if still open, else the
@@ -509,28 +535,30 @@ impl Sidebar {
         if !self.is_tab(tab) {
             return Err(Error::NotATab);
         }
+        let row = self.row_of(tab);
         if self.ancestors(tab).any(|id| id == today) {
-            self.move_node(tab, pinned, usize::MAX)
+            self.move_node(row, pinned, usize::MAX)
         } else if self.ancestors(tab).any(|id| id == pinned) {
-            self.move_node(tab, today, 0)
+            self.move_node(row, today, 0)
         } else {
             Ok(())
         }
     }
 
-    /// Moves a tab to the end of another Space's "Today" tabs, unpinned, and deselects it in the
-    /// Space it leaves. Favorites belong to no Space: they stay where they are, like a tab moved to
-    /// its own Space.
+    /// Moves a tab, with the split it is in, to the end of another Space's "Today" tabs, unpinned,
+    /// and deselects it in the Space it leaves. Favorites belong to no Space: they stay where they
+    /// are, like a tab moved to its own Space.
     pub fn move_to_space(&mut self, tab: NodeId, space: SpaceId) -> Result<(), Error> {
         let today = self.space(space)?.today;
         self.check_tab(tab)?;
         let Some(from) = self.space_of(tab).filter(|&from| from != space) else {
             return Ok(());
         };
-        self.move_node(tab, today, usize::MAX)?;
-        let from = self.space_mut(from)?;
-        if from.selected == Some(tab) {
-            from.selected = None;
+        let row = self.row_of(tab);
+        self.move_node(row, today, usize::MAX)?;
+        let selected = self.space(from)?.selected;
+        if selected.is_some_and(|selected| self.row_of(selected) == row) {
+            self.space_mut(from)?.selected = None;
         }
         Ok(())
     }
@@ -554,11 +582,13 @@ impl Sidebar {
         Ok(tabs)
     }
 
-    /// Favorites and pinned tabs stay when closed: closing one deselects it in `space` and takes
-    /// it back to its saved url, if any. Returns the tab to show instead: the tab it was opened
+    /// Favorites and pinned tabs stay when closed: closing one deselects it in `space`, takes it
+    /// out of its split, if any, and back to its saved url, if any. Returns the tab to show instead: the tab it was opened
     /// from if still open, else the Space's last "Today" tab, rather than a neighbor it stays with.
     pub fn close_in_place(&mut self, space: SpaceId, tab: NodeId) -> Result<Option<NodeId>, Error> {
+        self.space(space)?;
         let opener = self.open_opener(tab);
+        self.separate(tab);
         let space = self.spaces.iter_mut().find(|s| s.id == space);
         let space = space.ok_or(Error::UnknownSpace)?;
         if space.selected == Some(tab) {
@@ -575,10 +605,12 @@ impl Sidebar {
         Ok(opener.or_else(|| today.iter().rev().copied().find(|&id| self.is_tab(id))))
     }
 
-    /// Removes a tab or a folder with everything it contains.
+    /// Removes a tab, a folder or a split with everything it contains; the other tab of a split
+    /// left alone takes the split's place.
     pub fn remove(&mut self, id: NodeId) -> Result<(), Error> {
         let parent = self.movable(id)?;
         self.children_mut(parent).retain(|child| *child != id);
+        self.dissolve(parent);
         let mut pending = vec![id];
         while let Some(id) = pending.pop() {
             let node = self.nodes.remove(&id).expect("children are known nodes");
@@ -593,6 +625,64 @@ impl Sidebar {
             }
         }
         Ok(())
+    }
+
+    /// Moves `id` from `from` to `index` among `to`'s children, saving or forgetting the urls of
+    /// the tabs that become pinned or stop being pinned.
+    fn place(&mut self, id: NodeId, from: NodeId, to: NodeId, index: usize) {
+        let was_pinned = self.is_pinned(id);
+        self.children_mut(from).retain(|child| *child != id);
+        let children = self.children_mut(to);
+        children.insert(index.min(children.len()), id);
+        self.nodes.get_mut(&id).expect("a known node").parent = Some(to);
+        self.dissolve(from);
+        let pinned = self.is_pinned(id);
+        if pinned != was_pinned {
+            self.save_urls(id, pinned);
+        }
+    }
+
+    /// Moves a tab out of its split, right after it, which then dissolves.
+    fn separate(&mut self, tab: NodeId) {
+        let split = self.row_of(tab);
+        if split == tab {
+            return;
+        }
+        let parent = self.nodes[&split].parent.expect("a split has a parent");
+        let index = self.nodes[&parent]
+            .children
+            .iter()
+            .position(|&id| id == split);
+        self.place(
+            tab,
+            split,
+            parent,
+            index.expect("a child of its parent") + 1,
+        );
+    }
+
+    /// Replaces a split holding fewer than two tabs by the tab it has left, if any.
+    fn dissolve(&mut self, split: NodeId) {
+        if !self.is_split(split) || self.nodes[&split].children.len() > 1 {
+            return;
+        }
+        let node = self.nodes.remove(&split).expect("a known split");
+        let parent = node.parent.expect("a split has a parent");
+        for &child in &node.children {
+            self.nodes.get_mut(&child).expect("a known tab").parent = Some(parent);
+        }
+        let siblings = self.children_mut(parent);
+        let index = siblings.iter().position(|&id| id == split);
+        let index = index.expect("a child of its parent");
+        siblings.splice(index..=index, node.children);
+    }
+
+    fn is_split(&self, id: NodeId) -> bool {
+        matches!(self.nodes.get(&id).map(|n| &n.kind), Some(NodeKind::Split))
+    }
+
+    fn in_split(&self, id: NodeId) -> bool {
+        self.row_of(id) != id
     }
 
     fn next_id(&mut self) -> u64 {
@@ -634,7 +724,9 @@ impl Sidebar {
         for &id in &self.nodes[&parent].children {
             match &self.nodes[&id].kind {
                 NodeKind::Tab(_) => tabs.push(id),
-                NodeKind::Folder { expanded: true, .. } => self.push_visible_tabs(id, tabs),
+                NodeKind::Folder { expanded: true, .. } | NodeKind::Split => {
+                    self.push_visible_tabs(id, tabs)
+                }
                 _ => {}
             }
         }
@@ -691,7 +783,7 @@ impl Sidebar {
     fn check_container(&self, id: NodeId) -> Result<(), Error> {
         match self.nodes.get(&id).map(|n| &n.kind) {
             None => Err(Error::UnknownNode),
-            Some(NodeKind::Tab(_)) => Err(Error::NotAContainer),
+            Some(NodeKind::Tab(_) | NodeKind::Split) => Err(Error::NotAContainer),
             Some(_) => Ok(()),
         }
     }
@@ -1593,5 +1685,85 @@ mod tests {
         sidebar.display(work).unwrap();
         sidebar.delete_space(home(&sidebar).id).unwrap();
         assert_eq!(sidebar.displayed().id, work);
+    }
+
+    #[test]
+    fn splits_a_tab_with_another_in_its_place() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b, c] = ["a", "b", "c"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split(c, a).unwrap();
+        assert_eq!(children(&sidebar, home.today), [split, b]);
+        assert_eq!(children(&sidebar, split), [a, c]);
+        assert_eq!(sidebar.node(c).unwrap().parent, Some(split));
+        assert_eq!((sidebar.row_of(a), sidebar.row_of(b)), (split, b));
+        assert_eq!(sidebar.next_tab(home.id, true), Some(a));
+        assert_eq!(sidebar.split(b, c), Err(Error::NotSplittable));
+        assert_eq!(sidebar.split(b, b), Err(Error::NotSplittable));
+        assert_eq!(sidebar.split(split, b), Err(Error::NotATab));
+    }
+
+    #[test]
+    fn refuses_splits_in_the_favorites_and_moves_into_a_split() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let [a, b, c] = ["a", "b", "c"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        sidebar.move_node(a, favorites, 0).unwrap();
+        assert_eq!(sidebar.split(b, a), Err(Error::NotSplittable));
+        let split = sidebar.split(a, b).unwrap();
+        assert!(children(&sidebar, favorites).is_empty());
+        assert_eq!(sidebar.move_node(c, split, 0), Err(Error::NotAContainer));
+        assert_eq!(sidebar.add_tab(split, "d", "d"), Err(Error::NotAContainer));
+        assert_eq!(sidebar.move_node(split, favorites, 0), Err(Error::NotATab));
+    }
+
+    #[test]
+    fn a_split_left_with_one_tab_becomes_that_tab() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b, c, d] = ["a", "b", "c", "d"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let first = sidebar.split(b, a).unwrap();
+        assert_eq!(sidebar.next_after_close(a), Some(b));
+        sidebar.remove(a).unwrap();
+        assert_eq!(children(&sidebar, home.today), [b, c, d]);
+        assert_eq!(sidebar.node(b).unwrap().parent, Some(home.today));
+        assert!(sidebar.node(first).is_none());
+        let second = sidebar.split(d, c).unwrap();
+        sidebar.split(c, b).unwrap();
+        assert_eq!(children(&sidebar, home.today)[1], d);
+        assert!(sidebar.node(second).is_none());
+    }
+
+    #[test]
+    fn moves_pins_and_closes_a_split_as_one_row() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let [a, b, c] = ["a", "b", "c"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split(b, a).unwrap();
+        sidebar.toggle_pin(home.id, b).unwrap();
+        assert_eq!(children(&sidebar, home.pinned), [split]);
+        assert_eq!(saved_url(&mut sidebar, a).as_deref(), Some("a"));
+        assert_eq!(sidebar.close_in_place(home.id, a), Ok(Some(c)));
+        assert_eq!(children(&sidebar, home.pinned), [b, a]);
+        let split = sidebar.split(a, b).unwrap();
+        sidebar.select(home.id, a).unwrap();
+        sidebar.move_to_space(b, work).unwrap();
+        assert_eq!(children(&sidebar, sidebar.spaces()[1].today), [split]);
+        assert_eq!(saved_url(&mut sidebar, a), None);
+        assert_eq!(sidebar.spaces()[0].selected, None);
+    }
+
+    #[test]
+    fn a_split_survives_saving_and_older_sessions_still_load() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b] = ["a", "b"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let before = serde_json::to_string(&sidebar).unwrap();
+        assert_eq!(serde_json::from_str::<Sidebar>(&before).unwrap(), sidebar);
+        sidebar.split(b, a).unwrap();
+        let json = serde_json::to_string(&sidebar).unwrap();
+        assert_eq!(serde_json::from_str::<Sidebar>(&json).unwrap(), sidebar);
     }
 }

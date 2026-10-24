@@ -70,6 +70,9 @@ pub enum Command {
     /// Moves a tab or a folder to an index among a container's or a folder's children, as the
     /// app counts them once the node has left: `move/<id>/<parent id>/<index>`.
     Move(NodeId, NodeId, usize),
+    /// Puts a tab beside another in a split row, in the other's place: `split/<tab id>/<target
+    /// id>`.
+    Split(NodeId, NodeId),
     /// Creates a profile, with a Space of its own, for the UI to rename: `profile/new`.
     NewProfile,
     /// Renames a profile: `profile/rename/<profile id>/<percent-encoded name>`.
@@ -319,6 +322,14 @@ impl Command {
                     let id = serde_json::from_str(id).ok()?;
                     return percent_decode(title).map(|title| Self::RenameFolder(id, title));
                 }
+                if let Some((tab, target)) =
+                    path.strip_prefix("split/").and_then(|r| r.split_once('/'))
+                {
+                    let tab = serde_json::from_str(tab).ok()?;
+                    return serde_json::from_str(target)
+                        .ok()
+                        .map(|target| Self::Split(tab, target));
+                }
                 if let Some(args) = path.strip_prefix("move/") {
                     let mut args = args.split('/');
                     let (id, parent, index) = (args.next()?, args.next()?, args.next()?);
@@ -484,6 +495,16 @@ mod tests {
         assert_eq!(Command::parse("rename/6"), None);
         assert_eq!(Command::parse("rename/x/a"), None);
         assert_eq!(Command::parse("toggle/x"), None);
+    }
+
+    #[test]
+    fn parses_a_split() {
+        let Some(Command::Split(tab, target)) = Command::parse("split/4/7") else {
+            panic!("not a split")
+        };
+        assert_eq!(serde_json::to_string(&(tab, target)).unwrap(), "[4,7]");
+        assert_eq!(Command::parse("split/4"), None);
+        assert_eq!(Command::parse("split/4/x"), None);
     }
 
     #[test]
