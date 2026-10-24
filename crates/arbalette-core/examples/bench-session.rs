@@ -1,4 +1,5 @@
-//! Writes the performance prototype's session: 5 Spaces of 100 tabs, half of them in folders.
+//! Writes the performance prototype's session: 6 favorites, then 5 Spaces of 100 tabs, half of them
+//! in folders.
 //!
 //! Usage: `cargo run -p arbalette-core --example bench-session -- <data dir>`, then run the app with
 //! `ARBALETTE_DATA_DIR=<data dir>`.
@@ -6,6 +7,7 @@
 use arbalette_core::{sidebar::Sidebar, store};
 use std::path::PathBuf;
 
+const FAVORITES: usize = 6;
 const SPACES: usize = 5;
 const FOLDERS: usize = 5;
 const TABS_PER_FOLDER: usize = 10;
@@ -45,6 +47,15 @@ fn main() {
         for _ in 0..TODAY_TABS {
             open(&mut sidebar);
         }
+    }
+    let home = sidebar.spaces()[0].id;
+    let favorites = sidebar.profiles()[0].favorites;
+    for index in 1..=FAVORITES {
+        let url = format!("https://example.com/?favorite={index}");
+        let tab = sidebar.open_tab(home, &url).unwrap();
+        sidebar.tab_mut(tab).unwrap().title = format!("Favorite {index}");
+        sidebar.move_node(tab, favorites, usize::MAX).unwrap();
+        count += 1;
     }
     let home = sidebar.spaces()[0].clone();
     let first = sidebar.node(home.today).unwrap().children[0];
