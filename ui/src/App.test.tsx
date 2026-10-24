@@ -46,6 +46,7 @@ const favorites: Tab[] = [
 function receive(page: Partial<Page>, active = 3, favoriteTabs = favorites) {
   const detail = {
     page: { progress: 1, loading: false, canGoBack: true, canGoForward: true, ...page },
+    roots: { favorites: 1, pinned: 2, today: 12 },
     favorites: favoriteTabs,
     pinned,
     today,

@@ -55,7 +55,8 @@ struct UiState {
 }
 
 impl UiState {
-    /// Sent whole to the UI on every change. Only the first Space is shown for now.
+    /// Sent whole to the UI on every change. Only the first Space is shown for now. `roots` names
+    /// the sections' containers, which the UI moves nodes into.
     fn to_json(&self) -> serde_json::Value {
         let home = &self.sidebar.spaces()[0];
         let profile = self
@@ -63,9 +64,11 @@ impl UiState {
             .profiles()
             .iter()
             .find(|p| p.id == home.profile);
+        let favorites = profile.expect("a known profile").favorites;
         json!({
             "page": self.page,
-            "favorites": self.tabs(profile.expect("a known profile").favorites),
+            "roots": { "favorites": favorites, "pinned": home.pinned, "today": home.today },
+            "favorites": self.tabs(favorites),
             "pinned": self.items(home.pinned),
             "today": self.items(home.today),
             "active": home.selected,
@@ -330,6 +333,9 @@ pub fn run(command: Command) {
         }
         (Command::RenameFolder(id, title), _) => {
             let _ = update_sidebar(|sidebar| sidebar.rename_folder(id, &title));
+        }
+        (Command::Move(id, parent, index), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.move_node(id, parent, index));
         }
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
@@ -751,6 +757,12 @@ mod tests {
         assert_eq!(json["page"]["canGoBack"], false);
         assert_eq!(json["today"][0]["url"], "https://example.com/");
         assert_eq!(json["today"][0]["id"], json["active"]);
+        let roots = serde_json::json!({
+            "favorites": state.sidebar.profiles()[0].favorites,
+            "pinned": state.sidebar.spaces()[0].pinned,
+            "today": state.sidebar.spaces()[0].today,
+        });
+        assert_eq!(json["roots"], roots);
     }
 
     #[test]

@@ -209,17 +209,27 @@ impl Sidebar {
         Ok(())
     }
 
-    /// Moves a tab or a folder, with its content, to `index` among `parent`'s children.
+    /// Moves a tab or a folder, with its content, to `index` among `parent`'s children. Tabs that
+    /// become pinned save their url, tabs that stop being pinned forget it. Favorites hold only
+    /// tabs.
     pub fn move_node(&mut self, id: NodeId, parent: NodeId, index: usize) -> Result<(), Error> {
         let old_parent = self.movable(id)?;
         self.check_container(parent)?;
         if self.ancestors(parent).any(|ancestor| ancestor == id) {
             return Err(Error::MoveIntoItself);
         }
+        if !self.is_tab(id) && self.profiles.iter().any(|p| p.favorites == parent) {
+            return Err(Error::NotATab);
+        }
+        let was_pinned = self.is_pinned(id);
         self.children_mut(old_parent).retain(|child| *child != id);
         let children = self.children_mut(parent);
         children.insert(index.min(children.len()), id);
         self.nodes.get_mut(&id).expect("checked by movable").parent = Some(parent);
+        let pinned = self.is_pinned(id);
+        if pinned != was_pinned {
+            self.save_urls(id, pinned);
+        }
         Ok(())
     }
 
@@ -253,22 +263,20 @@ impl Sidebar {
             .any(|space| self.ancestors(id).any(|ancestor| ancestor == space.pinned))
     }
 
-    /// Pins a "Today" tab at the end of the Space's pinned tabs, saving its url, or moves a pinned
-    /// tab back to the top of "Today", forgetting its saved url. Favorites stay where they are.
+    /// Pins a "Today" tab at the end of the Space's pinned tabs, or moves a pinned tab back to the
+    /// top of "Today". Favorites stay where they are.
     pub fn toggle_pin(&mut self, space: SpaceId, tab: NodeId) -> Result<(), Error> {
         let (pinned, today) = self.space(space).map(|s| (s.pinned, s.today))?;
-        let url = self.tab_mut(tab).ok_or(Error::NotATab)?.url.clone();
-        let saved_url = if self.ancestors(tab).any(|id| id == today) {
-            self.move_node(tab, pinned, usize::MAX)?;
-            Some(url)
+        if !self.is_tab(tab) {
+            return Err(Error::NotATab);
+        }
+        if self.ancestors(tab).any(|id| id == today) {
+            self.move_node(tab, pinned, usize::MAX)
         } else if self.ancestors(tab).any(|id| id == pinned) {
-            self.move_node(tab, today, 0)?;
-            None
+            self.move_node(tab, today, 0)
         } else {
-            return Ok(());
-        };
-        self.tab_mut(tab).expect("checked above").saved_url = saved_url;
-        Ok(())
+            Ok(())
+        }
     }
 
     /// Favorites and pinned tabs stay when closed: closing one deselects it in `space` and takes
@@ -332,6 +340,18 @@ impl Sidebar {
             self.children_mut(parent).push(id);
         }
         id
+    }
+
+    /// Saves the url of every tab in `id`, or forgets it.
+    fn save_urls(&mut self, id: NodeId, save: bool) {
+        let mut pending = vec![id];
+        while let Some(id) = pending.pop() {
+            let node = self.nodes.get_mut(&id).expect("children are known nodes");
+            if let NodeKind::Tab(tab) = &mut node.kind {
+                tab.saved_url = save.then(|| tab.url.clone());
+            }
+            pending.extend(node.children.iter().copied());
+        }
     }
 
     /// The tab `tab` was opened from, if it is still open.
@@ -549,6 +569,55 @@ mod tests {
         sidebar.toggle_pin(home.id, tab).unwrap();
         assert_eq!(children(&sidebar, favorites), [tab]);
         assert!(!sidebar.is_pinned(tab));
+    }
+
+    fn saved_url(sidebar: &mut Sidebar, tab: NodeId) -> Option<String> {
+        sidebar.tab_mut(tab).unwrap().saved_url.clone()
+    }
+
+    #[test]
+    fn moving_a_tab_into_or_out_of_the_pinned_tabs_pins_or_unpins_it() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let folder = sidebar.add_folder(home.pinned, "Docs").unwrap();
+        let tab = sidebar.open_tab(home.id, "a").unwrap();
+        sidebar.move_node(tab, folder, 0).unwrap();
+        assert_eq!(saved_url(&mut sidebar, tab).as_deref(), Some("a"));
+        sidebar.tab_mut(tab).unwrap().url = "b".to_string();
+        sidebar.move_node(tab, home.pinned, 0).unwrap();
+        assert_eq!(saved_url(&mut sidebar, tab).as_deref(), Some("a"));
+        sidebar.move_node(tab, home.today, 0).unwrap();
+        assert_eq!(saved_url(&mut sidebar, tab), None);
+        sidebar.move_node(tab, home.pinned, 0).unwrap();
+        sidebar.move_node(tab, favorites, 0).unwrap();
+        assert!(sidebar.is_favorite(tab));
+        assert_eq!(saved_url(&mut sidebar, tab), None);
+    }
+
+    #[test]
+    fn moving_a_folder_pins_or_unpins_its_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let outer = sidebar.add_folder(home.today, "Outer").unwrap();
+        let inner = sidebar.add_folder(outer, "Inner").unwrap();
+        let tab = sidebar.open_tab(home.id, "a").unwrap();
+        sidebar.move_node(tab, inner, 0).unwrap();
+        assert_eq!(saved_url(&mut sidebar, tab), None);
+        sidebar.move_node(outer, home.pinned, 0).unwrap();
+        assert_eq!(saved_url(&mut sidebar, tab).as_deref(), Some("a"));
+        sidebar.move_node(outer, home.today, 0).unwrap();
+        assert_eq!(saved_url(&mut sidebar, tab), None);
+    }
+
+    #[test]
+    fn favorites_hold_only_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let folder = sidebar.add_folder(home.pinned, "Docs").unwrap();
+        assert_eq!(sidebar.move_node(folder, favorites, 0), Err(Error::NotATab));
+        assert_eq!(children(&sidebar, home.pinned), [folder]);
     }
 
     #[test]

@@ -7,6 +7,7 @@
   --background: #ece8f4;
   --hover: #0000000f;
   --active: #ffffffb3;
+  --accent: #6e56cf;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -14,6 +15,7 @@
     --background: #26232e;
     --hover: #ffffff14;
     --active: #ffffff24;
+    --accent: #9e8cfc;
   }
 }
 
@@ -30,9 +32,13 @@ body {
   box-sizing: border-box;
   height: 100vh;
   padding: 0 8px 8px;
+  user-select: none;
 }
 
+/* Today's tabs fill the rest of it: dropping below them moves a tab to their end. */
 .scroll {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -257,4 +263,36 @@ button.folder:hover {
   background: var(--active);
   color: inherit;
   font: inherit;
+}
+
+/* Pointer events drag the rows: the browser's own image drag would cancel them. */
+.sidebar img {
+  -webkit-user-drag: none;
+}
+
+.dragged {
+  opacity: 0.4;
+}
+
+.scroll > * {
+  flex: none;
+}
+
+.scroll > .today {
+  flex: 1 0 auto;
+}
+
+.drop-indicator {
+  display: none;
+  position: fixed;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.drop-indicator.into {
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  background: none;
 }
