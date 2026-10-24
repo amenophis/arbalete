@@ -1,47 +1,47 @@
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef } from "react";
 import { COLORS, type Color, type Profile, send, useRenaming } from "./bridge";
+import { useDismiss } from "./dismiss";
 
-// A button at the bottom of the sidebar opens the list of profiles, to create one, rename one or
-// pick its color. It opens by itself when the app asks to rename the profile it has just created.
-export function Profiles({ profiles }: { profiles: Profile[] }) {
-  const [open, setOpen] = useState(false);
+// The list of profiles, open above the footer, to create one, rename one or pick its color. It
+// opens by itself when the app asks to rename the profile it has just created; Escape or a press
+// outside closes it.
+export function Profiles({
+  profiles,
+  open,
+  onOpen,
+}: {
+  profiles: Profile[];
+  open: boolean;
+  onOpen: (open: boolean) => void;
+}) {
   const [renaming, setRenaming] = useRenaming("arbalette:rename-profile");
+  const list = useRef<HTMLUListElement>(null);
   const shown = open || renaming !== null;
+  useDismiss(list, shown, () => {
+    setRenaming(null);
+    onOpen(false);
+  });
+  if (!shown) return null;
   return (
-    <div className="profiles">
-      {shown && (
-        <ul aria-label="Profiles">
-          {profiles.map((profile) => (
-            <ProfileRow
-              // A new name from the app resets the field.
-              key={`${profile.id}:${profile.name}`}
-              profile={profile}
-              renaming={profile.id === renaming}
-              onRenamed={() => {
-                setRenaming(null);
-                setOpen(true);
-              }}
-            />
-          ))}
-          <li>
-            <button type="button" className="new-profile" onClick={() => send("profile/new")}>
-              + New profile
-            </button>
-          </li>
-        </ul>
-      )}
-      <button
-        type="button"
-        className="profiles-toggle"
-        aria-expanded={shown}
-        onClick={() => {
-          setRenaming(null);
-          setOpen(!shown);
-        }}
-      >
-        Profiles
-      </button>
-    </div>
+    <ul className="profiles" aria-label="Profiles" ref={list}>
+      {profiles.map((profile) => (
+        <ProfileRow
+          // A new name from the app resets the field.
+          key={`${profile.id}:${profile.name}`}
+          profile={profile}
+          renaming={profile.id === renaming}
+          onRenamed={() => {
+            setRenaming(null);
+            onOpen(true);
+          }}
+        />
+      ))}
+      <li>
+        <button type="button" className="new-profile" onClick={() => send("profile/new")}>
+          + New profile
+        </button>
+      </li>
+    </ul>
   );
 }
 

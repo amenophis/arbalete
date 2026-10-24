@@ -521,9 +521,14 @@ try {
   );
 
   await check(
-    "the profiles button lists every profile by name",
+    "the footer menu's profiles item lists every profile by name",
     `e2e.names = () => [...document.querySelectorAll(".profile input")].map((input) => input.value);
-     document.querySelector(".profiles-toggle").click()`,
+     e2e.menu = async (name) => {
+       document.querySelector(".new-toggle").click();
+       await new Promise(requestAnimationFrame);
+       [...document.querySelectorAll('[role="menuitem"]')].find((item) => item.textContent === name).click();
+     };
+     e2e.menu("Profiles…")`,
     `e2e.names().join() === "Default,Work"`,
   );
   await check(
@@ -564,7 +569,7 @@ try {
     await sidebar.call("Input.dispatchKeyEvent", { type: "keyUp", ...key });
   };
   await check(
-    "the new Space button slides to the page creating one, untinted, its name field focused",
+    "the footer menu's new Space item slides to the page creating one, untinted, its name field focused",
     `e2e.spaceField = (name) => document.querySelector('[aria-label="Space ' + name + '"]');
      e2e.newField = (name) => document.querySelector('[aria-label="New Space ' + name + '"]');
      e2e.newPage = () => document.querySelector(".new-space-page:not([inert])");
@@ -572,7 +577,7 @@ try {
      e2e.tint = () => getComputedStyle(document.querySelector(".sidebar"));
      e2e.window = () => getComputedStyle(document.querySelector(".sidebar"), "::before").backgroundImage;
      e2e.background = e2e.window();
-     document.querySelector(".new-space").click()`,
+     e2e.menu("New Space")`,
     `e2e.newPage() && document.activeElement === e2e.newField("name")
       && document.querySelector(".pages").style.transform === "translateX(-${spaceCount * 100}%)"
       && document.querySelector(".sidebar").style.getPropertyValue("--space") === "var(--background)"
@@ -612,7 +617,7 @@ try {
     `e2e.last().getAttribute("aria-label") === "Reading" && e2e.last().textContent === "📖"`,
   );
   await check(
-    "the emoji field keeps one emoji, which the switcher shows instead of the initial",
+    "the emoji field keeps one emoji, which the switcher shows instead of a dot",
     `e2e.input = e2e.spaceField("emoji"); e2e.input.focus(); e2e.input.value = "📚x";
      e2e.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`,
     `e2e.last().textContent === "📚" && e2e.spaceField("emoji").value === "📚"`,
@@ -759,6 +764,12 @@ try {
     `e2e.settled(0) && !e2e.library() && e2e.rows().length === e2e.count
       && e2e.state.closed.length === e2e.closedCount - 1`,
   );
+  await check(
+    "the footer's Library button slides to the library, the app keeping the first Space",
+    `document.querySelector('.switcher [aria-label="Library"]').click()`,
+    `e2e.library() && e2e.offset() === 100 && e2e.state.space === e2e.spaces[0]`,
+  );
+  await check("the first Space's dot slides back to its page", `e2e.spaceIcons()[0].click()`, `e2e.settled(0)`);
   const last = await sidebar.eval(`e2e.spaces.length - 1`);
   await check(
     "the last Space's shortcut slides its page in",

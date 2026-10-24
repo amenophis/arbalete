@@ -32,15 +32,8 @@ function edit(displayed = 14) {
 test("shows each Space's emoji, or a dot", () => {
   render(<Spaces spaces={spaces} displayed={13} onPage={onPage} />);
   const icons = within(screen.getByRole("list", { name: "Spaces" })).getAllByRole("button");
-  expect(icons.map((button) => button.textContent)).toEqual(["", "💼", "", "+"]);
+  expect(icons.map((button) => button.textContent)).toEqual(["", "💼", ""]);
   expect(icons[0].querySelector(".dot")).not.toBeNull();
-});
-
-test("goes to the page after the last Space to create one", () => {
-  render(<Spaces spaces={spaces} displayed={13} onPage={onPage} />);
-  fireEvent.click(icon("New Space"));
-  expect(onPage).toHaveBeenLastCalledWith(3);
-  expect(fetch).not.toHaveBeenCalled();
 });
 
 test("goes to another Space's page, and opens the displayed one's editor", () => {

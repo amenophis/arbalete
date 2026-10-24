@@ -334,11 +334,15 @@ test("renames the folder the app has just created", () => {
   expect(document.activeElement).toBe(input);
 });
 
-test("shows the profiles control at the bottom of the sidebar", () => {
+test("opens the profiles from the footer's menu, and closes them with Escape", () => {
   render(<App />);
   receive({});
-  fireEvent.click(screen.getByRole("button", { name: "Profiles" }));
+  fireEvent.click(screen.getByRole("button", { name: "New" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Profiles…" }));
+  expect(screen.queryByRole("menu")).toBeNull();
   expect(screen.getByRole("textbox", { name: "Profile name" })).toHaveProperty("value", "Default");
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(screen.queryByRole("list", { name: "Profiles" })).toBeNull();
 });
 
 test("shows one icon per Space at the bottom, the displayed one marked", () => {
@@ -350,7 +354,6 @@ test("shows one icon per Space at the bottom, the displayed one marked", () => {
     "work",
     "Travel",
     "Books",
-    "New Space",
   ]);
   expect(icons[0].getAttribute("aria-current")).toBe("true");
   expect(icons[1].hasAttribute("aria-current")).toBe(false);
@@ -517,11 +520,12 @@ test("swiping back from the new Space's page leaves the Spaces as they were", as
   expect((nameOfNew() as HTMLInputElement).value).toBe("");
 });
 
-test("the switcher's new Space button slides to that page, and its Space icon back", async () => {
+test("the footer menu's New Space slides to that page, and its Space icon back", async () => {
   reduceMotion();
   render(<App />);
   receive({});
-  fireEvent.click(screen.getByRole("button", { name: "New Space" }));
+  fireEvent.click(screen.getByRole("button", { name: "New" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "New Space" }));
   await frame();
   expect(position()).toBe("translateX(-400%)");
   expect(screen.getByRole("button", { name: "Home" }).hasAttribute("aria-current")).toBe(false);
