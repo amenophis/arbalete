@@ -181,7 +181,7 @@ function Items({
 }) {
   return items.map((item) =>
     "children" in item ? (
-      <li key={item.id} data-id={item.id}>
+      <li key={item.id} data-id={item.id} className="folder-item">
         <FolderRow
           id={item.id}
           title={item.title}
@@ -225,11 +225,7 @@ const FolderRow = memo(function FolderRow({
   renaming: boolean;
   onRename: Rename;
 }) {
-  const arrow = (
-    <span className="favicon" aria-hidden="true">
-      {expanded ? "▾" : "▸"}
-    </span>
-  );
+  const arrow = <FolderIcon open={expanded} />;
   const toggle = useRef<ReturnType<typeof setTimeout>>(undefined);
   if (!renaming) {
     return (
@@ -301,16 +297,21 @@ const TabItem = memo(function TabItem({
         aria-current={active ? "page" : undefined}
         onClick={() => send(`select/${id}`)}
       >
-        {favicon ? <img className="favicon" src={favicon} alt="" /> : <span className="favicon" />}
+        {favicon ? (
+          <img className="favicon" src={favicon} alt="" />
+        ) : (
+          <span className="favicon placeholder" />
+        )}
         <span className="title">{title}</span>
       </button>
+      {/* On the selected row, closing may only deselect a pinned tab (close_tab in shell.rs). */}
       <button
         type="button"
         className="close"
         aria-label={`Close ${title}`}
         onClick={() => send(`close/${id}`)}
       >
-        ✕
+        {active ? "—" : "×"}
       </button>
     </li>
   );
@@ -343,3 +344,24 @@ const Favorite = memo(function Favorite({
     </li>
   );
 });
+
+// A folder, open while its tabs show.
+function FolderIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      className="favicon"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {open ? (
+        <path d="M2.5 12V4.5a1 1 0 0 1 1-1h2.8l1.4 1.4h4.3a1 1 0 0 1 1 1V7M2.5 12l1.6-4.3a1 1 0 0 1 .9-.7h8.6a.6.6 0 0 1 .6.8l-1.5 3.9a1 1 0 0 1-.9.6H3.3a.8.8 0 0 1-.8-.3z" />
+      ) : (
+        <path d="M2.5 4.5a1 1 0 0 1 1-1h2.8l1.4 1.4h4.8a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      )}
+    </svg>
+  );
+}
