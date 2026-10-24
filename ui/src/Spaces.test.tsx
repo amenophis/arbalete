@@ -29,10 +29,11 @@ function edit(displayed = 14) {
   fireEvent.click(icon(spaces.find((space) => space.id === displayed)?.title ?? ""));
 }
 
-test("shows each Space's emoji, or the whole first character of its title", () => {
+test("shows each Space's emoji, or a dot", () => {
   render(<Spaces spaces={spaces} displayed={13} onPage={onPage} />);
   const icons = within(screen.getByRole("list", { name: "Spaces" })).getAllByRole("button");
-  expect(icons.map((button) => button.textContent)).toEqual(["H", "💼", "😀", "+"]);
+  expect(icons.map((button) => button.textContent)).toEqual(["", "💼", "", "+"]);
+  expect(icons[0].querySelector(".dot")).not.toBeNull();
 });
 
 test("goes to the page after the last Space to create one", () => {

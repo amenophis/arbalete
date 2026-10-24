@@ -345,7 +345,13 @@ test("shows one icon per Space at the bottom, the displayed one marked", () => {
   render(<App />);
   receive({});
   const icons = within(screen.getByRole("list", { name: "Spaces" })).getAllByRole("button");
-  expect(icons.map((icon) => icon.textContent)).toEqual(["H", "W", "T", "B", "+"]);
+  expect(icons.map((icon) => icon.getAttribute("aria-label"))).toEqual([
+    "Home",
+    "work",
+    "Travel",
+    "Books",
+    "New Space",
+  ]);
   expect(icons[0].getAttribute("aria-current")).toBe("true");
   expect(icons[1].hasAttribute("aria-current")).toBe(false);
 });
@@ -568,6 +574,18 @@ test("a swipe before the first Space shows the library, without telling the app"
   expect(screen.getByRole("navigation").style.getPropertyValue("--space")).toBe(
     "var(--background)",
   );
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("the Library button slides to the library, like a swipe", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  fetch.mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "Library" }));
+  await frame();
+  expect(position()).toBe("translateX(100%)");
+  expect(library()?.hasAttribute("inert")).toBe(false);
   expect(fetch).not.toHaveBeenCalled();
 });
 

@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { type Color, firstGrapheme, type Space, send } from "./bridge";
 import { keepOnEscape, NameField, Swatches } from "./Profiles";
 
-// One icon per Space, its emoji or its initial, then a button to create one, which slide the
+// One icon per Space, its emoji or a dot, then a button to create one, which slide the
 // sidebar to their page with `onPage`. The Space whose page shows, if any, is marked aria-current;
 // clicking its icon again opens its editor.
 export function Spaces({
@@ -37,7 +37,7 @@ export function Spaces({
                   onPage(index);
                 }}
               >
-                {space.emoji ?? firstGrapheme(space.title).toUpperCase()}
+                {space.emoji ?? <span className="dot" />}
               </button>
             </li>
           );
