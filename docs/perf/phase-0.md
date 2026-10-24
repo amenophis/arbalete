@@ -33,3 +33,7 @@ selected tab for now).
 - A state update re-renders the whole sidebar: 7 ms for 50 rows is above the 5 ms target and grows with the
   tab count. Sending changes instead of the whole state, and memoizing tab rows, should fix it in phase 1.
 - Choppy scrolling seen in the first builds came from the Mac's low battery, not from Arbalette.
+- 2026-10-24, phase 1: the 7 ms above was mostly the wait for the next frame, which the measure
+  included. Timed until the sidebar is laid out again, a state update takes 0.1 ms median, 0.3 ms
+  p95, before and after memoizing tab rows. Memoizing matters as tabs grow: with 500 rows, one
+  renamed tab went from 2.6 ms to 1.1 ms median.
