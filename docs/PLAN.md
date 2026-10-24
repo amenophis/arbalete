@@ -395,7 +395,15 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   its own icons and copies no asset.
 
 ### Later
-Sync, password import.
+- **Sync through a folder the user already syncs.** No Arbalete account and no server: the user picks a folder
+  synced by a service they already use (iCloud Drive, Google Drive for desktop, Dropbox, OneDrive, Nextcloud or
+  Syncthing).
+  - **One file per device.** Each device writes only its own file in that folder, and every device merges the
+    others' files item by item, by last change. The sync service never sees two writers on one file.
+  - **Optional encryption** with a passphrase.
+  - **Direct APIs set aside for now:** Google Drive needs an OAuth app; CloudKit needs an Apple developer account
+    and only covers Apple devices.
+- Password import.
 
 ## 6. Open points
 
