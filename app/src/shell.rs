@@ -26,9 +26,13 @@ const UI_ORIGIN: &str = "https://arbalette.ui/";
 
 const SIDEBAR_WIDTH: i32 = 260;
 
-/// The page is a card inset from the window's edges and from the sidebar, which paints the window
-/// around it (ui/src/index.css).
+/// The page is a card inset from the window's edges and from the sidebar. The window paints its
+/// margins with the colors the sidebar sends (Command::WindowColors).
 const CARD_MARGIN: i32 = 9;
+
+/// The window's color until the sidebar sends the displayed Space's: the dark one, its most
+/// common appearance (--window-end in ui/src/index.css).
+const WINDOW_COLOR: u32 = 0xff1b_0e1f;
 
 /// The strip along the window's left edge that reveals the hidden sidebar when the pointer
 /// reaches it. Views cannot be transparent, so it shows the sidebar's background.
@@ -58,10 +62,12 @@ const START_URL: &str = "https://www.wikipedia.org/";
 
 thread_local! {
     static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
-    /// As large as the window, below the card: it paints the window's background around it.
+    /// Beside the card, at the window's left edge. It must not reach under the card: a web view
+    /// below the overlays receives no real mouse event on macOS, only synthesized ones.
     static SIDEBAR: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    /// Holds the content views above the sidebar, inset from the window's edges. An overlay, as
-    /// macOS only rounds the corners of a window of its own.
+    /// Holds the content views, inset from the window's edges and from the sidebar. An overlay, as
+    /// macOS only rounds the corners of a window of its own. Without a selected tab, its own
+    /// color paints an empty Space's panel.
     static CARD: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The content view of each profile, `None` until its browser is created. Tabs of the same
     /// profile share one view: switching between them only navigates.
@@ -85,7 +91,8 @@ thread_local! {
     /// The first launch shows the import assistant with the window, instead of the start page.
     static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
-    /// The sidebar's draggable regions, which move the window while the sidebar is shown.
+    /// The sidebar's draggable regions, which move the window while the sidebar is shown, with
+    /// the margins around the card.
     static DRAG_REGIONS: RefCell<Vec<DraggableRegion>> = const { RefCell::new(Vec::new()) };
     static STATE: RefCell<UiState> = RefCell::default();
     /// Where the sidebar is saved, once the previous session is restored.
@@ -297,27 +304,38 @@ fn set_sidebar(mode: SidebarMode) {
     }
 }
 
-/// The window moves by the sidebar's drag areas, its margins around the card among them. The
-/// hidden sidebar paints nothing: the margins then move it by themselves.
+/// The window moves by its margins around the card, and by the sidebar's drag areas while it is
+/// shown. CEF applies the regions in order, a region that is not draggable cutting out of the
+/// ones before: the sidebar's come last, so its controls stay clickable.
 fn update_drag_regions() {
     let Some(window) = WINDOW.with_borrow(Clone::clone) else {
         return;
     };
-    let regions = if SIDEBAR_MODE.get() == SidebarMode::Shown {
-        DRAG_REGIONS.with_borrow(Clone::clone)
-    } else {
-        margin_regions(window.size())
-    };
+    let shown = SIDEBAR_MODE.get() == SidebarMode::Shown;
+    let mut regions = margin_regions(window.size(), card_left(shown));
+    if shown {
+        regions.extend(DRAG_REGIONS.with_borrow(Clone::clone));
+    }
     window.set_draggable_regions(Some(&regions));
 }
 
-/// The four margins around the card of a window of `size` without the sidebar.
-fn margin_regions(size: Size) -> Vec<DraggableRegion> {
+/// The card's left edge, past the sidebar while it is shown.
+fn card_left(shown: bool) -> i32 {
+    if shown {
+        SIDEBAR_WIDTH + CARD_MARGIN
+    } else {
+        CARD_MARGIN
+    }
+}
+
+/// The four margins around the card of a window of `size`, the card starting at `left`.
+fn margin_regions(size: Size, left: i32) -> Vec<DraggableRegion> {
     let (width, height) = (size.width, size.height);
+    let start = left - CARD_MARGIN;
     [
-        (0, 0, width, CARD_MARGIN),
-        (0, height - CARD_MARGIN, width, CARD_MARGIN),
-        (0, 0, CARD_MARGIN, height),
+        (start, 0, width - start, CARD_MARGIN),
+        (start, height - CARD_MARGIN, width - start, CARD_MARGIN),
+        (start, 0, CARD_MARGIN, height),
         (width - CARD_MARGIN, 0, CARD_MARGIN, height),
     ]
     .into_iter()
@@ -340,10 +358,7 @@ fn place_card() {
     };
     let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
     let Some(size) = size else { return };
-    let left = match SIDEBAR_MODE.get() {
-        SidebarMode::Shown => SIDEBAR_WIDTH + CARD_MARGIN,
-        _ => CARD_MARGIN,
-    };
+    let left = card_left(SIDEBAR_MODE.get() == SidebarMode::Shown);
     card.set_bounds(Some(&Rect {
         x: left,
         y: CARD_MARGIN,
@@ -417,7 +432,7 @@ fn show_import() {
     SOURCES.set(browsers::detect(&crate::import_home()));
     if IMPORT.with_borrow(Option::is_none) {
         let url = format!("{UI_ORIGIN}index.html#import");
-        let view = browser_view(UiClient::new(), &url, None);
+        let view = browser_view(UiClient::new(), &url, 0, None);
         let controller = window
             .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
             .expect("import");
@@ -831,9 +846,6 @@ fn show_content(profile: ProfileId, view: &BrowserView) {
     hide_content();
     SHOWN_PROFILE.set(Some(profile));
     view.set_visible(1);
-    if let Some(card) = CARD.with_borrow(Clone::clone) {
-        card.set_visible(1);
-    }
     if let Some(panel) = card_panel() {
         panel.layout();
     }
@@ -845,16 +857,27 @@ fn show_content(profile: ProfileId, view: &BrowserView) {
 }
 
 /// Hides the shown content view, left on a blank page: only the selected tab runs. Without one,
-/// the card shows the sidebar page below it, which paints an empty Space's panel there.
+/// the card shows its own color, an empty Space's panel.
 fn hide_content() {
     if let Some(shown) = content() {
         load("about:blank");
         shown.set_visible(0);
     }
-    if let Some(card) = CARD.with_borrow(Clone::clone) {
-        card.set_visible(0);
-    }
     SHOWN_PROFILE.set(None);
+}
+
+/// Paints the window around the sidebar and the card, and the card behind its content views. The
+/// card shows from the sidebar's first colors on, so that it never flashes another color.
+fn set_window_colors(window_color: u32, card_color: u32) {
+    if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+        window.set_background_color(window_color);
+    }
+    if let Some(panel) = card_panel() {
+        panel.set_background_color(card_color);
+    }
+    if let Some(card) = CARD.with_borrow(Clone::clone) {
+        card.set_visible(1);
+    }
 }
 
 /// Opens a profile's web data in its own directory, `Profile <id>`: Chromium only accepts profile
@@ -922,7 +945,7 @@ wrap_request_context_handler! {
         /// (content_created).
         fn on_request_context_initialized(&self, context: Option<&mut RequestContext>) {
             let Some(card) = card_panel() else { return };
-            let view = browser_view(ContentClient::new(self.profile), "about:blank", context);
+            let view = browser_view(ContentClient::new(self.profile), "about:blank", 0, context);
             view.set_visible(0);
             card.add_child_view(Some(&mut View::from(&view)));
         }
@@ -1004,6 +1027,7 @@ pub fn run(command: Command) {
         (Command::CloseImport, _) => close_import(),
         (Command::Import(choices), _) => run_import(choices),
         (Command::OpenFullDiskAccess, _) => open_full_disk_access(),
+        (Command::WindowColors { window, card }, _) => set_window_colors(window, card),
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
@@ -1111,10 +1135,20 @@ wrap_window_delegate! {
         fn on_window_created(&self, window: Option<&mut Window>) {
             let window = window.expect("window").clone();
             window.set_title(Some(&CefString::from("Arbalette")));
-            // The sidebar fills the window, below the card and the other overlays.
-            window.set_to_fill_layout();
-            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), None);
-            window.add_child_view(Some(&mut View::from(&sidebar)));
+            // The sidebar at the left edge, the rest of the window its own background, below the
+            // card and the other overlays.
+            window.set_background_color(WINDOW_COLOR);
+            let layout = window
+                .set_to_box_layout(Some(&BoxLayoutSettings {
+                    horizontal: 1,
+                    cross_axis_alignment: AxisAlignment::STRETCH,
+                    ..Default::default()
+                }))
+                .expect("box layout");
+            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), SIDEBAR_WIDTH, None);
+            let mut view = View::from(&sidebar);
+            window.add_child_view(Some(&mut view));
+            layout.set_flex_for_view(Some(&mut view), 0);
             SIDEBAR.set(Some(sidebar));
             let card = panel_create(None).expect("card");
             card.set_to_fill_layout();
@@ -1124,14 +1158,14 @@ wrap_window_delegate! {
             controller.set_visible(0);
             CARD.set(Some(controller));
             // Below the overlay, which is added after it.
-            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), None);
+            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), 0, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
                 .expect("reveal");
             controller.set_visible(0);
             REVEAL_VIEW.set(Some(reveal));
             REVEAL.set(Some(controller));
-            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), None);
+            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), 0, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
                 .expect("overlay");
@@ -1193,11 +1227,12 @@ wrap_window_delegate! {
     }
 }
 
-/// An Alloy browser view, sized by the layout or its overlay's bounds. Without a request context,
-/// it uses the global one, which only the app's own UI uses.
+/// An Alloy browser view, `width` wide, or sized by the layout or its overlay's bounds for 0.
+/// Without a request context, it uses the global one, which only the app's own UI uses.
 fn browser_view(
     mut client: Client,
     url: &str,
+    width: i32,
     context: Option<&mut RequestContext>,
 ) -> BrowserView {
     browser_view_create(
@@ -1206,18 +1241,20 @@ fn browser_view(
         Some(&BrowserSettings::default()),
         None,
         context,
-        Some(&mut AlloyViewDelegate::new()),
+        Some(&mut AlloyViewDelegate::new(width)),
     )
     .expect("browser view")
 }
 
 wrap_browser_view_delegate! {
-    struct AlloyViewDelegate {}
+    struct AlloyViewDelegate {
+        width: i32,
+    }
 
     impl ViewDelegate {
         // A zero height would make the size "empty" and CEF would ignore it.
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: 0, height: 1 }
+            Size { width: self.width, height: 1 }
         }
     }
 
@@ -1500,24 +1537,17 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CARD_MARGIN, Size, UiState, margin_regions, ui_file, ui_path};
+    use super::{
+        CARD_MARGIN, DraggableRegion, SIDEBAR_WIDTH, Size, UiState, card_left, margin_regions,
+        ui_file, ui_path,
+    };
 
     #[test]
     fn the_margins_around_the_card_move_the_window_without_the_sidebar() {
-        let regions = margin_regions(Size {
-            width: 1000,
-            height: 600,
-        });
-        let bounds: Vec<_> = regions
-            .iter()
-            .map(|region| {
-                let rect = &region.bounds;
-                (rect.x, rect.y, rect.width, rect.height)
-            })
-            .collect();
+        let regions = margin_regions(SIZE, card_left(false));
         let m = CARD_MARGIN;
         assert_eq!(
-            bounds,
+            bounds(&regions),
             [
                 (0, 0, 1000, m),
                 (0, 600 - m, 1000, m),
@@ -1526,6 +1556,37 @@ mod tests {
             ]
         );
         assert!(regions.iter().all(|region| region.draggable == 1));
+    }
+
+    #[test]
+    fn the_margins_start_past_the_sidebar_while_it_is_shown() {
+        let regions = margin_regions(SIZE, card_left(true));
+        let (m, s) = (CARD_MARGIN, SIDEBAR_WIDTH);
+        assert_eq!(
+            bounds(&regions),
+            [
+                (s, 0, 1000 - s, m),
+                (s, 600 - m, 1000 - s, m),
+                (s, 0, m, 600),
+                (1000 - m, 0, m, 600)
+            ]
+        );
+        assert!(regions.iter().all(|region| region.draggable == 1));
+    }
+
+    const SIZE: Size = Size {
+        width: 1000,
+        height: 600,
+    };
+
+    fn bounds(regions: &[DraggableRegion]) -> Vec<(i32, i32, i32, i32)> {
+        regions
+            .iter()
+            .map(|region| {
+                let rect = &region.bounds;
+                (rect.x, rect.y, rect.width, rect.height)
+            })
+            .collect()
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
-// between sections, moving the window by its margins, hiding and revealing the sidebar, keeping
+// between sections, painting the window with the Space's color, hiding and revealing the sidebar, keeping
 // profiles' web data apart, switching Spaces, creating, renaming and coloring profiles, creating
 // Spaces from the page after the last one and editing them, switching Spaces by number and by
 // swiping between their pages, reopening closed tabs from the library before the first Space,
@@ -61,6 +61,13 @@ try {
       return layout;
     },
     has: (list, id) => [...list].some((element) => element.closest("li").dataset.id === id),
+    // The commands the sidebar sends, the window's colors among them.
+    sent: [],
+    colors: () => e2e.sent.filter((url) => url.includes("/window/colors/")).at(-1),
+  }`);
+  await sidebar.eval(`{
+    const fetchCommand = fetch;
+    window.fetch = (url, init) => { e2e.sent.push(String(url)); return fetchCommand(url, init); };
   }`);
 
   async function check(description, action, condition, page = sidebar) {
@@ -72,6 +79,23 @@ try {
     }
     console.log(`ok - ${description}`);
   }
+
+  // The command painting the window with a Space's color (windowColors in ui/src/bridge.ts), from
+  // the sidebar's own colors.
+  const mix = (color, base, share) =>
+    `${[1, 3, 5]
+      .map((i) => {
+        const [from, to] = [color, base].map((hex) => Number.parseInt(hex.slice(i, i + 2), 16));
+        return Math.round((from * share + to * (100 - share)) / 100).toString(16).padStart(2, "0");
+      })
+      .join("")}`;
+  const windowColors = async (color) => {
+    const [end, panel] = await sidebar.eval(`(() => {
+      const style = getComputedStyle(document.documentElement);
+      return ["--window-end", "--panel"].map((name) => style.getPropertyValue(name).trim());
+    })()`);
+    return `/command/window/colors/${mix(color, end, 14)}/${mix(color, panel, 8)}`;
+  };
 
   // The benchmark session pins 5 folders of 10 tabs (crates/arbalette-core/examples/bench-session.rs).
   await check(
@@ -271,35 +295,32 @@ try {
   const content = await connect((await pages()).find((url) => !url.startsWith(SIDEBAR)));
   const width = (await content.eval("innerWidth")) + 260;
   // The card's margin, 9 pt from the window's edges and from the sidebar (CARD_MARGIN in shell.rs),
-  // measured from the sidebar, which fills the window: the card is a window of its own.
-  const frame = await sidebar.eval(`({ x: screenX, y: screenY, width: innerWidth, height: innerHeight })`);
+  // measured from the sidebar at the window's left edge: the card is a window of its own.
+  const frame = await sidebar.eval(`({ x: screenX, y: screenY, height: innerHeight })`);
   await check(
     "the page is a card inset from the window's edges and from the sidebar",
     ``,
-    `screenX === ${frame.x + 260 + 9} && screenY === ${frame.y + 9}
-      && innerWidth === ${frame.width - 260 - 2 * 9} && innerHeight === ${frame.height - 2 * 9}`,
+    `screenX === ${frame.x + 260 + 9} && screenY === ${frame.y + 9} && innerHeight === ${frame.height - 2 * 9}`,
     content,
   );
+  // A web view reaching under the card gets no real mouse event on macOS, only synthesized ones
+  // like these checks': the sidebar's view must keep its own width (SIDEBAR_WIDTH in shell.rs).
   await check(
-    "the sidebar's view fills the window and paints the window around the card",
+    "the sidebar's view is the sidebar's width and paints its gradient",
     ``,
     `(() => {
-      const window = getComputedStyle(document.querySelector(".sidebar"), "::before");
-      return innerWidth === outerWidth && innerHeight === outerHeight
-        && parseFloat(window.width) === innerWidth && parseFloat(window.height) === innerHeight
-        && window.backgroundImage.startsWith("linear-gradient")
-        && document.querySelector(".sidebar").getBoundingClientRect().width === 260;
+      const background = getComputedStyle(document.querySelector(".sidebar"), "::before");
+      return innerWidth === 260 && parseFloat(background.width) === 260
+        && background.backgroundImage.startsWith("linear-gradient");
     })()`,
   );
   await check(
-    "the margins around the card move the window, not the controls of the sidebar",
+    "the sidebar's toolbar moves the window, not its controls",
     ``,
     `(() => {
       const region = (x, y) => getComputedStyle(document.elementFromPoint(x, y)).getPropertyValue("app-region");
       const back = document.querySelector('[aria-label="Back"]').getBoundingClientRect();
-      return region(innerWidth / 2, 4) === "drag" && region(260 + 4, innerHeight / 2) === "drag"
-        && region(innerWidth - 4, innerHeight / 2) === "drag" && region(innerWidth / 2, innerHeight - 4) === "drag"
-        && region(back.left + 4, back.top + 4) === "no-drag";
+      return region(back.left - 4, back.top + 4) === "drag" && region(back.left + 4, back.top + 4) === "no-drag";
     })()`,
   );
   await check(
@@ -573,13 +594,9 @@ try {
       && e2e.tint().getPropertyValue("--space") === "#3e7bfa" && e2e.newField("name").value === ""`,
   );
   await check(
-    "an empty Space shows a flat panel in place of the page's card",
+    "an empty Space's card and the window around it take the Space's color",
     ``,
-    `(() => {
-      const panel = document.querySelector(".empty-space")?.getBoundingClientRect();
-      return panel?.left === 260 + 9 && panel.top === 9 && panel.right === innerWidth - 9
-        && panel.bottom === innerHeight - 9;
-    })()`,
+    `e2e.colors() === ${JSON.stringify(await windowColors("#3e7bfa"))}`,
   );
   const blank = await connect("about:blank");
   await check("the page's view is hidden on a blank page", ``, `document.visibilityState === "hidden"`, blank);
@@ -604,7 +621,8 @@ try {
     "picking a color tints the window around the page, behind the sidebar",
     `document.querySelector('[aria-label="Color of Reading"] [aria-label="orange"]').click()`,
     `e2e.tint().getPropertyValue("--space") === "#f76b15" && e2e.window().startsWith("linear-gradient")
-      && e2e.window() !== e2e.background && e2e.tint().backgroundColor === "rgba(0, 0, 0, 0)"`,
+      && e2e.window() !== e2e.background && e2e.tint().backgroundColor === "rgba(0, 0, 0, 0)"
+      && e2e.colors() === ${JSON.stringify(await windowColors("#f76b15"))}`,
   );
   await checkSession("the session saves the new Space, its name, emoji and color", (saved) => {
     const space = saved.spaces.at(-1);
@@ -621,7 +639,8 @@ try {
     "switching Space tints the window with that Space's color, the panel gone",
     `e2e.spaceIcons()[0].click()`,
     `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.tint().getPropertyValue("--space") === "#6e56cf"
-      && document.querySelector(".pages").style.transform === "translateX(0%)" && !document.querySelector(".empty-space")`,
+      && document.querySelector(".pages").style.transform === "translateX(0%)"
+      && e2e.colors() === ${JSON.stringify(await windowColors("#6e56cf"))}`,
   );
 
   // The tab list scrolls with a real wheel event, sent through DevTools, without switching Space.
