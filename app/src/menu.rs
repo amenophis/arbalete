@@ -49,6 +49,10 @@ pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
             let space = sidebar.spaces().iter().find(|space| space.id == id)?;
             Some(space_menu(sidebar, space))
         }
+        Target::SpaceProfile(id) => {
+            let space = sidebar.spaces().iter().find(|space| space.id == id)?;
+            Some(profiles(sidebar, space))
+        }
     }
 }
 
@@ -110,28 +114,6 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
             json!({ "space": id, "field": field }),
         )
     };
-    let mut profiles: Vec<_> = sidebar
-        .profiles()
-        .iter()
-        .map(|profile| {
-            let profile_id = serde_json::to_string(&profile.id).expect("an id");
-            Entry::Item(Item {
-                id: format!("profile/{profile_id}"),
-                title: profile.name.clone(),
-                checked: profile.id == space.profile,
-                enabled: true,
-                action: Action::Run(Command::SetSpaceProfile(id, profile.id)),
-            })
-        })
-        .collect();
-    profiles.extend([
-        Entry::Separator,
-        item(
-            "new-profile",
-            "New Profile…",
-            Action::Run(Command::NewSpaceProfile(id)),
-        ),
-    ]);
     let delete = Action::Confirm {
         question: format!("Delete the Space “{}”?", space.title),
         detail: "Its tabs and folders will be closed.",
@@ -142,7 +124,7 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
         item("icon", "Change Space Icon…", edit("emoji")),
         item("rename", "Rename Space…", edit("name")),
         item("color", "Edit Theme Color…", edit("color")),
-        Entry::Submenu("Set Profile".to_string(), profiles),
+        Entry::Submenu("Set Profile".to_string(), profiles(sidebar, space)),
         Entry::Separator,
         item(
             "new-folder",
@@ -165,6 +147,33 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
             action: delete,
         }),
     ]
+}
+
+/// The profiles a Space may be attached to, its own checked, and a new one.
+fn profiles(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
+    let mut profiles: Vec<_> = sidebar
+        .profiles()
+        .iter()
+        .map(|profile| {
+            let profile_id = serde_json::to_string(&profile.id).expect("an id");
+            Entry::Item(Item {
+                id: format!("profile/{profile_id}"),
+                title: profile.name.clone(),
+                checked: profile.id == space.profile,
+                enabled: true,
+                action: Action::Run(Command::SetSpaceProfile(space.id, profile.id)),
+            })
+        })
+        .collect();
+    profiles.extend([
+        Entry::Separator,
+        item(
+            "new-profile",
+            "New Profile…",
+            Action::Run(Command::NewSpaceProfile(space.id)),
+        ),
+    ]);
+    profiles
 }
 
 fn folder(folder: NodeId) -> Vec<Entry> {
@@ -401,6 +410,21 @@ mod tests {
                 button: "Delete",
                 command: Command::DeleteSpace(home.id),
             })
+        );
+    }
+
+    #[test]
+    fn a_spaces_profile_pill_lists_the_profiles_its_own_checked() {
+        let mut sidebar = Sidebar::default();
+        let work = sidebar.create_profile("Work").unwrap();
+        let home = sidebar.spaces()[0].id;
+        let target = Target::SpaceProfile(home);
+        let menu = build(&sidebar, target).unwrap();
+        assert_eq!(titles(&menu), ["✓ Default", "Work", "-", "New Profile…"]);
+        let work_id = serde_json::to_string(&work).unwrap();
+        assert_eq!(
+            find(menu, &format!("profile/{work_id}")),
+            Some(Action::Run(Command::SetSpaceProfile(home, work)))
         );
     }
 

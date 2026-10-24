@@ -113,6 +113,9 @@ pub enum Command {
     ToggleSpace(SpaceId),
     /// Deletes a Space with its tabs, once confirmed: `space/delete/<space id>`.
     DeleteSpace(SpaceId),
+    /// Moves a Space to an index in sidebar order, as the app counts them once the Space has
+    /// left: `space/move/<space id>/<index>`.
+    MoveSpace(SpaceId, usize),
     /// Attaches a Space to another profile, from its menu.
     SetSpaceProfile(SpaceId, ProfileId),
     /// Attaches a Space to a new profile for the UI to rename, from its menu.
@@ -144,6 +147,9 @@ pub enum Target {
     Node(NodeId),
     /// A Space, from its header.
     Space(SpaceId),
+    /// The profiles a Space may be attached to, from its card in the library.
+    #[serde(rename = "space-profile")]
+    SpaceProfile(SpaceId),
 }
 
 /// Where a menu's target shows in a sidebar, in CSS pixels from the view's top left corner.
@@ -166,6 +172,9 @@ impl Target {
     fn parse(path: &str) -> Option<Self> {
         if let Some(id) = path.strip_prefix("space/") {
             return serde_json::from_str(id).ok().map(Self::Space);
+        }
+        if let Some(id) = path.strip_prefix("space-profile/") {
+            return serde_json::from_str(id).ok().map(Self::SpaceProfile);
         }
         let id = path.strip_prefix("node/")?;
         serde_json::from_str(id).ok().map(Self::Node)
@@ -299,6 +308,13 @@ impl Command {
                 }
                 if let Some(id) = path.strip_prefix("space/delete/") {
                     return serde_json::from_str(id).ok().map(Self::DeleteSpace);
+                }
+                if let Some((id, index)) = path
+                    .strip_prefix("space/move/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    return index.parse().ok().map(|index| Self::MoveSpace(id, index));
                 }
                 if let Some(number) = path.strip_prefix("space/number/") {
                     let number = number.parse().ok().filter(|n| (1..=9).contains(n));
@@ -663,6 +679,13 @@ mod tests {
             panic!("not a deletion")
         };
         assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        let Some(Command::MoveSpace(id, 2)) = Command::parse("space/move/4/2") else {
+            panic!("a Space to move");
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        assert_eq!(Command::parse("space/move/4/x"), None);
+        assert_eq!(Command::parse("space/move/x/2"), None);
+        assert_eq!(Command::parse("space/move/4"), None);
         assert_eq!(Command::parse("space/toggle/x"), None);
         assert_eq!(Command::parse("space/delete/x"), None);
         assert_eq!(Command::parse("space/color/4/teal"), None);
@@ -688,6 +711,11 @@ mod tests {
         );
         let Some(Command::Menu(Target::Space(id))) = Command::parse("menu/space/4") else {
             panic!("not a Space's menu")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        let Some(Command::Menu(Target::SpaceProfile(id))) = Command::parse("menu/space-profile/4")
+        else {
+            panic!("not a Space's profiles")
         };
         assert_eq!(serde_json::to_string(&id).unwrap(), "4");
         let Some(Command::ChooseMenu(Target::Space(id), item)) =
