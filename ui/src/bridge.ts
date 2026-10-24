@@ -192,7 +192,9 @@ export function useAppEvent<T>(event: string, handler: (detail: T) => void) {
 
 // A right-click on a row or the header of the displayed Space's page asks the app for its native
 // menu (app/src/menu.rs). Elsewhere, but in text fields, it shows no menu: the page's menu, with
-// Back, Forward or View Page Source, has nothing to do with the sidebar.
+// Back, Forward or View Page Source, has nothing to do with the sidebar. On macOS, real
+// right-clicks reach no `contextmenu` listener: the app finds their target itself
+// (ui/src/menuTargets.ts).
 export function showMenu(event: MouseEvent) {
   const target = event.target as Element;
   if (target.closest("input, textarea")) return;

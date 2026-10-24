@@ -3,6 +3,7 @@
 use crate::command::Command;
 use crate::menu::{Action, Entry};
 use crate::swipe::{Phase, Scroll};
+use block2::RcBlock;
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::{
     ClassType, DefinedClass, Encoding, MainThreadMarker, MainThreadOnly, RefEncode, define_class,
@@ -13,13 +14,14 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSColor, NSControlStateValueOn,
-    NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags, NSEventPhase, NSEventType,
+    NSDownArrowFunctionKey, NSEvent, NSEventMask, NSEventModifierFlags, NSEventPhase, NSEventType,
     NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
     NSRightArrowFunctionKey, NSUpArrowFunctionKey, NSView, NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{NSArray, NSNumber, NSString, ns_string};
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
+use std::ptr::NonNull;
 
 /// The page's corner radius, in points.
 const CARD_RADIUS: f64 = 8.0;
@@ -41,6 +43,8 @@ const CARD_EDGE: f64 = 0.5;
 thread_local! {
     /// Its title says what it does: hide or show the sidebar.
     static SIDEBAR_ITEM: RefCell<Option<Retained<NSMenuItem>>> = const { RefCell::new(None) };
+    /// Watches the clicks that open sidebar menus (watch_menu_clicks).
+    static MENU_CLICKS: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     /// The actions of the menu last shown, which its items' tags index.
     static MENU_ACTIONS: RefCell<Vec<Action>> = const { RefCell::new(Vec::new()) };
 }
@@ -194,6 +198,37 @@ impl ArbaletteApplication {
     extern_methods! {
         #[unsafe(method(sharedApplication))]
         fn shared_application() -> Retained<Self>;
+    }
+}
+
+/// Watches clicks as the application takes them from the system: mouse events never reach
+/// sendEvent: above, which Chromium's windows bypass.
+pub fn watch_menu_clicks() {
+    let mask = NSEventMask::RightMouseDown | NSEventMask::LeftMouseDown;
+    let handler = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: AppKit gives a valid event.
+        if swallows_menu_click(unsafe { event.as_ref() }) {
+            std::ptr::null_mut()
+        } else {
+            event.as_ptr()
+        }
+    });
+    // SAFETY: the handler returns the event it is given, or null to drop it.
+    let monitor = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &handler) };
+    MENU_CLICKS.set(monitor);
+}
+
+/// Keeps right-clicks, and clicks with ⌃, over the sidebar from the page, which would show
+/// Chromium's page menu: the sidebar shows its own at once (shell::menu_at), whose tracking takes
+/// the release, as a native view's menu does.
+fn swallows_menu_click(event: &NSEvent) -> bool {
+    let menu_click = event.r#type() == NSEventType::RightMouseDown
+        || event
+            .modifierFlags()
+            .contains(NSEventModifierFlags::Control);
+    menu_click && {
+        let (x, y) = main_window_point(event);
+        crate::shell::menu_at(x, y)
     }
 }
 
