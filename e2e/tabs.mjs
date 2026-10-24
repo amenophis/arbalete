@@ -1,5 +1,5 @@
-// Checks the sidebar sections, and selecting, closing and reopening tabs and favorites, in the
-// real app.
+// Checks the sidebar sections, and selecting, closing, reopening and pinning tabs and favorites, in
+// the real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
@@ -92,6 +92,29 @@ try {
     "closing the selected favorite with the close command keeps its tile and deselects it",
     `e2e.send("close")`,
     `e2e.tile.isConnected && e2e.tiles().length === 6 && !e2e.tile.hasAttribute("aria-current") && e2e.current() === e2e.rows().at(-1)`,
+  );
+  // Pinning moves the row to another list, so rows are found again by position.
+  await check(
+    "the pin command moves the selected tab to the end of the pinned tabs",
+    `e2e.pinnedRows = () => [...document.querySelectorAll(".pinned > .tab-row")];
+     e2e.saved = document.querySelector(".url").textContent; e2e.count = e2e.rows().length; e2e.send("pin")`,
+    `e2e.current() === e2e.pinnedRows().at(-1) && e2e.rows().length === e2e.count - 1 && e2e.above(e2e.current())`,
+  );
+  await check(
+    "closing a pinned tab keeps its row, deselects it and shows its saved url",
+    `e2e.pinned = e2e.current(); e2e.send("close")`,
+    `e2e.pinned.isConnected && e2e.pinnedRows().at(-1) === e2e.pinned && !!e2e.current()
+      && e2e.current() !== e2e.pinned && e2e.pinned.textContent.includes(e2e.saved)`,
+  );
+  await check(
+    "selecting the closed pinned tab marks it aria-current",
+    `e2e.pinned.querySelector(".tab").click()`,
+    `e2e.current() === e2e.pinned`,
+  );
+  await check(
+    "the pin command unpins a pinned tab to the top of today's tabs",
+    `e2e.send("pin")`,
+    `e2e.pinnedRows().length === 0 && e2e.current() === e2e.rows()[0] && e2e.rows().length === e2e.count`,
   );
   await check(
     "scrolling the tabs keeps the url bar in place",

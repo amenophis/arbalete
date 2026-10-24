@@ -19,6 +19,8 @@ pub enum Command {
     Close(Option<NodeId>),
     /// Reopens the last closed tab.
     Reopen,
+    /// Pins or unpins a tab, `pin/<tab id>`, or the selected one, `pin`.
+    Pin(Option<NodeId>),
 }
 
 impl Command {
@@ -32,6 +34,7 @@ impl Command {
             "overlay/hide" => Some(Self::HideOverlay),
             "close" => Some(Self::Close(None)),
             "reopen" => Some(Self::Reopen),
+            "pin" => Some(Self::Pin(None)),
             _ => {
                 if let Some(id) = path.strip_prefix("select/") {
                     return serde_json::from_str(id).ok().map(Self::Select);
@@ -40,6 +43,9 @@ impl Command {
                     return serde_json::from_str(id)
                         .ok()
                         .map(|id| Self::Close(Some(id)));
+                }
+                if let Some(id) = path.strip_prefix("pin/") {
+                    return serde_json::from_str(id).ok().map(|id| Self::Pin(Some(id)));
                 }
                 percent_decode(path.strip_prefix("open/")?).map(Self::Open)
             }
@@ -81,6 +87,11 @@ mod tests {
         assert!(matches!(
             Command::parse("close/3"),
             Some(Command::Close(Some(_)))
+        ));
+        assert_eq!(Command::parse("pin"), Some(Command::Pin(None)));
+        assert!(matches!(
+            Command::parse("pin/3"),
+            Some(Command::Pin(Some(_)))
         ));
     }
 
