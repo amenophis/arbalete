@@ -266,6 +266,23 @@ Each following phase starts the same way: define its commit sequence before writ
 - Hide the sidebar, with reveal on hover at the left edge.
 - Shortcuts (`⌘` on macOS, `Ctrl` elsewhere): close, reopen, move between tabs, `1…9` for Favorites.
 
+Commit sequence (the phase 0 measurements put the state update first, before the sidebar grows):
+
+| # | Branch | Commit |
+|---|---|---|
+| 20 | `feat/close-tabs` | `feat(ui): close tabs from the sidebar and with ⌘W` |
+| 21 | | `feat(core): return to the opener tab when closing a tab` |
+| 22 | | `feat(app): reopen the last closed tab with ⌘⇧T` |
+| 23 | `perf/state-updates` | `perf(ui): re-render only the tab rows that change` |
+| 24 | `feat/sidebar-sections` | `feat(ui): show pinned tabs and folders above today's tabs` |
+| 25 | | `feat(core): add favorites to each profile` |
+| 26 | | `feat(ui): show favorites as an icon grid` |
+| 27 | | `feat(app): pin and unpin tabs, pinned tabs go back to their saved url` |
+| 28 | `feat/sidebar-editing` | `feat(ui): create, rename and collapse folders` |
+| 29 | | `feat(ui): drag and drop tabs and folders between sections` |
+| 30 | `feat/sidebar-shortcuts` | `feat(app): move between tabs and open favorites with ⌘1…9` |
+| 31 | | `feat(ui): hide the sidebar and reveal it at the left edge` |
+
 ### Phase 2 — Profiles and Spaces
 - Profiles: creation, name, color; isolated web data (one data store per profile).
 - Spaces: creation / editing (name, emoji, color or gradient), attached to a profile, several Spaces per profile.
