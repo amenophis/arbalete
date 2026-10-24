@@ -24,6 +24,8 @@ the features we take inspiration from and to import user data.
 - **Resource saving**: tabs in the background are frozen, then unloaded, and reload when selected. The sidebar
   shows their state. Sites can be excluded, and the browser saves more when the computer is on low power.
 - **Split View** and **Peek** (preview a link above the current page).
+- **Incognito windows** (⌘⇧N): a separate dark window whose browsing leaves nothing behind: no history, no
+  session, cookies and cache kept in memory only.
 - **Chrome extensions**: installed from the Chrome Web Store, like in any Chromium browser. Password managers and
   content blockers are essential for users coming from Arc.
 
@@ -369,6 +371,21 @@ Commit sequence (Arc first, the browser Arbalette users are most likely to come 
 ### Phase 11 — Developer mode
 - A view for working on a site under development, like Arc's developer mode: to be studied (behavior and
   layout) when the phase starts.
+
+### Phase 12 — Incognito
+- ⌘⇧N (and File › New Incognito Window) opens a separate window on an off-the-record request context: cookies,
+  cache and storage in memory only, discarded when the window closes; nothing written to history, the session or
+  the sidebar state.
+- A minimal sidebar like Arc's: the address field, an "Incognito" label, "New Tab" and today's tabs only (no
+  Favorites, pinned tabs, Spaces or profiles); a dark theme that sets it apart.
+- Extensions disabled unless allowed in incognito; downloads still saved.
+
+### Phase 13 — Arc feature audit
+- Use Arc as a user, systematically, to find the features this plan misses: every menu and submenu, keyboard
+  shortcut, context menu, setting and empty state, with edge cases (many tabs, long titles, drag and drop
+  everywhere, several windows and profiles).
+- Record each finding with what Arc does and whether Arbalette has it; turn the missing ones into plan entries,
+  ranked by how much users coming from Arc rely on them.
 
 ### Later
 Sync, password import.
