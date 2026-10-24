@@ -339,17 +339,75 @@ body {
   font-weight: 600;
 }
 
-/* The displayed Space's name above its pinned tabs. */
+/* The displayed Space's name above its pinned tabs. Hovered, its icon turns into a chevron, which
+   points down while the Space's tabs show, and its options button appears. */
 .space-header {
   display: flex;
   align-items: center;
-  gap: 8px;
   height: 32px;
   margin: 4px 0 0;
-  padding: 0 10px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.space-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   opacity: 0.55;
+}
+
+.space-toggle .favicon {
+  display: grid;
+  place-items: center;
+}
+
+.space-header .chevron,
+.space-header:hover .space-icon {
+  display: none;
+}
+
+.space-header:hover .chevron {
+  display: grid;
+}
+
+.space-toggle[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+.space-more {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  opacity: 0;
+}
+
+.space-header:hover .space-more,
+.space-more:focus-visible {
+  opacity: 0.7;
+}
+
+.space-more:hover {
+  background: var(--hover);
+  opacity: 1;
 }
 
 .space-dot {

@@ -12,10 +12,10 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApp, NSApplication, NSColor, NSControlStateValueOn, NSDownArrowFunctionKey, NSEvent,
-    NSEventModifierFlags, NSEventPhase, NSEventType, NSLeftArrowFunctionKey, NSMenu, NSMenuItem,
-    NSPasteboard, NSPasteboardTypeString, NSRightArrowFunctionKey, NSUpArrowFunctionKey, NSView,
-    NSWindowButton, NSWorkspace,
+    NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSColor, NSControlStateValueOn,
+    NSDownArrowFunctionKey, NSEvent, NSEventModifierFlags, NSEventPhase, NSEventType,
+    NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
+    NSRightArrowFunctionKey, NSUpArrowFunctionKey, NSView, NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{NSArray, NSNumber, NSString, ns_string};
 use std::cell::{Cell, RefCell};
@@ -493,6 +493,7 @@ fn native_menu(
     actions: &mut Vec<Action>,
 ) -> Retained<NSMenu> {
     let menu = NSMenu::new(mtm);
+    menu.setAutoenablesItems(false);
     for entry in entries {
         let item = match entry {
             Entry::Item(entry) => {
@@ -506,6 +507,7 @@ fn native_menu(
                 if entry.checked {
                     item.setState(NSControlStateValueOn);
                 }
+                item.setEnabled(entry.enabled);
                 actions.push(entry.action);
                 item
             }
@@ -520,6 +522,19 @@ fn native_menu(
         menu.addItem(&item);
     }
     menu
+}
+
+/// Asks the user to confirm an action named by `button`, which may destroy data.
+pub fn confirm(question: &str, detail: &str, button: &str) -> bool {
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let alert = NSAlert::new(mtm);
+    alert.setMessageText(&NSString::from_str(question));
+    alert.setInformativeText(&NSString::from_str(detail));
+    alert
+        .addButtonWithTitle(&NSString::from_str(button))
+        .setHasDestructiveAction(true);
+    alert.addButtonWithTitle(ns_string!("Cancel"));
+    alert.runModal() == NSAlertFirstButtonReturn
 }
 
 /// Puts a link on the clipboard.

@@ -29,6 +29,8 @@ export type SpacePage = {
   space: number;
   // The tab the content view shows while the Space is displayed.
   selected: number | null;
+  // Only the Space's header and its New Tab row show.
+  collapsed: boolean;
   // The containers of the sections, to move tabs and folders into.
   roots: { favorites: number; pinned: number; today: number };
   favorites: Tab[];
@@ -188,15 +190,17 @@ export function useAppEvent<T>(event: string, handler: (detail: T) => void) {
   }, [event]);
 }
 
-// A right-click on a row of the displayed Space's page asks the app for the row's native menu
-// (app/src/menu.rs). Elsewhere, but in text fields, it shows no menu: the page's menu, with Back,
-// Forward or View Page Source, has nothing to do with the sidebar.
+// A right-click on a row or the header of the displayed Space's page asks the app for its native
+// menu (app/src/menu.rs). Elsewhere, but in text fields, it shows no menu: the page's menu, with
+// Back, Forward or View Page Source, has nothing to do with the sidebar.
 export function showMenu(event: MouseEvent) {
   const target = event.target as Element;
   if (target.closest("input, textarea")) return;
   event.preventDefault();
   const row = target.closest<HTMLElement>(".space-page li[data-id]");
-  if (row) send(`menu/node/${row.dataset.id}`);
+  if (row) return send(`menu/node/${row.dataset.id}`);
+  const page = target.closest(".space-header")?.closest<HTMLElement>(".space-page");
+  if (page) send(`menu/space/${page.dataset.space}`);
 }
 
 const graphemes = new Intl.Segmenter();

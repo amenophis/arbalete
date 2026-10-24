@@ -1,9 +1,10 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type Ref, useEffect, useRef, useState } from "react";
 import { type Color, firstGrapheme, type Space, send, useAppEvent } from "./bridge";
 import { keepOnEscape, NameField, Swatches } from "./Profiles";
 
 // One icon per Space, its emoji or a dot, which slides the sidebar to its page with `onPage`. The
-// Space whose page shows, if any, is marked aria-current; clicking its icon again opens its editor.
+// Space whose page shows, if any, is marked aria-current; clicking its icon again opens its editor,
+// which the Space's menu also opens on one of its fields.
 export function Spaces({
   spaces,
   displayed,
@@ -14,8 +15,24 @@ export function Spaces({
   onPage: (page: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // A new request each time, so that asking for the same field again focuses it again.
+  const [focus, setFocus] = useState<{ field: Field }>();
   const current = spaces.find((space) => space.id === displayed);
   const editing = current !== undefined && open;
+  useAppEvent<{ space: number; field: Field }>("arbalette:edit-space", (detail) => {
+    if (detail.space !== displayed) return;
+    setOpen(true);
+    setFocus({ field: detail.field });
+  });
+  const editor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const selector = {
+      emoji: ".emoji",
+      name: "input:not(.emoji)",
+      color: ".swatch[aria-pressed=true]",
+    };
+    if (focus) editor.current?.querySelector<HTMLElement>(selector[focus.field])?.focus();
+  }, [focus]);
   return (
     <>
       <ul className="spaces" aria-label="Spaces">
@@ -47,18 +64,21 @@ export function Spaces({
           // A new name or emoji from the app resets the fields.
           key={`${current.id}:${current.title}:${current.emoji}`}
           space={current}
+          ref={editor}
         />
       )}
     </>
   );
 }
 
+type Field = "emoji" | "name" | "color";
+
 // The emoji field keeps only its first character; emptying it brings the initial back.
-function SpaceEditor({ space }: { space: Space }) {
+function SpaceEditor({ space, ref }: { space: Space; ref: Ref<HTMLDivElement> }) {
   const { id, title, color } = space;
   const emoji = space.emoji ?? "";
   return (
-    <div className="space-editor">
+    <div className="space-editor" ref={ref}>
       <div className="space-fields">
         <input
           className="emoji"
