@@ -102,6 +102,7 @@ body {
 
 .url {
   position: relative;
+  min-height: 1lh;
   margin-top: 8px;
   padding: 6px 8px;
   border-radius: 8px;

@@ -90,6 +90,14 @@ test("shows the active tab and the loading progress", () => {
   expect(screen.getByRole("button", { name: "Example" }).getAttribute("aria-current")).toBe("page");
 });
 
+test("keeps the url bar without a selected tab", () => {
+  render(<App />);
+  receive({ loading: true }, 99);
+  const url = document.querySelector(".url");
+  expect(url?.textContent).toBe("");
+  expect(screen.queryByRole("progressbar")).toBeNull();
+});
+
 test("selects a tab", () => {
   render(<App />);
   receive({});
