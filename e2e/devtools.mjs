@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const APP = resolve("target/bundle/arbalete.app/Contents/MacOS/arbalete");
+const APP = resolve("target/bundle/Arbalete.app/Contents/MacOS/arbalete");
 const PORT = 9333;
 const TIMEOUT = 10_000;
 

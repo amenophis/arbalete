@@ -153,7 +153,7 @@ function ms(time) {
 function memory() {
   const lines = execFileSync("ps", ["-A", "-o", "rss=,command="], { encoding: "utf8" }).split("\n");
   const types = new Map();
-  for (const line of lines.filter((line) => line.includes("arbalete.app/Contents"))) {
+  for (const line of lines.filter((line) => line.includes("Arbalete.app/Contents"))) {
     const type = line.match(/--type=([\w-]+)/)?.[1] ?? "browser";
     const megabytes = Number.parseInt(line, 10) / 1024;
     types.set(type, (types.get(type) ?? []).concat(Math.round(megabytes)));
