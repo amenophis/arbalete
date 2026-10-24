@@ -11,15 +11,16 @@ const RUNS = 20;
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error("usage: node perf/measure.mjs <data dir>");
 
-const started = performance.now();
-const app = launch(dataDir);
+// macOS checks a new build's code on its first launch, which takes over a second: measured apart.
+const firstLaunch = await start();
+firstLaunch.app.kill();
+await new Promise((resolve) => firstLaunch.app.once("exit", resolve));
+const { app, sidebar, startup } = await start();
 try {
-  const sidebar = await connect(SIDEBAR);
-  await sidebar.eval(waitFor(`!!document.querySelector(".tabs .tab")`));
-  const startup = performance.now() - started;
   const overlay = await connect(OVERLAY);
 
   const rows = [
+    ["First launch of a new build to a usable sidebar", [firstLaunch.startup]],
     ["Cold start to a usable sidebar", [startup]],
     ["Switch tab, UI part (click → active tab painted)", await repeat(() => sidebar.eval(switchTab))],
     ["State update rendered (one title changed)", await repeat(() => sidebar.eval(stateUpdate))],
@@ -33,6 +34,15 @@ try {
   console.log(`Resident memory: ${memory()}`);
 } finally {
   app.kill();
+}
+
+// Launches the app and waits until its sidebar shows tabs.
+async function start() {
+  const started = performance.now();
+  const app = launch(dataDir);
+  const sidebar = await connect(SIDEBAR);
+  await sidebar.eval(waitFor(`!!document.querySelector(".tabs .tab")`));
+  return { app, sidebar, startup: performance.now() - started };
 }
 
 // Clicks a random tab of the first Space, waits for it to be shown as active, then for a frame.
