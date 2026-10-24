@@ -218,10 +218,12 @@ and the Rust ↔ UI bridge with its change events.
 | UI memory (excluding web pages) | < 150 MB |
 | Shortcuts | work while the web page has focus |
 | Overlay | the Command Bar displays above the page |
-| Page scrolling | as smooth as Chrome on the same page (choppy in the first builds) |
+| Page scrolling | as smooth as Chrome on the same page |
 
 Tools: Web Inspector / DevTools (Performance), Rust-side timestamps on commands and events, Instruments on macOS.
 Measurements are reproducible with a script and generated data.
+
+Results: [docs/perf/phase-0.md](perf/phase-0.md).
 
 If targets are missed: optimize first. If the gap remains large, reconsider the UI (cross-platform Rust UI such as
 `gpui`, or native per OS) before phase 1. Only the UI would need rewriting, since the logic is in Rust.
@@ -250,7 +252,7 @@ Rules in [CONTRIBUTING.md](../CONTRIBUTING.md#commits). Every commit builds and 
 | | | `feat(app): handle keyboard shortcuts through native menus` |
 | 16 | | `feat(ui): show an overlay above the page` |
 | 17 | `perf/prototype` | `test(perf): generate a 500-tab benchmark scenario` |
-| 18 | | `test(perf): measure tab switching, drag and command bar latency` |
+| 18 | | `test(perf): measure startup, tab switching and overlay latency` |
 | 19 | | `docs(perf): record phase 0 measurements` |
 
 The engine spike lives on the throwaway branch `spike/cef-shell` and is not part of this sequence.
