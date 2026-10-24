@@ -1,5 +1,6 @@
 //! Writes the performance prototype's session: 6 favorites, then 5 Spaces of 100 tabs, half of them
-//! in folders.
+//! in folders. The last 2 Spaces belong to a second profile, to check that profiles keep their web
+//! data apart.
 //!
 //! Usage: `cargo run -p arbalette-core --example bench-session -- <data dir>`, then run the app with
 //! `ARBALETTE_DATA_DIR=<data dir>`.
@@ -9,6 +10,7 @@ use std::path::PathBuf;
 
 const FAVORITES: usize = 6;
 const SPACES: usize = 5;
+const WORK_SPACES: usize = 2;
 const FOLDERS: usize = 5;
 const TABS_PER_FOLDER: usize = 10;
 const TODAY_TABS: usize = 50;
@@ -20,8 +22,14 @@ fn main() {
             .expect("usage: bench-session <data dir>"),
     );
     let mut sidebar = Sidebar::default();
-    let profile = sidebar.profiles()[0].id;
+    let default = sidebar.profiles()[0].id;
+    let work = sidebar.add_profile("Work");
     for index in 1..SPACES {
+        let profile = if index < SPACES - WORK_SPACES {
+            default
+        } else {
+            work
+        };
         sidebar
             .add_space(&format!("Space {}", index + 1), profile)
             .unwrap();

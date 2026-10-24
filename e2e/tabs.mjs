@@ -1,13 +1,23 @@
 // Checks the sidebar sections, selecting, closing, reopening and pinning tabs and favorites, moving
 // between tabs and to favorites, creating, renaming and collapsing folders, dragging tabs
-// between sections, and hiding and revealing the sidebar, in the real app.
+// between sections, hiding and revealing the sidebar, and keeping profiles' web data apart, in the
+// real app.
 // Usage: `mise run e2e`, which bundles the app and writes a session first.
 // Rows are tracked as DOM elements: their titles change as pages load, React keeps the elements.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { connect, launch, pages, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs";
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error("usage: node e2e/tabs.mjs <data dir>");
+
+// The sidebar shows only the first Space: tabs of the others are found in the session file.
+const session = JSON.parse(readFileSync(join(dataDir, "session.json"), "utf8")).sidebar;
+const todayTab = (space, index) => session.nodes[space.today].children[index];
+const tabUrl = (tab) => session.nodes[tab].kind.Tab.url;
+const home = session.spaces[0];
+const otherProfileSpace = session.spaces.find((space) => space.profile !== home.profile);
 
 const app = launch(dataDir);
 try {
@@ -291,6 +301,26 @@ try {
     `document.visibilityState === "visible" && e2e.current() === e2e.rows()[1]`,
   );
   await check("the revealed sidebar is hidden with it", ``, `document.visibilityState === "hidden"`, reveal);
+
+  // Selects a tab by id and checks a condition in its page once loaded and shown.
+  async function checkPage(description, tab, condition) {
+    await sidebar.eval(`e2e.send("select/${tab}")`);
+    const page = await connect(tabUrl(tab));
+    await check(description, ``, `document.visibilityState === "visible" && ${condition}`, page);
+    return page;
+  }
+  const page = await checkPage("a tab of the first profile shows its page", todayTab(home, 45), `true`);
+  await page.eval(`localStorage.setItem("profile", "first"); document.cookie = "profile=first; max-age=600"`);
+  await checkPage(
+    "a tab of another profile's Space on the same site sees none of the first profile's web data",
+    todayTab(otherProfileSpace, 0),
+    `localStorage.getItem("profile") === null && !document.cookie.includes("profile=")`,
+  );
+  await checkPage(
+    "back on a tab of the first profile, its web data is still there",
+    todayTab(home, 46),
+    `localStorage.getItem("profile") === "first" && document.cookie.includes("profile=first")`,
+  );
 } finally {
   app.kill();
 }
