@@ -622,7 +622,7 @@ try {
      e2e.menu("New Space")`,
     `e2e.newPage() && document.activeElement === e2e.newField("name")
       && document.querySelector(".pages").style.transform === "translateX(-${spaceCount * 100}%)"
-      && document.querySelector(".sidebar").style.getPropertyValue("--space") === "var(--background)"
+      && document.querySelector(".sidebar").style.getPropertyValue("--tinted") === "0"
       && e2e.spaceIcons().length === ${spaceCount}`,
   );
   await type("Novels");
@@ -732,8 +732,8 @@ try {
   // The app sends a trackpad swipe, from touch to lift, as arbalette:swipe events: `dx` is how
   // far the content would scroll, in points, `time` when, in milliseconds (app/src/swipe.rs).
   await sidebar.eval(`Object.assign(e2e, {
-    gesture: (phase, dx, time) =>
-      dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, time } })),
+    gesture: (phase, dx, time, y = 300) =>
+      dispatchEvent(new CustomEvent("arbalette:swipe", { detail: { phase, dx, y, time } })),
     // Touch, move \`events\` times \`interval\` ms apart, and lift unless \`hold\`.
     swipe: (dx, events, interval, hold) => {
       e2e.gesture("begin", dx, 0);
@@ -754,15 +754,22 @@ try {
     `e2e.send("space/color/" + e2e.spaces[2] + "/green")`,
     `e2e.state.spaces[2].color === "green"`,
   );
+  // The window's margins, the first part of its colors, blend from one Space's to the next one's.
+  const green = await windowColors("#30a46c");
+  const margins = (colors) => colors.split("/").at(-2);
+  await sidebar.eval(`e2e.margins = () => e2e.colors().split("/").at(-2); e2e.rest = e2e.margins()`);
   await check(
-    "a slow swipe moves the pages with the fingers and blends the Spaces' tints",
+    "a slow swipe moves the pages with the fingers and blends the Spaces' tints and the window's",
     `e2e.swipe(-10, 15, 50, true)`,
-    `e2e.offset() < -100 && e2e.offset() > -200 && e2e.tint().getPropertyValue("--space").startsWith("color-mix")`,
+    `e2e.offset() < -100 && e2e.offset() > -200
+      && e2e.tint().getPropertyValue("--space") !== "#30a46c"
+      && e2e.margins() !== e2e.rest && e2e.margins() !== "${margins(green)}"`,
   );
   await check(
-    "lifting past half way displays the next Space, its page settled in view",
+    "lifting past half way displays the next Space, the window settling on its color",
     `e2e.swipe(-10, 15, 50)`,
-    `e2e.settled(2) && !e2e.tint().getPropertyValue("--space").startsWith("color-mix")`,
+    `e2e.settled(2) && e2e.tint().getPropertyValue("--space") === "#30a46c"
+      && e2e.colors() === ${JSON.stringify(green)}`,
   );
   await check(
     "a short slow swipe goes back to the displayed Space",
@@ -800,12 +807,40 @@ try {
     `e2e.rows().length === e2e.count - 1 && e2e.state.closed.length > 0`,
   );
   await check(
+    "on the way to the library the card follows the fingers and the first Space's page fades",
+    `e2e.library = () => document.querySelector(".library:not([inert])");
+     e2e.offsets = () => e2e.sent.filter((url) => url.includes("/card/offset/")).map((url) => Number(url.split("/").at(-1)));
+     e2e.swipe(10, 4, 50, true)`,
+    `e2e.offsets().at(-1) > 0 && e2e.offsets().at(-1) < 180
+      && Number(document.querySelector('.space-page[data-space="' + e2e.spaces[0] + '"]').style.opacity) < 1`,
+  );
+  await check("the page keeps its size while the card moves", ``, `innerWidth === ${width - 260}`, content);
+  await check("lifting early goes back, the card with it", `e2e.gesture("end", 0, 1000)`, `e2e.settled(0) && e2e.offsets().at(-1) === 0`);
+  await check(
     "a swipe before the first Space shows the library listing it, the app keeping the first Space",
-    `e2e.library = () => document.querySelector(".library:not([inert])"); e2e.swipe(20, 15, 50)`,
+    `e2e.swipe(20, 15, 50)`,
     `e2e.library()?.querySelector(".tab")?.textContent === e2e.closedText && e2e.offset() === 100
       && e2e.state.space === e2e.spaces[0] && !e2e.page()
-      && document.querySelector(".sidebar").style.getPropertyValue("--space") === "var(--background)"`,
+      && e2e.sent.at(-1).endsWith("/library/show")`,
   );
+  // On the library, the sidebar and the window around it are untinted alike: no seam.
+  const untinted = await sidebar.eval(`(() => {
+    const style = getComputedStyle(document.documentElement);
+    return style.getPropertyValue("--window-end").trim().slice(1);
+  })()`);
+  await check(
+    "the library leaves the sidebar and the window's margins untinted alike",
+    ``,
+    `document.querySelector(".sidebar").style.getPropertyValue("--tinted") === "0"
+      && e2e.margins() === "${untinted}"`,
+  );
+  await check(
+    "the app widens the sidebar for the library, the card resting beside it",
+    ``,
+    `innerWidth === ${width - 440}`,
+    content,
+  );
+  await check("the library is as wide as the sidebar", ``, `innerWidth === 440`);
   await check(
     "the library resists a swipe towards a page before it",
     `e2e.swipe(100, 20, 50, true)`,
@@ -816,12 +851,14 @@ try {
     `e2e.gesture("end", 0, 1000)`,
     `e2e.library() && e2e.offset() === 100`,
   );
+  await check("the library's width comes back with it", ``, `innerWidth === 440`);
   await check(
     "reopening a tab from the library slides back to the displayed Space, where it opens",
     `e2e.closedCount = e2e.state.closed.length; e2e.library().querySelector(".tab").click()`,
     `e2e.settled(0) && !e2e.library() && e2e.rows().length === e2e.count
-      && e2e.state.closed.length === e2e.closedCount - 1`,
+      && e2e.state.closed.length === e2e.closedCount - 1 && innerWidth === 260`,
   );
+  await check("the card gets its place back beside the sidebar", ``, `innerWidth === ${width - 260}`, content);
   await check(
     "the footer's Library button slides to the library, the app keeping the first Space",
     `document.querySelector('.switcher [aria-label="Library"]').click()`,
@@ -835,6 +872,26 @@ try {
     `e2e.settled(${last})`,
   );
   const after = -(last + 1) * 100;
+  await check(
+    "a short pull past the last Space resists and brings out the + at the pointer",
+    `e2e.bubble = () => document.querySelector(".new-bubble"); e2e.swipe(-10, 3, 50, true)`,
+    `e2e.offset() < ${-last * 100} && e2e.offset() > ${-last * 100 - 10}
+      && Number(e2e.bubble().style.opacity) > 0 && !e2e.bubble().hasAttribute("data-armed")
+      && e2e.bubble().style.transform.includes("300px")`,
+  );
+  await check("released before it arms, it goes back", `e2e.gesture("end", 0, 1000)`, `e2e.settled(${last}) && e2e.bubble().style.opacity === "0"`);
+  await check(
+    "pulling further arms the +",
+    `e2e.swipe(-20, 15, 50, true)`,
+    `e2e.bubble().hasAttribute("data-armed") && e2e.bubble().style.opacity === "1"
+      && getComputedStyle(e2e.bubble().firstChild).backgroundColor === "rgb(255, 255, 255)"`,
+  );
+  await check(
+    "releasing it armed shows the page creating a Space",
+    `e2e.gesture("end", 0, 1000)`,
+    `e2e.newPage() && e2e.offset() === ${after}`,
+  );
+  await check("a swipe back settles on the last Space once more", `e2e.swipe(20, 15, 50)`, `e2e.settled(${last})`);
   await check(
     "a swipe past the last Space shows the page creating one, the app keeping the last Space",
     `e2e.swipe(-20, 15, 50)`,

@@ -44,6 +44,12 @@ test("mixes a share of a color into another, like color-mix in srgb", () => {
   expect(mix("#3e7bfa", "#1b0e1f", 14)).toBe("#201d3e");
 });
 
-test("tints the window and an empty Space's card with the Space's color", () => {
-  expect(windowColors("#000000", "#ffffff", "#ffffff")).toBe("window/colors/dbdbdb/ebebeb");
+test("tints the window with a tint and an empty Space's card with the Space's color", () => {
+  const black = { color: "#000000", strength: 1 };
+  expect(windowColors(black, "#000000", "#ffffff", "#ffffff")).toBe("window/colors/dbdbdb/ebebeb");
+  // A page that is no Space's leaves the window untinted, halfway to it half tinted.
+  const none = { color: "#000000", strength: 0 };
+  expect(windowColors(none, "#000000", "#ffffff", "#ffffff")).toBe("window/colors/ffffff/ebebeb");
+  const half = { color: "#000000", strength: 0.5 };
+  expect(windowColors(half, "#000000", "#ffffff", "#ffffff")).toBe("window/colors/ededed/ebebeb");
 });

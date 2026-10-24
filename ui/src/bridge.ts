@@ -73,32 +73,61 @@ export function mix(color: string, base: string, share: number): string {
     .join("")}`;
 }
 
+// A Space's color, at a `strength` from 0, for a page that is no Space's, to 1: between two
+// pages, the blend of theirs.
+export type Tint = { color: string; strength: number };
+
 // The command painting the window around the sidebar and the card, and an empty Space's card
-// (WindowColors in app/src/command.rs): the end of the sidebar's gradient and the panel's color,
-// tinted by the Space's `color` as the sidebar tints them (index.css).
-export function windowColors(color: string, end: string, panel: string): string {
-  return `window/colors/${mix(color, end, 14).slice(1)}/${mix(color, panel, 8).slice(1)}`;
+// (WindowColors in app/src/command.rs): the end of the sidebar's gradient tinted as the sidebar
+// tints it (index.css), and the panel's color tinted by the displayed Space's `card` color.
+export function windowColors(tint: Tint, card: string, end: string, panel: string): string {
+  const margins = mix(tint.color, end, 14 * tint.strength).slice(1);
+  return `window/colors/${margins}/${mix(card, panel, 8).slice(1)}`;
 }
 
-// Sends the window's colors for a Space's `color`, and again when the appearance changes the
-// colors they derive from, read from index.css.
-export function useWindowColors(color: string | undefined) {
-  useEffect(() => {
-    if (!color) return;
-    const paint = () => {
-      const style = getComputedStyle(document.documentElement);
-      const end = style.getPropertyValue("--window-end").trim();
-      const panel = style.getPropertyValue("--panel").trim();
-      if (!end || !panel) return false;
-      send(windowColors(color, end, panel));
-      return true;
-    };
+// Paints the window with the colors last given, sending them only when they change, and again
+// when the appearance changes the colors they derive from, read from index.css.
+export class WindowPainter {
+  private colors?: [Tint, string];
+  private base?: [string, string];
+  private sent = "";
+  private readonly repaint = () => {
+    this.base = undefined;
+    this.send();
+  };
+
+  start() {
+    window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", this.repaint);
+  }
+
+  stop() {
+    window
+      .matchMedia?.("(prefers-color-scheme: dark)")
+      .removeEventListener?.("change", this.repaint);
+  }
+
+  paint(tint: Tint, card: string) {
+    this.colors = [tint, card];
+    this.send();
+  }
+
+  private send() {
+    if (!this.colors) return;
+    this.base ??= baseColors();
     // Without the stylesheet, as in tests, there is nothing to paint with.
-    if (!paint()) return;
-    const scheme = matchMedia("(prefers-color-scheme: dark)");
-    scheme.addEventListener("change", paint);
-    return () => scheme.removeEventListener("change", paint);
-  }, [color]);
+    if (!this.base) return;
+    const command = windowColors(...this.colors, ...this.base);
+    if (command === this.sent) return;
+    this.sent = command;
+    send(command);
+  }
+}
+
+function baseColors(): [string, string] | undefined {
+  const style = getComputedStyle(document.documentElement);
+  const end = style.getPropertyValue("--window-end").trim();
+  const panel = style.getPropertyValue("--panel").trim();
+  return end && panel ? [end, panel] : undefined;
 }
 
 export type Page = {

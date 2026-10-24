@@ -1,6 +1,5 @@
 import { type CSSProperties, type KeyboardEvent, memo, useRef, useState } from "react";
 import {
-  COLORS,
   type Item,
   type Space,
   type SpacePage,
@@ -8,7 +7,6 @@ import {
   type Tab,
   useAppState,
   useRenaming,
-  useWindowColors,
 } from "./bridge";
 import { useDrag } from "./drag";
 import { Icon } from "./Icon";
@@ -24,14 +22,12 @@ export function App() {
   const { indicator, onPointerDown } = useDrag();
   const [profiles, setProfiles] = useState(false);
   const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
-  // The displayed Space's color tints the sidebar, and blends into the next one's on the way.
+  // The displayed Space's color tints the sidebar and the window, and blends into the next one's
+  // on the way.
   const pager = usePager(state?.spaces ?? [], displayed);
   const count = state?.spaces.length ?? 0;
   // The pages may rest on one that is not a Space's, while the app still displays a Space.
   const onSpace = pager.settled >= 0 && pager.settled < count;
-  // Only the sidebar beside the page paints the window, not the one revealed above it.
-  const space = state?.spaces[displayed];
-  useWindowColors(space && location.hash === "" ? COLORS[space.color] : undefined);
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =
@@ -124,6 +120,10 @@ export function App() {
         <Profiles profiles={state?.profiles ?? []} open={profiles} onOpen={setProfiles} />
       </div>
       <div className="drop-indicator" ref={indicator} />
+      {/* Pulled out past the last Space, it opens the page creating one once armed. */}
+      <div className="new-bubble" ref={pager.bubble} aria-hidden="true">
+        <span>+</span>
+      </div>
     </nav>
   );
 }
