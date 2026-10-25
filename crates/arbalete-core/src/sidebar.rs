@@ -411,6 +411,31 @@ impl Sidebar {
         Ok(self.insert(Some(parent), NodeKind::Tab(tab)))
     }
 
+    /// Adds a new tab with `tab`'s url, title and icon at `index` among `parent`'s children, as
+    /// `add_tab` adds one.
+    pub fn duplicate(
+        &mut self,
+        tab: NodeId,
+        parent: NodeId,
+        index: usize,
+    ) -> Result<NodeId, Error> {
+        let Some(NodeKind::Tab(original)) = self.nodes.get(&tab).map(|node| &node.kind) else {
+            return Err(Error::NotATab);
+        };
+        let Tab {
+            url,
+            title,
+            favicon,
+            ..
+        } = original.clone();
+        let copy = self.add_tab(parent, &url, &title)?;
+        self.tab_mut(copy).expect("just added").favicon = favicon;
+        let children = self.children_mut(parent);
+        children.pop();
+        children.insert(index.min(children.len()), copy);
+        Ok(copy)
+    }
+
     /// Adds a folder at the end of `parent`, which cannot be favorites: they hold only tabs.
     pub fn add_folder(&mut self, parent: NodeId, title: &str) -> Result<NodeId, Error> {
         self.check_container(parent)?;
@@ -487,6 +512,15 @@ impl Sidebar {
         let from = self.movable(tab)?;
         self.place(tab, from, split, 1);
         Ok(split)
+    }
+
+    /// Puts a copy of `tab` beside `target` in a split, as `split` puts `tab` itself.
+    pub fn split_duplicate(&mut self, tab: NodeId, target: NodeId) -> Result<NodeId, Error> {
+        let parent = self.movable(target)?;
+        let copy = self.duplicate(tab, parent, usize::MAX)?;
+        self.split(copy, target).inspect_err(|_| {
+            self.remove(copy).expect("just added");
+        })
     }
 
     /// The row a tab shows in: its split, if any, else the tab itself.
@@ -632,7 +666,7 @@ impl Sidebar {
     pub fn close_in_place(&mut self, space: SpaceId, tab: NodeId) -> Result<Option<NodeId>, Error> {
         self.space(space)?;
         let opener = self.open_opener(tab);
-        self.separate(tab);
+        self.separate(tab)?;
         let space = self.spaces.iter_mut().find(|s| s.id == space);
         let space = space.ok_or(Error::UnknownSpace)?;
         if space.selected == Some(tab) {
@@ -706,11 +740,13 @@ impl Sidebar {
         }
     }
 
-    /// Moves a tab out of its split, right after it, which then dissolves.
-    fn separate(&mut self, tab: NodeId) {
+    /// Moves a tab out of its split, as a row right after it; the split then dissolves, its
+    /// other tab staying as a row in its place. A tab in no split stays where it is.
+    pub fn separate(&mut self, tab: NodeId) -> Result<(), Error> {
+        self.check_tab(tab)?;
         let split = self.row_of(tab);
         if split == tab {
-            return;
+            return Ok(());
         }
         let parent = self.nodes[&split].parent.expect("a split has a parent");
         let index = self.nodes[&parent]
@@ -723,6 +759,7 @@ impl Sidebar {
             parent,
             index.expect("a child of its parent") + 1,
         );
+        Ok(())
     }
 
     /// Replaces a split holding fewer than two tabs by the tab it has left, if any.
@@ -1952,6 +1989,59 @@ mod tests {
         assert_eq!(children(&sidebar, sidebar.spaces()[1].today), [split]);
         assert_eq!(saved_url(&mut sidebar, a), None);
         assert_eq!(sidebar.spaces()[0].selected, None);
+    }
+
+    #[test]
+    fn duplicates_a_tab_at_an_index_and_keeps_the_original() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b] = ["a", "b"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        sidebar.tab_mut(a).unwrap().title = "A".into();
+        sidebar.tab_mut(a).unwrap().favicon = Some("a.ico".into());
+        let copy = sidebar.duplicate(a, home.today, 1).unwrap();
+        assert_eq!(children(&sidebar, home.today), [a, copy, b]);
+        let tab = sidebar.tab_mut(copy).unwrap();
+        assert_eq!((tab.url.as_str(), tab.title.as_str()), ("a", "A"));
+        assert_eq!(tab.favicon.as_deref(), Some("a.ico"));
+        let pinned = sidebar.duplicate(b, home.pinned, usize::MAX).unwrap();
+        assert_eq!(children(&sidebar, home.pinned), [pinned]);
+        assert_eq!(saved_url(&mut sidebar, pinned).as_deref(), Some("b"));
+        assert_eq!(saved_url(&mut sidebar, b), None);
+        let split = sidebar.split(b, a).unwrap();
+        assert_eq!(sidebar.duplicate(split, home.today, 0), Err(Error::NotATab));
+        assert_eq!(sidebar.duplicate(a, split, 0), Err(Error::NotAContainer));
+    }
+
+    #[test]
+    fn splits_a_copy_of_a_tab_with_another_and_keeps_the_original() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let [a, b, c] = ["a", "b", "c"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split_duplicate(c, a).unwrap();
+        let copy = children(&sidebar, split)[1];
+        assert_eq!(children(&sidebar, home.today), [split, b, c]);
+        assert_eq!(children(&sidebar, split), [a, copy]);
+        assert_eq!(sidebar.tab_mut(copy).unwrap().url, "c");
+        sidebar.move_node(b, favorites, 0).unwrap();
+        let count = sidebar.tabs().count();
+        assert_eq!(sidebar.split_duplicate(c, b), Err(Error::NotSplittable));
+        assert_eq!(sidebar.split_duplicate(c, a), Err(Error::NotAContainer));
+        assert_eq!(sidebar.tabs().count(), count);
+    }
+
+    #[test]
+    fn separates_a_tab_from_its_split_as_the_row_after_it() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let [a, b, c] = ["a", "b", "c"].map(|url| sidebar.open_tab(home.id, url).unwrap());
+        let split = sidebar.split(c, a).unwrap();
+        sidebar.separate(a).unwrap();
+        assert_eq!(children(&sidebar, home.today), [c, a, b]);
+        assert!(sidebar.node(split).is_none());
+        sidebar.separate(b).unwrap();
+        assert_eq!(children(&sidebar, home.today), [c, a, b]);
+        assert_eq!(sidebar.separate(home.today), Err(Error::NotATab));
     }
 
     #[test]
