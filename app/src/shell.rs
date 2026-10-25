@@ -1560,6 +1560,15 @@ pub fn run(command: Command) {
         (Command::Split(tab, target), _) => {
             let _ = update_sidebar(|sidebar| sidebar.split(tab, target));
         }
+        (Command::Duplicate(tab, parent, index), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.duplicate(tab, parent, index));
+        }
+        (Command::SplitDuplicate(tab, target), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.split_duplicate(tab, target));
+        }
+        (Command::Separate(tab), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.separate(tab));
+        }
         (Command::NewProfile, _) => new_profile(),
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
         (Command::RenameProfile(id, name), _) => {
