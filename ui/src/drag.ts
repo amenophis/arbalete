@@ -1,6 +1,7 @@
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { send } from "./bridge";
+import { rowRects, slideFrom, startFrom } from "./motion";
 
 // Where a dragged node lands: an index among a container's or a folder's children.
 export type Place = { parent: number; index: number };
@@ -21,8 +22,7 @@ export const FULL_HINT_MS = 1500;
 const TILE = 47;
 const GAP = 8;
 
-// How long rows and tiles slide to their new place, unless motion is reduced.
-export const ROW_SLIDE = "200ms ease-in-out";
+// How long tiles slide to their new place, unless motion is reduced.
 const TILE_SLIDE = "200ms ease-out";
 
 // What is dragged: a tab row, a folder, a split row or a favorite tile.
@@ -107,27 +107,25 @@ type Found = { place: Place; line: Line } | { split: HTMLElement };
 // the pointer itself, the other tiles sliding to open its slot; a row over the favorites becomes
 // a tile ghost and opens a slot too, unless the favorites are full: `full` then names them, to say
 // so, and the drop does nothing. Escape cancels. The drop sends one command; once the app answers
-// with the new state, the rows that moved slide to their place.
+// with the new state, the rows that moved slide to their place (useListMotion), the dropped one
+// from its ghost.
 export function useDrag(state: unknown) {
   const indicator = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [full, setFull] = useState<number | null>(null);
   const fullTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  // Set on a drop, until the state that follows: the rows' places before it, to slide from.
-  const dropped = useRef<{ state: unknown; before: Map<string, DOMRect> } | null>(null);
+  // Set on a drop, until the state that follows.
+  const dropped = useRef<unknown>(null);
   const latest = useRef(state);
   latest.current = state;
 
   useLayoutEffect(() => {
-    const drop = dropped.current;
-    if (!drop || drop.state === state) return;
+    if (dropped.current === null || dropped.current === state) return;
     dropped.current = null;
-    const page = displayedPage();
     for (const element of document.querySelectorAll<HTMLElement>(".dragged, .lifted")) {
       element.classList.remove("dragged", "lifted");
       element.style.transform = "";
     }
-    if (page) slideFrom(drop.before, page, ROW_SLIDE);
     setPreview(null);
   }, [state]);
   const shown = preview && (!("dropped" in preview) || preview.dropped === state) ? preview : null;
@@ -274,11 +272,11 @@ export function useDrag(state: unknown) {
       if (!started) return;
       flagFull(false);
       const command = commit ? commandOf(id, from, drop) : null;
-      // The dropped row slides from where its ghost was.
       const before = rowRects(page);
-      const copy = ghost?.firstElementChild;
-      if (copy && !ghost?.classList.contains("hidden")) {
-        before.set(String(id), copy.getBoundingClientRect());
+      // The dropped row slides from where its ghost was.
+      const shown = ghost?.firstElementChild;
+      if (command && shown && !ghost?.classList.contains("hidden")) {
+        startFrom(String(id), shown.getBoundingClientRect());
       }
       ghost?.remove();
       showLine(indicator.current, null);
@@ -291,7 +289,7 @@ export function useDrag(state: unknown) {
           item.style.transform = "";
           slideFrom(before, grid, TILE_SLIDE);
         }
-        dropped.current = { state: latest.current, before };
+        dropped.current = latest.current;
         setPreview((shown) => shown && { ...shown, dropped: latest.current });
         send(command);
         return;
@@ -337,10 +335,6 @@ function placeOf(item: HTMLElement): Place {
   return { parent: Number(list.dataset.parent), index: [...list.children].indexOf(item) };
 }
 
-function displayedPage(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(".space-page:not([inert])");
-}
-
 // The click that ends a drag must not select the tab or toggle the folder.
 export function swallowClick() {
   const swallow = (event: Event) => event.stopPropagation();
@@ -349,56 +343,6 @@ export function swallowClick() {
 }
 
 type Line = { left: number; top: number; width: number };
-
-// The rows and tiles that slide, by node id: a folder's own row, without the tabs below it.
-function rowElements(root: ParentNode): Map<string, HTMLElement> {
-  const rows = new Map<string, HTMLElement>();
-  for (const item of root.querySelectorAll<HTMLElement>("li[data-id]")) {
-    const row = item.classList.contains("folder-item")
-      ? item.querySelector<HTMLElement>(":scope > .folder")
-      : item;
-    if (row) rows.set(item.dataset.id as string, row);
-  }
-  return rows;
-}
-
-export function rowRects(root: ParentNode): Map<string, DOMRect> {
-  const rects = new Map<string, DOMRect>();
-  for (const [id, row] of rowElements(root)) rects.set(id, row.getBoundingClientRect());
-  return rects;
-}
-
-// Slides the rows of `root` from where they were, `before`, to where they are now, with the
-// transform alone; the lifted tile follows the pointer instead.
-export function slideFrom(before: Map<string, DOMRect>, root: ParentNode, timing: string) {
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-  const rows = [...rowElements(root)].filter(([, row]) => !row.classList.contains("lifted"));
-  for (const [, row] of rows) {
-    row.style.transition = "";
-    row.style.transform = "";
-  }
-  const moves: [HTMLElement, number, number][] = [];
-  for (const [id, row] of rows) {
-    const from = before.get(id);
-    const to = row.getBoundingClientRect();
-    if (!from) continue;
-    const [dx, dy] = [from.left - to.left, from.top - to.top];
-    if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) moves.push([row, dx, dy]);
-  }
-  for (const [row, dx, dy] of moves) {
-    row.style.transition = "none";
-    row.style.transform = `translate(${dx}px, ${dy}px)`;
-  }
-  // The rows must show at their old place before they transition to the new one.
-  document.body.getBoundingClientRect();
-  for (const [row] of moves) {
-    row.style.transition = `transform ${timing}`;
-    row.style.transform = "";
-    row.addEventListener("transitionend", () => row.style.removeProperty("transition"), {
-      once: true,
-    });
-  }
-}
 
 // The place in the lists under the pointer, with the line showing it, or the tab row a tab
 // would make a split with.

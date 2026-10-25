@@ -1,7 +1,8 @@
 import { type PointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { COLORS, type Glance, type Profile, type Space, send } from "./bridge";
-import { ROW_SLIDE, rowRects, slideFrom, swallowClick, THRESHOLD } from "./drag";
+import { swallowClick, THRESHOLD } from "./drag";
 import { Icon } from "./Icon";
+import { ROW_SLIDE, rowRects, slideFrom } from "./motion";
 import { NameField } from "./Profiles";
 import { SpaceEditor } from "./Spaces";
 

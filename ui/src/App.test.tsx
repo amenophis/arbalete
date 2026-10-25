@@ -959,7 +959,7 @@ test("dragging a row leaves it dimmed in place, a ghost of it following the poin
   const other = shown().getByRole("button", { name: "Other" });
   dragTo(other, shown().getByRole("button", { name: "Example" }), 4);
   expect(other.closest("li")?.classList.contains("dragged")).toBe(true);
-  expect(document.querySelector(".drag-ghost")?.textContent).toBe("Other");
+  expect(document.querySelector(".drag-ghost .ghost-pill")?.textContent).toBe("Other");
   const line = document.querySelector<HTMLElement>(".drop-indicator");
   expect(line?.style.display).toBe("block");
   fireEvent.pointerUp(window);
