@@ -53,21 +53,13 @@ pub fn load(path: &Path) -> Result<Option<Sidebar>, LoadError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::import::TestDir;
     use crate::sidebar::Color;
-    use std::path::PathBuf;
-
-    /// A fresh directory per test, so tests can run in parallel.
-    fn directory(test: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("arbalete-store-{}-{test}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
 
     #[test]
     fn saves_and_loads_the_sidebar() {
-        let path = directory("round-trip").join("sidebar.json");
+        let dir = TestDir::new("store-round-trip");
+        let path = dir.0.join("sidebar.json");
         let mut sidebar = Sidebar::default();
         let home = sidebar.spaces()[0].clone();
         let folder = sidebar.add_folder(home.pinned, "Docs").unwrap();
@@ -85,13 +77,15 @@ mod tests {
 
     #[test]
     fn loads_nothing_before_the_first_save() {
-        let path = directory("missing").join("sidebar.json");
+        let dir = TestDir::new("store-missing");
+        let path = dir.0.join("sidebar.json");
         assert!(matches!(load(&path), Ok(None)));
     }
 
     #[test]
     fn rejects_an_unknown_version() {
-        let path = directory("version").join("sidebar.json");
+        let dir = TestDir::new("store-version");
+        let path = dir.0.join("sidebar.json");
         save(&Sidebar::default(), &path).unwrap();
         let json = fs::read_to_string(&path)
             .unwrap()
@@ -105,7 +99,8 @@ mod tests {
 
     #[test]
     fn rejects_an_invalid_file() {
-        let path = directory("invalid").join("sidebar.json");
+        let dir = TestDir::new("store-invalid");
+        let path = dir.0.join("sidebar.json");
         fs::write(&path, "not json").unwrap();
         assert!(matches!(load(&path), Err(LoadError::Invalid(_))));
     }
