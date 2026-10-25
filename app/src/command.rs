@@ -80,6 +80,14 @@ pub enum Command {
     /// Puts a tab beside another in a split row, in the other's place: `split/<tab id>/<target
     /// id>`.
     Split(NodeId, NodeId),
+    /// Adds a copy of a tab at an index among a container's or a folder's children:
+    /// `duplicate/<tab id>/<parent id>/<index>`.
+    Duplicate(NodeId, NodeId, usize),
+    /// Puts a copy of a tab beside another in a split row, in the other's place:
+    /// `split-duplicate/<tab id>/<target id>`.
+    SplitDuplicate(NodeId, NodeId),
+    /// Takes a tab out of its split row, as the row after it: `separate/<tab id>`.
+    Separate(NodeId),
     /// Creates a profile, with a Space of its own, for the UI to rename: `profile/new`.
     NewProfile,
     /// Renames a profile: `profile/rename/<profile id>/<percent-encoded name>`.
@@ -358,25 +366,44 @@ impl Command {
                         .ok()
                         .map(|target| Self::Split(tab, target));
                 }
-                if let Some(args) = path.strip_prefix("move/") {
-                    let mut args = args.split('/');
-                    let (id, parent, index) = (args.next()?, args.next()?, args.next()?);
-                    if args.next().is_some() {
-                        return None;
-                    }
-                    let (id, parent) = (
-                        serde_json::from_str(id).ok()?,
-                        serde_json::from_str(parent).ok()?,
-                    );
-                    return index
-                        .parse()
+                if let Some((tab, target)) = path
+                    .strip_prefix("split-duplicate/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let tab = serde_json::from_str(tab).ok()?;
+                    return serde_json::from_str(target)
                         .ok()
-                        .map(|index| Self::Move(id, parent, index));
+                        .map(|target| Self::SplitDuplicate(tab, target));
+                }
+                if let Some(id) = path.strip_prefix("separate/") {
+                    return serde_json::from_str(id).ok().map(Self::Separate);
+                }
+                if let Some(args) = path.strip_prefix("move/") {
+                    let (id, parent, index) = parse_place(args)?;
+                    return Some(Self::Move(id, parent, index));
+                }
+                if let Some(args) = path.strip_prefix("duplicate/") {
+                    let (tab, parent, index) = parse_place(args)?;
+                    return Some(Self::Duplicate(tab, parent, index));
                 }
                 percent_decode(path.strip_prefix("open/")?).map(Self::Open)
             }
         }
     }
+}
+
+/// A node, a parent and an index among its children: `<id>/<parent id>/<index>`.
+fn parse_place(args: &str) -> Option<(NodeId, NodeId, usize)> {
+    let mut args = args.split('/');
+    let (id, parent, index) = (args.next()?, args.next()?, args.next()?);
+    if args.next().is_some() {
+        return None;
+    }
+    Some((
+        serde_json::from_str(id).ok()?,
+        serde_json::from_str(parent).ok()?,
+        index.parse().ok()?,
+    ))
 }
 
 /// A color by its name, like `blue`.
@@ -540,6 +567,28 @@ mod tests {
         assert_eq!(serde_json::to_string(&(tab, target)).unwrap(), "[4,7]");
         assert_eq!(Command::parse("split/4"), None);
         assert_eq!(Command::parse("split/4/x"), None);
+    }
+
+    #[test]
+    fn parses_a_duplicate_a_split_of_a_duplicate_and_a_separation() {
+        let Some(Command::Duplicate(tab, parent, index)) = Command::parse("duplicate/12/6/3")
+        else {
+            panic!("not a duplicate")
+        };
+        assert_eq!(serde_json::to_string(&(tab, parent)).unwrap(), "[12,6]");
+        assert_eq!(index, 3);
+        assert_eq!(Command::parse("duplicate/12/6"), None);
+        let Some(Command::SplitDuplicate(tab, target)) = Command::parse("split-duplicate/4/7")
+        else {
+            panic!("not a split of a duplicate")
+        };
+        assert_eq!(serde_json::to_string(&(tab, target)).unwrap(), "[4,7]");
+        assert_eq!(Command::parse("split-duplicate/4"), None);
+        let Some(Command::Separate(tab)) = Command::parse("separate/4") else {
+            panic!("not a separation")
+        };
+        assert_eq!(serde_json::to_string(&tab).unwrap(), "4");
+        assert_eq!(Command::parse("separate/x"), None);
     }
 
     #[test]
