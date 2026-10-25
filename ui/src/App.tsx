@@ -15,6 +15,7 @@ import { favoriteColumns, previewTiles, type TilePreview, useDrag } from "./drag
 import { useFaviconColor } from "./faviconColor";
 import { Icon } from "./Icon";
 import { Library, LibraryButton } from "./Library";
+import { useListMotion } from "./motion";
 import { NewMenu } from "./NewMenu";
 import { Profiles } from "./Profiles";
 import { usePager } from "./pager";
@@ -35,6 +36,8 @@ export function App() {
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalete:rename");
   const { indicator, preview, full, onPointerDown } = useDrag(state);
+  // After the drag's own clean-up, which puts the dropped row back in the list.
+  useListMotion(state);
   const [profiles, setProfiles] = useState(false);
   const displayed = state ? state.spaces.findIndex((space) => space.id === state.space) : 0;
   // The displayed Space's color tints the sidebar and the window, and blends into the next one's

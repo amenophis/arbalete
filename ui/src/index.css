@@ -759,6 +759,14 @@ button.folder:hover {
   display: none;
 }
 
+/* The tabs of a folder closing fade out where they were (ui/src/motion.ts). */
+.leaving {
+  position: fixed;
+  z-index: 1;
+  color: var(--text);
+  pointer-events: none;
+}
+
 /* Over the middle of a tab row, the split it would make takes the row's place. */
 .split-preview {
   position: fixed;

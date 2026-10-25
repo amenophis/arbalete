@@ -435,6 +435,26 @@ try {
     `e2e.send("close/" + e2e.pair[1])`,
     `!e2e.page().querySelector(".split-row") && e2e.rows()[0].dataset.id === e2e.pair[0]`,
   );
+
+  await sidebar.eval(waitFor(`document.getAnimations().length === 0`));
+  // A transition on a row's transform, running: the rows below the folder slide by.
+  const sliding = `[...e2e.page().querySelectorAll("li[data-id], .folder")].some((row) =>
+    row.getAnimations().some((animation) => animation.transitionProperty === "transform" && animation.playState === "running"))`;
+  await check(
+    "a folder closing slides the rows below it up while its tabs fade out",
+    `e2e.folder = e2e.folders()[0]; e2e.folder.scrollIntoView({ block: "start" });
+     e2e.send("toggle/" + e2e.folder.parentElement.dataset.id)`,
+    `matchMedia("(prefers-reduced-motion: reduce)").matches
+      || (${sliding} && !!document.querySelector(".leaving"))`,
+  );
+  await sidebar.eval(waitFor(`document.getAnimations().length === 0 && !document.querySelector(".leaving")`));
+  await check(
+    "a folder opening slides the rows below it down while its tabs fade in",
+    `e2e.send("toggle/" + e2e.folder.parentElement.dataset.id)`,
+    `matchMedia("(prefers-reduced-motion: reduce)").matches
+      || (${sliding} && e2e.folder.parentElement.querySelectorAll(".folder-tabs li").length === 10
+        && e2e.folder.parentElement.querySelector(".folder-tabs li").getAnimations().length > 0)`,
+  );
   await check(
     "the sidebar page does not scroll or bounce, only its tab list scrolls",
     `scrollBy(0, 500)`,
