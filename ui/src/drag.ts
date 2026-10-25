@@ -188,10 +188,7 @@ export function useDrag(state: unknown) {
         const dy = pointer.y - grab.y - base.top;
         item.style.transform = `translate(${dx}px, ${dy}px)`;
       } else if (ghost) {
-        const tile = ghost.classList.contains("tile");
-        const x = pointer.x - (tile ? TILE / 2 : grab.x);
-        const y = pointer.y - (tile ? TILE / 2 : grab.y);
-        ghost.style.transform = `translate(${x}px, ${y}px)`;
+        ghost.style.transform = `translate(${pointer.x - grab.x}px, ${pointer.y - grab.y}px)`;
       }
     };
     const showSplit = (row: HTMLElement | null) => {
@@ -257,7 +254,7 @@ export function useDrag(state: unknown) {
           showSlot(from.index);
         } else {
           item.classList.add("dragged");
-          ghost = ghostOf(item, start.width);
+          ghost = ghostOf(item, start.width, grab);
           document.body.append(ghost);
         }
       }
@@ -274,7 +271,9 @@ export function useDrag(state: unknown) {
       const command = commit ? commandOf(id, from, drop) : null;
       const before = rowRects(page);
       // The dropped row slides from where its ghost was.
-      const shown = ghost?.firstElementChild;
+      const shown = ghost?.querySelector(
+        ghost.classList.contains("tile") ? ".ghost-tile" : ".ghost-pill",
+      );
       if (command && shown && !ghost?.classList.contains("hidden")) {
         startFrom(String(id), shown.getBoundingClientRect());
       }
@@ -395,18 +394,28 @@ function showLine(indicator: HTMLElement | null, line: Line | null) {
     : "";
 }
 
-// A copy of the dragged row that follows the pointer, as wide as the row.
-function ghostOf(item: HTMLElement, width: number): HTMLElement {
+// A copy of the dragged row that follows the pointer, as wide as the row, held where it was
+// grabbed. Over the favorites, it shrinks into the tile it would make there, around the pointer
+// (index.css).
+function ghostOf(item: HTMLElement, width: number, grab: { x: number; y: number }): HTMLElement {
   const ghost = document.createElement("div");
   ghost.className = "drag-ghost";
-  ghost.style.setProperty("--width", `${width}px`);
+  const style = ghost.style;
+  style.setProperty("--width", `${width}px`);
+  style.setProperty("--grab-x", `${grab.x}px`);
+  style.setProperty("--grab-y", `${grab.y}px`);
+  style.setProperty("--shrink", String(TILE / width));
   const row = item.querySelector(":scope > .tab, :scope > .folder, :scope > .split") ?? item;
   const copy = row.cloneNode(true) as HTMLElement;
   copy.classList.add("ghost-pill");
   for (const element of [copy, ...copy.querySelectorAll("[aria-current]")]) {
     element.removeAttribute("aria-current");
   }
-  ghost.append(copy);
+  const tile = document.createElement("div");
+  tile.className = "ghost-tile";
+  const icon = row.querySelector(".favicon")?.cloneNode(true);
+  if (icon) tile.append(icon);
+  ghost.append(copy, tile);
   return ghost;
 }
 
