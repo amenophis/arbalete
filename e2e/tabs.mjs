@@ -468,6 +468,45 @@ try {
     copyId !== originalId && saved.nodes[copyId]?.kind.Tab?.url === saved.nodes[originalId].kind.Tab.url,
   );
 
+  await sidebar.eval(`e2e.pair = [e2e.rows()[0].dataset.id, e2e.rows()[1].dataset.id]; 0`);
+  await check(
+    "a split made from two tabs shows as one row",
+    `e2e.send("split/" + e2e.pair[1] + "/" + e2e.pair[0])`,
+    `e2e.page().querySelector(".today > .split-row")?.querySelectorAll(".half").length === 2`,
+  );
+  await sidebar.eval(waitFor(`document.getAnimations().length === 0`));
+  const half = await point(`e2e.page().querySelector(".today > .split-row .half:last-child")`, 0.5, 0.5);
+  await press("mouseMoved", half);
+  await check(
+    "hovering a split row without Option shows no separate button",
+    ``,
+    `[...e2e.page().querySelectorAll(".split-row .separate")].every((button) => getComputedStyle(button).display === "none")`,
+  );
+  await press("mouseMoved", half, 1);
+  await check(
+    "holding Option over a split row shows a 20 px separate button in each half",
+    ``,
+    `[...e2e.page().querySelectorAll(".split-row .separate")].every((button) => {
+      const rect = button.getBoundingClientRect();
+      return getComputedStyle(button).display === "grid" && rect.width === 20 && rect.height === 20;
+    })`,
+  );
+  const separate = await point(`e2e.page().querySelectorAll(".split-row .separate")[1]`, 0.5, 0.5);
+  await press("mouseMoved", separate, 1);
+  await press("mousePressed", separate, 1);
+  await press("mouseReleased", separate, 1);
+  await check(
+    "clicking a half's separate button takes its tab out, as the row after the other",
+    ``,
+    `!e2e.page().querySelector(".split-row") && e2e.rows()[0].dataset.id === e2e.pair[0]
+      && e2e.rows()[1].dataset.id === e2e.pair[1]`,
+  );
+  await press("mouseMoved", { x: separate.x, y: separate.y + 200 });
+  await check(
+    "moving without Option forgets it",
+    ``,
+    `!document.querySelector(".sidebar").hasAttribute("data-option")`,
+  );
   await sidebar.eval(waitFor(`document.getAnimations().length === 0`));
   // A transition on a row's transform, running: the rows below the folder slide by.
   const sliding = `[...e2e.page().querySelectorAll("li[data-id], .folder")].some((row) =>

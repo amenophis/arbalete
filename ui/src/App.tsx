@@ -62,6 +62,10 @@ export function App() {
       className="sidebar"
       ref={pager.sidebar}
       onPointerDown={onPointerDown}
+      onPointerMove={holdOption}
+      onPointerLeave={releaseOption}
+      onKeyDown={holdOption}
+      onKeyUp={holdOption}
       onContextMenu={showMenu}
     >
       <div className="toolbar" role="toolbar" onFocus={unlessTabbed}>
@@ -284,6 +288,17 @@ function Sections({
   );
 }
 
+// Option held over the sidebar shows what it changes, like a split row's separate buttons
+// (index.css). The page hears keys only while focused: the pointer's events say it too, and
+// leaving the sidebar forgets it, so that it never sticks.
+function holdOption(event: { altKey: boolean; currentTarget: Element }) {
+  event.currentTarget.toggleAttribute("data-option", event.altKey);
+}
+
+function releaseOption(event: { currentTarget: Element }) {
+  event.currentTarget.removeAttribute("data-option");
+}
+
 // What the url bar shows of a page's address: its host, without "www.", or the whole address
 // when it has no host, like about:blank.
 export function domain(url: string): string {
@@ -451,11 +466,25 @@ const TabItem = memo(function TabItem({
 });
 
 // A split's row holds a pill per tab. Its tabs close from their menus or the keyboard, which
-// leaves the other tab alone in the row.
+// leaves the other tab alone in the row. Holding Option over the row, each pill offers to take
+// its tab out of the split, as the row after it.
 function SplitItem({ split, active }: { split: Split; active?: number | null }) {
   return (
     <li className="split-row" data-id={split.id}>
       <div className="split">
+        {/* Before the pills, which stay the row's first and last children. */}
+        {split.split.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className="separate"
+            aria-label={`Separate ${tab.title || tab.url}`}
+            title="Separate"
+            onClick={() => send(`separate/${tab.id}`)}
+          >
+            <Icon d="M5.5 3.5v9M10.5 3.5v9M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" size={14} />
+          </button>
+        ))}
         {split.split.map((tab) => (
           <Half
             key={tab.id}

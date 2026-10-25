@@ -569,6 +569,7 @@ button.folder:hover {
    shows it while a tab is dragged over a row (splitPreview in drag.ts). Selected, the row lights up
    and the tab shown is the brighter pill. */
 .split {
+  position: relative;
   display: flex;
   gap: 6px;
   box-sizing: border-box;
@@ -617,6 +618,39 @@ button.folder:hover {
 
 .split .half[aria-current] {
   background: var(--half-current);
+}
+
+/* Holding Option over a split row, each pill shows a button at its right end that takes its tab
+   out of the split, at once. */
+.separate {
+  position: absolute;
+  top: 10.5px;
+  right: 8px;
+  display: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+}
+
+.separate:first-child {
+  right: calc(50% + 7px);
+}
+
+.separate:hover {
+  background: var(--hover);
+}
+
+.sidebar[data-option] .split-row:hover .separate {
+  display: grid;
+}
+
+.sidebar[data-option] .split-row:hover .half {
+  padding-right: 30px;
 }
 
 /* Drawn over the url pill's bottom edge, inside its rounded corners, so that loading moves nothing. */
