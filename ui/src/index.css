@@ -779,6 +779,27 @@ button.folder:hover {
   display: none;
 }
 
+/* Holding Option drops a copy: a green "+" by the pointer says so. */
+.copy-badge {
+  position: absolute;
+  top: calc(var(--grab-y) + 6px);
+  left: calc(var(--grab-x) + 8px);
+  display: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #30a46c;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.drag-ghost.copy .copy-badge {
+  display: block;
+}
+
 /* The tabs of a folder closing fade out where they were (ui/src/motion.ts). */
 .leaving {
   position: fixed;

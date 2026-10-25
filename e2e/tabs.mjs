@@ -299,11 +299,13 @@ try {
   // Real drags: the mouse pressed, moved in steps and released through DevTools, as Chromium turns
   // it into pointer events. `from` and `to` are expressions for elements, `to` aimed at fractions
   // of its width and height once nothing slides; the press lifts on the center of `from`.
-  const press = (type, { x, y }) =>
+  // `modifiers` 1 holds Option.
+  const press = (type, { x, y }, modifiers = 0) =>
     sidebar.call("Input.dispatchMouseEvent", {
       type,
       x,
       y,
+      modifiers,
       button: "left",
       buttons: type === "mouseReleased" ? 0 : 1,
       clickCount: 1,
@@ -313,18 +315,19 @@ try {
       const rect = (${element}).getBoundingClientRect();
       return { x: rect.left + rect.width * ${fx}, y: rect.top + rect.height * ${fy} };
     })()`);
-  const hold = async (from, to, fx, fy) => {
+  const hold = async (from, to, fx, fy, modifiers = 0) => {
     // Rows still sliding from the last drop are not where they will rest.
     await sidebar.eval(waitFor(`document.getAnimations().length === 0`));
     const [start, end] = [await point(from, 0.5, 0.5), await point(to, fx, fy)];
     await press("mousePressed", start);
     for (let step = 1; step <= 8; step++) {
       const t = step / 8;
-      await press("mouseMoved", { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t });
+      const at = { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t };
+      await press("mouseMoved", at, modifiers);
     }
     return end;
   };
-  const release = (end) => press("mouseReleased", end);
+  const release = (end, modifiers = 0) => press("mouseReleased", end, modifiers);
   // Unless motion is reduced, some row slides to its new place with a transition.
   const slides = `(matchMedia("(prefers-reduced-motion: reduce)").matches
     || [...e2e.page().querySelectorAll("li[data-id], .folder")].some((row) => row.style.transition.includes("transform")))`;
@@ -434,6 +437,35 @@ try {
     "closing a half leaves the other tab as a normal row",
     `e2e.send("close/" + e2e.pair[1])`,
     `!e2e.page().querySelector(".split-row") && e2e.rows()[0].dataset.id === e2e.pair[0]`,
+  );
+
+  await sidebar.eval(`e2e.rows()[0].scrollIntoView({ block: "center" }); e2e.dragged = e2e.rows()[3];
+    e2e.count = e2e.rows().length; e2e.copied = e2e.dragged.textContent; 0`);
+  end = await hold(`e2e.dragged`, `e2e.rows()[0]`, 0.5, 0.1);
+  await press("mouseMoved", end, 1);
+  await check(
+    "holding Option while dragging a tab shows a \"+\" badge on its ghost, the tab staying lit",
+    ``,
+    `!!document.querySelector(".drag-ghost.copy") && getComputedStyle(document.querySelector(".copy-badge")).display === "block"
+      && !e2e.dragged.classList.contains("dragged")`,
+  );
+  await press("mouseMoved", end);
+  await check(
+    "releasing Option mid-drag takes the badge away",
+    ``,
+    `!document.querySelector(".drag-ghost.copy") && e2e.dragged.classList.contains("dragged")`,
+  );
+  await press("mouseMoved", end, 1);
+  await release(end, 1);
+  await check(
+    "dropping it with Option inserts a copy at the line and leaves the tab where it was",
+    ``,
+    `e2e.rows().length === e2e.count + 1 && e2e.rows()[4] === e2e.dragged && e2e.rows()[0] !== e2e.dragged
+      && e2e.rows()[0].textContent === e2e.copied && !document.querySelector(".drag-ghost")`,
+  );
+  const [copyId, originalId] = await sidebar.eval(`[e2e.rows()[0].dataset.id, e2e.dragged.dataset.id]`);
+  await checkSession("the session saves the copy as another tab with the same url", (saved) =>
+    copyId !== originalId && saved.nodes[copyId]?.kind.Tab?.url === saved.nodes[originalId].kind.Tab.url,
   );
 
   await sidebar.eval(waitFor(`document.getAnimations().length === 0`));
