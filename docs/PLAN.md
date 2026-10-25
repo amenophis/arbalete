@@ -360,8 +360,10 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - Import Arc's link routing rules.
 
 ### Phase 9 — Polish
-- Split View, Peek. The sidebar already makes split rows, a tab dropped on the middle of another:
-  until Split View shows both tabs side by side, a click on either half shows that tab alone.
+- Split View, Peek. The sidebar already makes split rows, a tab dropped on the middle of another
+  (with Option, a copy of it), and separates them again from a button Option shows on each half:
+  until Split View shows both tabs side by side, a split row opens its first tab, and a click on
+  either half shows that tab alone.
 - Per-OS finish: macOS vibrancy, Windows Mica, Wayland/X11.
 
 ### Phase 10 — Linux and Windows
