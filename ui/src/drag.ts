@@ -139,7 +139,7 @@ export function useDrag(state: unknown) {
 
   const onPointerDown = (event: ReactPointerEvent) => {
     const target = event.target as Element;
-    if (event.button !== 0 || target.closest(".close, input")) return;
+    if (event.button !== 0 || target.closest(".close, .separate, input")) return;
     const item = target
       .closest(".tab-row, .folder, .favorite, .split-row")
       ?.closest<HTMLElement>("li[data-id]");

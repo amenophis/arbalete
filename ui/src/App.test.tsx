@@ -270,12 +270,28 @@ test("shows a split as one row of two tabs, each selected by a click", () => {
   render(<App />);
   receive({}, 22);
   const row = document.querySelector<HTMLElement>('.split-row[data-id="20"]');
-  const halves = within(row as HTMLElement).getAllByRole("button");
+  const halves = [...(row as HTMLElement).querySelectorAll<HTMLElement>(".half")];
   expect(halves.map((half) => half.textContent)).toEqual(["Left", "Right"]);
   expect(halves[1].getAttribute("aria-current")).toBe("page");
   expect(document.querySelector(".url")?.getAttribute("title")).toBe("https://example.com/right");
   fireEvent.click(halves[0]);
   expect(fetch).toHaveBeenLastCalledWith("/command/select/21", { method: "POST" });
+});
+
+test("Option over the sidebar shows a split's separate buttons, until the pointer leaves", () => {
+  render(<App />);
+  receive({}, 22);
+  const sidebar = document.querySelector(".sidebar") as HTMLElement;
+  fireEvent.pointerMove(sidebar, { altKey: true });
+  expect(sidebar.hasAttribute("data-option")).toBe(true);
+  fireEvent.pointerLeave(sidebar);
+  expect(sidebar.hasAttribute("data-option")).toBe(false);
+  fireEvent.keyDown(sidebar, { key: "Alt", altKey: true });
+  expect(sidebar.hasAttribute("data-option")).toBe(true);
+  fireEvent.keyUp(sidebar, { key: "Alt" });
+  expect(sidebar.hasAttribute("data-option")).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Separate Right" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/separate/22", { method: "POST" });
 });
 
 test("shows the favorites as a grid of tiles named by their titles", () => {
