@@ -48,6 +48,11 @@ export function rowPlace(parent: number, index: number, zone: Zone, folder?: num
   return { parent, index: zone === "after" ? index + 1 : index };
 }
 
+// Option held while dragging a tab drops a copy of it, the tab staying where it is.
+export function copies(kind: Kind, option: boolean): boolean {
+  return option && kind === "tab";
+}
+
 // The command that moves node `id` from `from` to `to`, or null when it would stay in place. The
 // app counts the index once the node has left its parent.
 export function moveCommand(id: number, from: Place, to: Place): string | null {
@@ -97,7 +102,8 @@ export function previewTiles<T extends { id: number }>(
   return [...rest.slice(0, preview.slot), moved, ...rest.slice(preview.slot)];
 }
 
-type Drop = { place: Place | null; split: HTMLElement | null };
+// Where a drop lands: at a place, or in a split with the tab row `split`; nowhere with neither.
+export type Drop = { place: Place | null; split: HTMLElement | null };
 
 type Found = { place: Place; line: Line } | { split: HTMLElement };
 
@@ -106,7 +112,8 @@ type Found = { place: Place; line: Line } | { split: HTMLElement };
 // shows where it would land, or the row it would split with shows both tabs. A tile moves with
 // the pointer itself, the other tiles sliding to open its slot; a row over the favorites becomes
 // a tile ghost and opens a slot too, unless the favorites are full: `full` then names them, to say
-// so, and the drop does nothing. Escape cancels. The drop sends one command; once the app answers
+// so, and the drop does nothing. Holding Option while dragging a tab drops a copy of it instead,
+// as a badge on the ghost says. Escape cancels. The drop sends one command; once the app answers
 // with the new state, the rows that moved slide to their place (useListMotion), the dropped one
 // from its ghost.
 export function useDrag(state: unknown) {
@@ -151,6 +158,13 @@ export function useDrag(state: unknown) {
     // Where the lifted tile rests in the grid, which its transform starts from.
     let base = start;
     let drop: Drop = { place: null, split: null };
+    let copy = false;
+    // Option may be pressed or released at any time during the drag.
+    const holdOption = (option: boolean) => {
+      copy = copies(kind, option);
+      ghost?.classList.toggle("copy", copy);
+      if (ghost) item.classList.toggle("dragged", !copy);
+    };
     let overFull = false;
     // Says the favorites are full while the pointer is over them, and a moment after.
     const flagFull = (over: boolean) => {
@@ -249,15 +263,16 @@ export function useDrag(state: unknown) {
         if (Math.hypot(pointer.x - origin.x, pointer.y - origin.y) < THRESHOLD) return;
         started = true;
         addEventListener("keydown", onKey, true);
+        addEventListener("keyup", onKey, true);
         if (kind === "tile") {
           item.classList.add("lifted");
           showSlot(from.index);
         } else {
-          item.classList.add("dragged");
           ghost = ghostOf(item, start.width, grab);
           document.body.append(ghost);
         }
       }
+      holdOption(event.altKey);
       locate();
       follow();
     };
@@ -266,15 +281,16 @@ export function useDrag(state: unknown) {
       removeEventListener("pointerup", up);
       removeEventListener("pointercancel", cancel);
       removeEventListener("keydown", onKey, true);
+      removeEventListener("keyup", onKey, true);
       if (!started) return;
       flagFull(false);
-      const command = commit ? commandOf(id, from, drop) : null;
+      const command = commit ? commandOf(id, from, drop, copy) : null;
       const before = rowRects(page);
-      // The dropped row slides from where its ghost was.
+      // The dropped row slides from where its ghost was; a copy appears in its place.
       const shown = ghost?.querySelector(
         ghost.classList.contains("tile") ? ".ghost-tile" : ".ghost-pill",
       );
-      if (command && shown && !ghost?.classList.contains("hidden")) {
+      if (command && shown && !copy && !ghost?.classList.contains("hidden")) {
         startFrom(String(id), shown.getBoundingClientRect());
       }
       ghost?.remove();
@@ -298,14 +314,16 @@ export function useDrag(state: unknown) {
       showSlot(null);
       if (kind === "tile") slideFrom(before, grid, TILE_SLIDE);
     };
-    const up = () => {
+    const up = (event: PointerEvent) => {
       if (started) swallowClick();
+      holdOption(event.altKey);
       finish(true);
     };
     const cancel = () => finish(false);
     // The press goes on after Escape: its release must not click the row either.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key === "Alt") return holdOption(event.type === "keydown");
+      if (event.type !== "keydown" || event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
       addEventListener("pointerup", swallowClick, { once: true });
@@ -324,9 +342,13 @@ function dragKind(item: HTMLElement): Kind {
   return item.querySelector(":scope > .folder") ? "folder" : "tab";
 }
 
-function commandOf(id: number, from: Place, drop: Drop): string | null {
-  if (drop.split) return `split/${id}/${drop.split.dataset.id}`;
-  return drop.place && moveCommand(id, from, drop.place);
+// The command a drop sends: a copy of the tab, or the node itself, at the place or in a split.
+export function commandOf(id: number, from: Place, drop: Drop, copy: boolean): string | null {
+  const target = drop.split?.dataset.id;
+  if (target) return copy ? `split-duplicate/${id}/${target}` : `split/${id}/${target}`;
+  if (!drop.place) return null;
+  if (copy) return `duplicate/${id}/${drop.place.parent}/${drop.place.index}`;
+  return moveCommand(id, from, drop.place);
 }
 
 function placeOf(item: HTMLElement): Place {
@@ -396,7 +418,7 @@ function showLine(indicator: HTMLElement | null, line: Line | null) {
 
 // A copy of the dragged row that follows the pointer, as wide as the row, held where it was
 // grabbed. Over the favorites, it shrinks into the tile it would make there, around the pointer
-// (index.css).
+// (index.css); holding Option, it shows a "+" badge.
 function ghostOf(item: HTMLElement, width: number, grab: { x: number; y: number }): HTMLElement {
   const ghost = document.createElement("div");
   ghost.className = "drag-ghost";
@@ -415,7 +437,10 @@ function ghostOf(item: HTMLElement, width: number, grab: { x: number; y: number 
   tile.className = "ghost-tile";
   const icon = row.querySelector(".favicon")?.cloneNode(true);
   if (icon) tile.append(icon);
-  ghost.append(copy, tile);
+  const badge = document.createElement("span");
+  badge.className = "copy-badge";
+  badge.textContent = "+";
+  ghost.append(copy, tile, badge);
   return ghost;
 }
 

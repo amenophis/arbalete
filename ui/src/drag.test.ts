@@ -1,5 +1,14 @@
 import { expect, test } from "vitest";
-import { END, moveCommand, previewTiles, rowPlace, tileSlot, zoneAt } from "./drag";
+import {
+  commandOf,
+  copies,
+  END,
+  moveCommand,
+  previewTiles,
+  rowPlace,
+  tileSlot,
+  zoneAt,
+} from "./drag";
 
 test("a tab on the middle of another tab row makes a split, its edges insert", () => {
   expect(zoneAt(0.1, "tab", "tab")).toBe("before");
@@ -76,4 +85,26 @@ test("shows the favorites as they are without a preview of theirs", () => {
   expect(previewTiles(tiles, 9, null)).toBe(tiles);
   expect(previewTiles(tiles, 9, { parent: 8, slot: 1, tile: null })).toBe(tiles);
   expect(previewTiles(tiles, 9, { parent: 9, slot: 1, tile: 7 })).toBe(tiles);
+});
+
+test("Option drops a copy of a dragged tab, never of a folder, a split or a favorite", () => {
+  expect(copies("tab", true)).toBe(true);
+  expect(copies("tab", false)).toBe(false);
+  expect(copies("folder", true)).toBe(false);
+  expect(copies("split", true)).toBe(false);
+  expect(copies("tile", true)).toBe(false);
+});
+
+test("a copy goes at the drop's place as counted before the drop, or in a split", () => {
+  const from = { parent: 2, index: 1 };
+  const place = { parent: 2, index: 4 };
+  const split = { dataset: { id: "7" } } as unknown as HTMLElement;
+  expect(commandOf(5, from, { place, split: null }, true)).toBe("duplicate/5/2/4");
+  expect(commandOf(5, from, { place: { parent: 2, index: 2 }, split: null }, true)).toBe(
+    "duplicate/5/2/2",
+  );
+  expect(commandOf(5, from, { place, split: null }, false)).toBe("move/5/2/3");
+  expect(commandOf(5, from, { place: null, split }, true)).toBe("split-duplicate/5/7");
+  expect(commandOf(5, from, { place: null, split }, false)).toBe("split/5/7");
+  expect(commandOf(5, from, { place: null, split: null }, true)).toBeNull();
 });

@@ -951,7 +951,9 @@ function dragTo(row: HTMLElement, under: Element, y: number) {
 }
 
 const dragCommands = () =>
-  fetch.mock.calls.map(([url]) => String(url)).filter((url) => /\/(move|split)\//.test(url));
+  fetch.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => /\/(move|split|duplicate|split-duplicate)\//.test(url));
 
 test("dragging a row leaves it dimmed in place, a ghost of it following the pointer", () => {
   render(<App />);
@@ -960,12 +962,40 @@ test("dragging a row leaves it dimmed in place, a ghost of it following the poin
   dragTo(other, shown().getByRole("button", { name: "Example" }), 4);
   expect(other.closest("li")?.classList.contains("dragged")).toBe(true);
   expect(document.querySelector(".drag-ghost .ghost-pill")?.textContent).toBe("Other");
+  expect(document.querySelector(".drag-ghost.copy")).toBeNull();
   const line = document.querySelector<HTMLElement>(".drop-indicator");
   expect(line?.style.display).toBe("block");
   fireEvent.pointerUp(window);
   expect(dragCommands()).toEqual(["/command/move/4/12/0"]);
   expect(document.querySelector(".drag-ghost")).toBeNull();
   expect(line?.style.display).toBe("");
+  vi.restoreAllMocks();
+});
+
+test("holding Option while dragging a tab drops a copy of it, as a badge on the ghost says", () => {
+  render(<App />);
+  receive({});
+  const other = shown().getByRole("button", { name: "Other" });
+  dragTo(other, shown().getByRole("button", { name: "Example" }), 4);
+  fireEvent.pointerMove(window, { clientX: 20, clientY: 4, altKey: true });
+  expect(document.querySelector(".drag-ghost.copy")).not.toBeNull();
+  expect(other.closest("li")?.classList.contains("dragged")).toBe(false);
+  fireEvent.keyUp(window, { key: "Alt" });
+  expect(document.querySelector(".drag-ghost.copy")).toBeNull();
+  fireEvent.keyDown(window, { key: "Alt", altKey: true });
+  expect(document.querySelector(".drag-ghost.copy")).not.toBeNull();
+  fireEvent.pointerUp(window, { altKey: true });
+  expect(dragCommands()).toEqual(["/command/duplicate/4/12/0"]);
+  vi.restoreAllMocks();
+});
+
+test("Option dropped on the middle of a tab row splits a copy of the tab with it", () => {
+  render(<App />);
+  receive({});
+  const other = shown().getByRole("button", { name: "Other" });
+  dragTo(other, shown().getByRole("button", { name: "Example" }), 20);
+  fireEvent.pointerUp(window, { altKey: true });
+  expect(dragCommands()).toEqual(["/command/split-duplicate/4/3"]);
   vi.restoreAllMocks();
 });
 
