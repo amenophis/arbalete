@@ -3,7 +3,8 @@ import { type ClosedTab, type Profile, type Space, send, useAppEvent } from "./b
 import { type Download, DownloadsList } from "./Downloads";
 import { HistoryList } from "./History";
 import { Icon } from "./Icon";
-import { ManageSpaces, matches } from "./ManageSpaces";
+import { ManageSpaces } from "./ManageSpaces";
+import { matches } from "./search";
 
 export type Section = "spaces" | "closed" | "history" | "downloads";
 
@@ -32,7 +33,7 @@ export const SECTIONS: { id: Section; label: string; icon: string }[] = [
 ];
 
 // The page before the first Space: a rail of sections, the one picked last kept until the app
-// quits, and the picked section's content under a field searching it. Spaces are managed there;
+// quits, and the picked section's content under a field searching it, but for the Spaces. Spaces are managed there;
 // the tabs closed since launch reopen in the displayed Space, whose page `onBack` slides back to;
 // the history searches the displayed Space's profile; the downloads are all listed.
 export function Library({
@@ -65,6 +66,8 @@ export function Library({
     setSection(next);
     setQuery("");
   };
+  // The Spaces fill the window, the page hidden; the other sections rest beside it.
+  useEffect(() => send(section === "spaces" ? "library/wide" : "library/narrow"), [section]);
   const label = SECTIONS.find(({ id }) => id === section)?.label;
   return (
     <section
@@ -99,20 +102,21 @@ export function Library({
           <Icon d="M13 8H3.5M7.5 4 3.5 8l4 4" />
         </button>
       </div>
-      <div className="library-panel" role="tabpanel" aria-label={label}>
-        <input
-          type="search"
-          className="library-search"
-          aria-label={`Search ${label}`}
-          placeholder={`Search ${label}…`}
-          value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-        />
+      <div className="library-panel" role="tabpanel" aria-label={label} data-section={section}>
+        {section !== "spaces" && (
+          <input
+            type="search"
+            className="library-search"
+            aria-label={`Search ${label}`}
+            placeholder={`Search ${label}…`}
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+          />
+        )}
         {section === "spaces" && (
           <ManageSpaces
             spaces={spaces}
             profiles={profiles}
-            query={query}
             onShow={onShow}
             onNewSpace={onNewSpace}
           />

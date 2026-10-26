@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Space } from "./bridge";
-import { ManageSpaces, matches, RENAME_CLICK_MS, spaceMoveCommand } from "./ManageSpaces";
+import { ManageSpaces, RENAME_CLICK_MS, spaceMoveCommand } from "./ManageSpaces";
 
 const fetch = vi.fn();
 
@@ -37,15 +37,9 @@ const profiles = [
   { id: 7, name: "Office", color: "blue" as const },
 ];
 
-function renderCards(onShow = vi.fn(), onNewSpace = vi.fn(), query = "") {
+function renderCards(onShow = vi.fn(), onNewSpace = vi.fn()) {
   render(
-    <ManageSpaces
-      spaces={spaces}
-      profiles={profiles}
-      query={query}
-      onShow={onShow}
-      onNewSpace={onNewSpace}
-    />,
+    <ManageSpaces spaces={spaces} profiles={profiles} onShow={onShow} onNewSpace={onNewSpace} />,
   );
   return { onShow, onNewSpace };
 }
@@ -77,16 +71,6 @@ test("a card per Space shows its color, icon, name, profile and pinned tabs, fol
   expect(work.querySelector("img")?.getAttribute("src")).toBe("https://ui.test/mail.png");
   // The cards hold no buttons for their pinned tabs: they only show them.
   expect(work.querySelector("button")).toBeNull();
-});
-
-test("only the Spaces matching the search show", () => {
-  renderCards(vi.fn(), vi.fn(), "PROJ");
-  expect([...document.querySelectorAll(".space-card-name")].map((c) => c.textContent)).toEqual([
-    "Work",
-  ]);
-  expect(matches("", "anything")).toBe(true);
-  expect(matches(" ma ", "Mail")).toBe(true);
-  expect(matches("x", "Mail", "")).toBe(false);
 });
 
 test("clicking a card shows its Space, by its index in sidebar order", () => {
