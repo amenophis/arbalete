@@ -56,6 +56,8 @@ export function App() {
   // Window › Downloads (⇧⌘J) and History › Show All History (⌘Y) open the library on them.
   useAppEvent("arbalete:show-downloads", () => pager.go(-1));
   useAppEvent("arbalete:show-history", () => pager.go(-1));
+  // Window › Library (⇧⌘L) opens it on the section it showed last.
+  useAppEvent("arbalete:open-library", () => pager.go(-1));
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =

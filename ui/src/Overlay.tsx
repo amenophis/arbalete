@@ -8,6 +8,8 @@ type Results = {
   pages: { url: string; title: string }[];
 };
 
+type Switching = { tabs: Results["tabs"]; picked: number };
+
 type Row =
   | { kind: "go"; url: string; title: string; search: boolean }
   | { kind: "tab"; id: number; url: string; title: string; favicon: string | null }
@@ -36,6 +38,10 @@ export function Overlay() {
   const [picked, setPicked] = useState(0);
   const [completing, setCompleting] = useState(false);
   const deleting = useRef(false);
+  // The tabs selected last while ⌃⇥ is held, the picked one highlighted (switch_tab in
+  // app/src/shell.rs): the app shows the picked tab once ⌃ is released.
+  const [switching, setSwitching] = useState<Switching | null>(null);
+  useAppEvent<Switching>("arbalete:switch", setSwitching);
   useAppEvent<{ url: string | null } | null>("arbalete:show", (detail) => {
     const url = detail?.url ?? null;
     setText(url ?? "");
@@ -43,6 +49,7 @@ export function Overlay() {
     setResults(null);
     setPicked(0);
     setCompleting(false);
+    setSwitching(null);
     requestAnimationFrame(() => {
       input.current?.focus();
       input.current?.select();
@@ -58,12 +65,12 @@ export function Overlay() {
     if (value !== text) input.current?.setSelectionRange(text.length, value.length);
   }, [text, value]);
   const rows = resultRows(text, results, completion);
-  useEffect(() => {
-    const height = rows.length
+  const height = switching
+    ? switching.tabs.length * RESULT_ROW + 2 * RESULTS_PADDING
+    : rows.length
       ? SEARCH_ROW + rows.length * RESULT_ROW + 2 * RESULTS_PADDING
       : SEARCH_ROW;
-    send(`overlay/height/${height}`);
-  }, [rows.length]);
+  useEffect(() => send(`overlay/height/${height}`), [height]);
   const open = (row: Row) => {
     if (row.kind === "tab") {
       send(`select/${row.id}`);
@@ -78,6 +85,20 @@ export function Overlay() {
     setPicked(0);
     send(`overlay/search/${encodeURIComponent(typed)}`);
   };
+  if (switching) {
+    return (
+      <ul className="overlay overlay-results" aria-label="Recent tabs">
+        {switching.tabs.map((tab, index) => (
+          <li key={tab.id}>
+            <div className="overlay-result" aria-current={index === switching.picked || undefined}>
+              <RowIcon row={{ kind: "tab", ...tab }} />
+              <span className="title">{tab.title || tab.url}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
+  }
   return (
     <form
       className="overlay"

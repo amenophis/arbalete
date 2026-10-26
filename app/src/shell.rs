@@ -71,6 +71,9 @@ const OVERLAY_WIDTH: i32 = 720;
 const OVERLAY_ROW: i32 = 62;
 const OVERLAY_TOP: f32 = 0.29;
 
+/// How many tabs selected last the tab switcher lists, at most.
+const RECENT_TABS: usize = 10;
+
 /// The open tabs and history pages the Command Bar shows for a text, at most.
 const OVERLAY_TABS: usize = 3;
 const OVERLAY_PAGES: usize = 5;
@@ -138,6 +141,10 @@ thread_local! {
     /// The first launch shows the import assistant with the window, instead of the start page.
     static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
+    /// The tabs selected last, the most recent first, which the tab switcher lists.
+    static RECENT: RefCell<Vec<NodeId>> = const { RefCell::new(Vec::new()) };
+    /// The tab switcher's tabs and the picked one's index, while ⌃ is held.
+    static SWITCH: RefCell<Option<(Vec<NodeId>, usize)>> = const { RefCell::new(None) };
     /// The sidebar sent the window's colors, which show the card.
     static COLORED: Cell<bool> = const { Cell::new(false) };
     /// The docked sidebar shows the library, wider (LIBRARY_WIDTH).
@@ -467,6 +474,81 @@ fn show_downloads() {
     }
     let view = shown_sidebar();
     dispatch(view, r#"new Event("arbalete:show-downloads")"#);
+}
+
+/// Opens the library on the section it showed last, showing the sidebar first if it is hidden.
+fn show_library_page() {
+    if SIDEBAR_MODE.get() == SidebarMode::Hidden {
+        set_sidebar(SidebarMode::Shown);
+    }
+    dispatch(shown_sidebar(), r#"new Event("arbalete:open-library")"#);
+}
+
+/// Puts a tab first among the tabs selected last, which the tab switcher lists.
+fn remember(recent: &mut Vec<NodeId>, tab: NodeId) {
+    recent.retain(|&id| id != tab);
+    recent.insert(0, tab);
+    recent.truncate(RECENT_TABS);
+}
+
+/// The picked tab's index after a step forward or back among `count` tabs, round the list.
+fn step(index: usize, count: usize, forward: bool) -> usize {
+    if forward {
+        (index + 1) % count
+    } else {
+        (index + count - 1) % count
+    }
+}
+
+/// ⌃⇥ shows the tabs selected last, still open, the most recent first, in the Command Bar's panel,
+/// and picks the one before the shown tab; each ⌃⇥ more picks the next one, ⌃⇧⇥ the one before.
+/// Releasing ⌃ shows the picked tab (end_tab_switch).
+fn switch_tab(forward: bool) {
+    let switch = SWITCH.take().or_else(|| {
+        let tabs: Vec<_> = STATE.with_borrow_mut(|state| {
+            RECENT
+                .with_borrow(Clone::clone)
+                .into_iter()
+                .filter(|&id| state.sidebar.tab_mut(id).is_some())
+                .collect()
+        });
+        (tabs.len() > 1).then_some((tabs, 0))
+    });
+    let Some((tabs, index)) = switch else { return };
+    let index = step(index, tabs.len(), forward);
+    let rows: Vec<_> = STATE.with_borrow(|state| {
+        let profile = |id| state.sidebar.profile_of(id);
+        tabs.iter()
+            .filter_map(|&id| {
+                let NodeKind::Tab(tab) = &state.sidebar.node(id)?.kind else {
+                    return None;
+                };
+                let favicon = favicon_url(profile(id)?, tab);
+                Some(json!({ "id": id, "url": tab.url, "title": tab.label(), "favicon": favicon }))
+            })
+            .collect()
+    });
+    let detail = json!({ "tabs": rows, "picked": index });
+    dispatch(
+        &OVERLAY_VIEW,
+        &format!(r#"new CustomEvent("arbalete:switch", {{ detail: {detail} }})"#),
+    );
+    if let Some(overlay) = OVERLAY.with_borrow(Clone::clone)
+        && overlay.is_visible() == 0
+    {
+        place_overlay(OVERLAY_ROW);
+        overlay.set_visible(1);
+        round_overlay();
+    }
+    SWITCH.set(Some((tabs, index)));
+}
+
+/// Shows the tab picked in the switcher, if it is shown.
+fn end_tab_switch() {
+    if let Some((tabs, index)) = SWITCH.take() {
+        show_overlay(false);
+        select_tab(tabs[index]);
+    }
 }
 
 fn download_command(action: DownloadAction, id: u32) {
@@ -1702,6 +1784,9 @@ fn selected() -> Option<(ProfileId, String)> {
 /// Shows the selected tab in its profile's content view, which is created the first time, or
 /// leaves the card empty when the displayed Space has none.
 fn show_selected() {
+    if let Some(tab) = STATE.with_borrow(|state| state.sidebar.displayed().selected) {
+        RECENT.with_borrow_mut(|recent| remember(recent, tab));
+    }
     let Some((profile, url)) = selected() else {
         hide_content();
         return;
@@ -1902,6 +1987,9 @@ pub fn run(command: Command) {
         }
         (Command::Download(action, id), _) => download_command(action, id),
         (Command::ShowDownloads, _) => show_downloads(),
+        (Command::ShowLibraryPage, _) => show_library_page(),
+        (Command::SwitchTab(forward), _) => switch_tab(forward),
+        (Command::EndTabSwitch, _) => end_tab_switch(),
         (Command::ShowHistory, _) => show_history(),
         (Command::SearchHistory { text, limit }, _) => search_history(&text, limit),
         (Command::RemoveHistory(url), _) => {
@@ -2905,10 +2993,32 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH, Rect,
-        SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lerp_rect, margin_regions,
-        slide_duration, toggled, ui_file, ui_path,
+        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH, RECENT_TABS,
+        Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lerp_rect, margin_regions,
+        remember, slide_duration, step, toggled, ui_file, ui_path,
     };
+    use arbalete_core::sidebar::NodeId;
+
+    #[test]
+    fn remembers_the_tabs_selected_last_the_most_recent_first() {
+        let id = |n: u64| -> NodeId { serde_json::from_str(&n.to_string()).unwrap() };
+        let mut recent = Vec::new();
+        for n in [1, 2, 3, 1] {
+            remember(&mut recent, id(n));
+        }
+        assert_eq!(recent, [id(1), id(3), id(2)]);
+        for n in 10..10 + RECENT_TABS as u64 {
+            remember(&mut recent, id(n));
+        }
+        assert_eq!(recent.len(), RECENT_TABS);
+    }
+
+    #[test]
+    fn the_tab_switcher_steps_round_the_list() {
+        assert_eq!(step(0, 3, true), 1);
+        assert_eq!(step(2, 3, true), 0);
+        assert_eq!(step(0, 3, false), 2);
+    }
 
     fn rect(rect: &Rect) -> (i32, i32, i32, i32) {
         (rect.x, rect.y, rect.width, rect.height)

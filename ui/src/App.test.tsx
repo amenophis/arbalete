@@ -841,6 +841,23 @@ test("the Library button slides to the library, like a swipe", async () => {
   expect(spaceCommands()).toEqual([]);
 });
 
+test("Window › Library slides to the library, on the section it showed last", async () => {
+  reduceMotion();
+  render(<App />);
+  receive({});
+  fireEvent.click(within(library() as HTMLElement).getByRole("tab", { name: "History" }));
+  act(() => {
+    dispatchEvent(new Event("arbalete:open-library"));
+  });
+  await frame();
+  expect(position()).toBe("translateX(100%)");
+  expect(
+    within(library() as HTMLElement)
+      .getByRole("tab", { name: "History" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+});
+
 test("the Space menu's Manage Spaces slides to the library", async () => {
   reduceMotion();
   render(<App />);

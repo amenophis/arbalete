@@ -47,8 +47,8 @@ const CARD_EDGE: f64 = 0.5;
 thread_local! {
     /// Its title says what it does: hide or show the sidebar.
     static SIDEBAR_ITEM: RefCell<Option<Retained<NSMenuItem>>> = const { RefCell::new(None) };
-    /// Watches the clicks that open sidebar menus (watch_menu_clicks).
-    static MENU_CLICKS: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    /// Watches the clicks that open sidebar menus and the tab switcher's keys (watch_events).
+    static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     /// The actions of the menu last shown, which its items' tags index.
     static MENU_ACTIONS: RefCell<Vec<Action>> = const { RefCell::new(Vec::new()) };
 }
@@ -235,6 +235,21 @@ define_class!(
             crate::shell::run(Command::ShowDownloads);
         }
 
+        #[unsafe(method(arbaleteLibrary:))]
+        fn library(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowLibraryPage);
+        }
+
+        #[unsafe(method(arbaleteCopyUrl:))]
+        fn copy_url(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::CopyLink);
+        }
+
+        #[unsafe(method(arbaleteClearToday:))]
+        fn clear_today(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ClearToday);
+        }
+
         #[unsafe(method(arbaletePrint:))]
         fn print(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Print);
@@ -265,13 +280,17 @@ impl ArbaleteApplication {
     }
 }
 
-/// Watches clicks as the application takes them from the system: mouse events never reach
-/// sendEvent: above, which Chromium's windows bypass.
-pub fn watch_menu_clicks() {
-    let mask = NSEventMask::RightMouseDown | NSEventMask::LeftMouseDown;
+/// Watches clicks and keys as the application takes them from the system: mouse events never
+/// reach sendEvent: above, which Chromium's windows bypass.
+pub fn watch_events() {
+    let mask = NSEventMask::RightMouseDown
+        | NSEventMask::LeftMouseDown
+        | NSEventMask::KeyDown
+        | NSEventMask::FlagsChanged;
     let handler = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
         // SAFETY: AppKit gives a valid event.
-        if swallows_menu_click(unsafe { event.as_ref() }) {
+        let event_ref = unsafe { event.as_ref() };
+        if swallows_menu_click(event_ref) || switches_tabs(event_ref) {
             std::ptr::null_mut()
         } else {
             event.as_ptr()
@@ -279,17 +298,44 @@ pub fn watch_menu_clicks() {
     });
     // SAFETY: the handler returns the event it is given, or null to drop it.
     let monitor = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &handler) };
-    MENU_CLICKS.set(monitor);
+    EVENT_MONITOR.set(monitor);
+}
+
+/// The tab switcher's keys, whatever has the focus, page included: ⌃⇥ and ⌃⇧⇥ pick a tab,
+/// releasing ⌃ shows it. Only ⌃⇥ is taken from the page.
+fn switches_tabs(event: &NSEvent) -> bool {
+    /// The Tab key's virtual key code.
+    const TAB: u16 = 48;
+    let flags = event.modifierFlags();
+    match event.r#type() {
+        NSEventType::KeyDown
+            if event.keyCode() == TAB
+                && flags.contains(NSEventModifierFlags::Control)
+                && !flags.contains(NSEventModifierFlags::Command) =>
+        {
+            let forward = !flags.contains(NSEventModifierFlags::Shift);
+            crate::shell::run(Command::SwitchTab(forward));
+            true
+        }
+        NSEventType::FlagsChanged if !flags.contains(NSEventModifierFlags::Control) => {
+            crate::shell::run(Command::EndTabSwitch);
+            false
+        }
+        _ => false,
+    }
 }
 
 /// Keeps right-clicks, and clicks with ⌃, over the sidebar from the page, which would show
 /// Chromium's page menu: the sidebar shows its own at once (shell::menu_at), whose tracking takes
 /// the release, as a native view's menu does.
 fn swallows_menu_click(event: &NSEvent) -> bool {
-    let menu_click = event.r#type() == NSEventType::RightMouseDown
-        || event
+    let menu_click = match event.r#type() {
+        NSEventType::RightMouseDown => true,
+        NSEventType::LeftMouseDown => event
             .modifierFlags()
-            .contains(NSEventModifierFlags::Control);
+            .contains(NSEventModifierFlags::Control),
+        _ => false,
+    };
     menu_click && {
         let (x, y) = main_window_point(event);
         crate::shell::menu_at(x, y)
@@ -394,11 +440,12 @@ pub fn setup_menu() {
                     sel!(arbaleteTogglePin:),
                     ns_string!("d"),
                 ),
+                // ⇧⌘N is the incognito window's; Arc's New Folder has no shortcut either.
                 item(
                     mtm,
                     ns_string!("New Folder"),
                     sel!(arbaleteNewFolder:),
-                    ns_string!("N"),
+                    ns_string!(""),
                 ),
                 // No shortcut: imports are rare.
                 item(
@@ -535,6 +582,13 @@ fn edit_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
         NSMenuItem::separatorItem(mtm),
         item(
             mtm,
+            ns_string!("Copy URL"),
+            sel!(arbaleteCopyUrl:),
+            ns_string!("C"),
+        ),
+        NSMenuItem::separatorItem(mtm),
+        item(
+            mtm,
             ns_string!("Find…"),
             sel!(arbaleteFind:),
             ns_string!("f"),
@@ -564,6 +618,12 @@ fn window_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
         ),
         item(mtm, ns_string!("Zoom"), sel!(performZoom:), ns_string!("")),
         NSMenuItem::separatorItem(mtm),
+        item(
+            mtm,
+            ns_string!("Library"),
+            sel!(arbaleteLibrary:),
+            ns_string!("L"),
+        ),
         item(
             mtm,
             ns_string!("Downloads"),
@@ -616,7 +676,8 @@ pub fn sidebar_shown(view: *mut c_void, shown: bool) {
     }
 }
 
-/// Next and previous tab with ⌘⌥↓ and ⌘⌥↑, then the favorites with ⌘1 to ⌘9.
+/// Next and previous tab with ⌘⌥↓ and ⌘⌥↑, or ⌘} and ⌘{, Clear Today with ⇧⌘K, then the
+/// favorites with ⌘1 to ⌘9.
 fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
     let mut items = vec![
         arrow_item(
@@ -631,6 +692,25 @@ fn tabs_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
             sel!(arbaletePreviousTab:),
             NSUpArrowFunctionKey,
         ),
+        hidden_item(
+            mtm,
+            ns_string!("Next Tab"),
+            sel!(arbaleteNextTab:),
+            ns_string!("}"),
+        ),
+        hidden_item(
+            mtm,
+            ns_string!("Previous Tab"),
+            sel!(arbaletePreviousTab:),
+            ns_string!("{"),
+        ),
+        item(
+            mtm,
+            ns_string!("Clear Today"),
+            sel!(arbaleteClearToday:),
+            ns_string!("K"),
+        ),
+        NSMenuItem::separatorItem(mtm),
     ];
     for number in 1..=9 {
         let title = if number == 9 {
@@ -679,6 +759,20 @@ fn spaces_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
         items.push(item);
     }
     items
+}
+
+/// A menu item the menu does not show, whose shortcut, ⌘ and `key`, sends `action`: a second
+/// shortcut for an item shown.
+fn hidden_item(
+    mtm: MainThreadMarker,
+    title: &NSString,
+    action: Sel,
+    key: &NSString,
+) -> Retained<NSMenuItem> {
+    let item = item(mtm, title, action, key);
+    item.setHidden(true);
+    item.setAllowsKeyEquivalentWhenHidden(true);
+    item
 }
 
 /// A menu item sending `action` with ⌘⌥ and an arrow `key`.
