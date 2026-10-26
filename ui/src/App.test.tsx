@@ -793,10 +793,14 @@ test("the Library button slides to the library, like a swipe", async () => {
   render(<App />);
   receive({});
   fetch.mockClear();
+  const sidebar = screen.getByRole("navigation");
+  expect(sidebar.hasAttribute("data-library")).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Library" }));
   await frame();
   expect(position()).toBe("translateX(100%)");
   expect(library()?.hasAttribute("inert")).toBe(false);
+  // The library takes the whole sidebar, without the url bar and the Spaces' footer.
+  expect(sidebar.hasAttribute("data-library")).toBe(true);
   expect(spaceCommands()).toEqual([]);
 });
 
@@ -825,6 +829,7 @@ test("the library reopens a closed tab in the displayed Space and slides back to
   await frame();
   expect(position()).toBe("translateX(0%)");
   expect(library()?.hasAttribute("inert")).toBe(true);
+  expect(screen.getByRole("navigation").hasAttribute("data-library")).toBe(false);
   expect(commands().at(-1)).toBe("/command/card/offset/0");
 });
 
