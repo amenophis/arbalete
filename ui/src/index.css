@@ -1487,6 +1487,31 @@ button.folder:hover {
   opacity: 0.75;
 }
 
+/* While the pages head for the library, the url bar, the downloads and the Spaces' footer fold
+   away, so that it takes the sidebar's whole height (Pager.render in pager.ts). */
+.sidebar > :is(.url, .downloads, .switcher) {
+  interpolate-size: allow-keywords;
+  transition-property: height, margin, padding, opacity, visibility;
+  transition-duration: 0.2s;
+  transition-behavior: allow-discrete;
+}
+
+.sidebar[data-library] > :is(.url, .downloads, .switcher) {
+  overflow: hidden;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar > :is(.url, .downloads, .switcher) {
+    transition: none;
+  }
+}
+
 /* The library: a rail of sections at the left, the picked one's content at the right. */
 .library {
   flex-direction: row;

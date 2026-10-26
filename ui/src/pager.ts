@@ -268,6 +268,8 @@ class Pager {
       this.sidebar.style.setProperty("--space", color.color);
       this.sidebar.style.setProperty("--tinted", String(color.strength));
     }
+    // The library takes the whole sidebar, from the moment the pages head for it (index.css).
+    this.sidebar?.toggleAttribute("data-library", this.page === -1);
     // Only the first Space's page fades, and a reordering may make another page first.
     const first = String(this.spaces[0]?.id);
     for (const page of this.track?.querySelectorAll<HTMLElement>("[data-space]") ?? []) {
