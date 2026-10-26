@@ -94,6 +94,31 @@ impl History {
     /// The `limit` most recently visited urls whose address or title holds `text`, ignoring case;
     /// all of them for an empty `text`.
     pub fn search(&self, text: &str, limit: usize) -> rusqlite::Result<Vec<Entry>> {
+        self.matching(text, "last_visit DESC", limit)
+    }
+
+    /// The `limit` urls that best answer `text` typed in the Command Bar at `now`: those whose
+    /// address or title holds it, ranked by how they match it, how often and how recently they
+    /// were visited (`score`).
+    pub fn suggest(&self, text: &str, limit: usize, now: i64) -> rusqlite::Result<Vec<Entry>> {
+        let mut entries = self.matching(text, "visit_count DESC, last_visit DESC", CANDIDATES)?;
+        let text = text.to_lowercase();
+        let scores: Vec<_> = entries
+            .iter()
+            .map(|entry| score(entry, &text, now))
+            .collect();
+        let mut ranked: Vec<_> = scores.into_iter().zip(entries.drain(..)).collect();
+        // The higher score first; between equals, the shorter address, closer to a site's home.
+        ranked.sort_by(|(a, x), (b, y)| b.total_cmp(a).then(x.url.len().cmp(&y.url.len())));
+        Ok(ranked
+            .into_iter()
+            .take(limit)
+            .map(|(_, entry)| entry)
+            .collect())
+    }
+
+    /// The `limit` first urls in `order` whose address or title holds `text`, ignoring case.
+    fn matching(&self, text: &str, order: &str, limit: usize) -> rusqlite::Result<Vec<Entry>> {
         // `%`, `_` and the escape character itself match literally.
         let pattern = format!(
             "%{}%",
@@ -101,11 +126,11 @@ impl History {
                 .replace('%', "\\%")
                 .replace('_', "\\_")
         );
-        let mut statement = self.0.prepare(
+        let mut statement = self.0.prepare(&format!(
             "SELECT url, title, visit_count, last_visit FROM urls
              WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\'
-             ORDER BY last_visit DESC LIMIT ?2",
-        )?;
+             ORDER BY {order} LIMIT ?2"
+        ))?;
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = statement.query_map(params![pattern, limit], |row| {
             Ok(Entry {
@@ -124,6 +149,47 @@ impl History {
             .execute("DELETE FROM urls WHERE url = ?1", params![url])?;
         Ok(())
     }
+}
+
+/// The most visited matches `suggest` ranks: enough to find the best among many.
+const CANDIDATES: usize = 200;
+
+const DAY: i64 = 24 * 60 * 60 * 1000;
+
+/// How well a page answers `text`, in lowercase, at `now`: its address starting with it counts
+/// most, then a word of its address or title starting with it, then holding it anywhere; times
+/// how often it was visited, which counts less and less, and how recently.
+fn score(entry: &Entry, text: &str, now: i64) -> f64 {
+    let url = entry.url.to_lowercase();
+    let address = address(&url);
+    let title = entry.title.to_lowercase();
+    let words = |words: &str| {
+        words
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| word.starts_with(text))
+    };
+    let matched = if address.starts_with(text) {
+        4.0
+    } else if words(address) || words(&title) {
+        2.0
+    } else {
+        1.0
+    };
+    let frequency = 1.0 + (1.0 + entry.visit_count.max(0) as f64).ln();
+    let recency = match (now - entry.last_visit) / DAY {
+        0 => 1.0,
+        1..7 => 0.8,
+        7..30 => 0.5,
+        30..90 => 0.3,
+        _ => 0.15,
+    };
+    matched * frequency * recency
+}
+
+/// A url as typed: without its scheme and "www.".
+fn address(url: &str) -> &str {
+    let url = url.split_once("://").map_or(url, |(_, rest)| rest);
+    url.strip_prefix("www.").unwrap_or(url)
 }
 
 fn is_web(url: &str) -> bool {
@@ -264,6 +330,47 @@ mod tests {
         assert_eq!(urls("", 2).len(), 2);
         assert_eq!(urls("%_", 10), ["https://docs.example.org/100%_done"]);
         assert!(urls("_x", 10).is_empty());
+    }
+
+    #[test]
+    fn suggests_the_best_match_the_most_visited_and_recent_first() {
+        let dir = TestDir::new("history-suggest");
+        let mut history = History::open(&dir.0.join(FILE_NAME)).unwrap();
+        let now = 100 * DAY;
+        history
+            .merge(&[
+                // Holds "git" in a word of its path only.
+                entry("https://blog.example.com/git-tips", "Tips", 50, now),
+                // Starts with it, often and lately visited.
+                entry("https://github.com/", "GitHub", 40, now - DAY),
+                // Starts with it too, but once and long ago.
+                entry("https://gitlab.com/", "GitLab", 1, now - 60 * DAY),
+                entry("https://www.digital.example/", "Digital", 90, now),
+            ])
+            .unwrap();
+        let urls: Vec<_> = history
+            .suggest("GIT", 10, now)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.url)
+            .collect();
+        assert_eq!(
+            urls,
+            [
+                "https://github.com/",
+                "https://blog.example.com/git-tips",
+                "https://www.digital.example/",
+                "https://gitlab.com/",
+            ]
+        );
+        assert_eq!(history.suggest("git", 1, now).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn reads_an_address_as_typed() {
+        assert_eq!(address("https://www.example.com/a"), "example.com/a");
+        assert_eq!(address("http://docs.example.com/"), "docs.example.com/");
+        assert_eq!(address("example.com"), "example.com");
     }
 
     #[test]

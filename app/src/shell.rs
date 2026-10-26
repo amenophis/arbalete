@@ -539,11 +539,16 @@ fn open_overlay(visible: bool, url: Option<String>) {
     }
     overlay.set_visible(visible.into());
     if visible && let Some(view) = overlay.contents_view() {
-        #[cfg(target_os = "macos")]
-        if let Some(host) = OVERLAY_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host()) {
-            crate::mac::round_command_bar(host.window_handle());
-        }
+        round_overlay();
         view.request_focus();
+    }
+}
+
+/// Rounds the Command Bar's window and draws its shadow, again after it changes size.
+fn round_overlay() {
+    #[cfg(target_os = "macos")]
+    if let Some(host) = OVERLAY_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host()) {
+        crate::mac::round_command_bar(host.window_handle());
     }
 }
 
@@ -565,7 +570,7 @@ fn place_overlay(height: i32) {
 }
 
 /// Sends the Command Bar the open tabs, in every Space and the favorites, then the displayed
-/// Space's profile history pages, whose address or title holds `text`.
+/// Space's profile history pages, best first, whose address or title holds `text`.
 fn search_overlay(text: &str) {
     let wanted = text.trim().to_lowercase();
     let (tabs, profile) = STATE.with_borrow(|state| {
@@ -589,7 +594,7 @@ fn search_overlay(text: &str) {
         Vec::new()
     } else {
         with_history(profile, |history| {
-            history.search(text.trim(), OVERLAY_PAGES + OVERLAY_TABS)
+            history.suggest(text.trim(), OVERLAY_PAGES + OVERLAY_TABS, now())
         })
         .and_then(Result::ok)
         .unwrap_or_default()
@@ -1898,6 +1903,7 @@ pub fn run(command: Command) {
         (Command::SearchOverlay(text), _) => search_overlay(&text),
         (Command::OverlayHeight(height), _) => {
             place_overlay(i32::try_from(height).unwrap_or(OVERLAY_ROW));
+            round_overlay();
         }
         (Command::Navigate(url), _) => navigate(&url),
         (Command::ToggleSidebar, _) => {

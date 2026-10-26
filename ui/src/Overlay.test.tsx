@@ -56,14 +56,14 @@ test("searches what is not an address", () => {
 test("lists the matching open tabs then history pages, picked with the arrows, and fits them", () => {
   render(<Overlay />);
   show();
-  fireEvent.change(field(), { target: { value: "wiki" } });
+  fireEvent.change(field(), { target: { value: "pedia" } });
   answer(
-    "wiki",
+    "pedia",
     [{ id: 7, url: "https://en.wikipedia.org/", title: "Wikipedia", favicon: null }],
     [{ url: "https://wiki.test/", title: "" }],
   );
   expect(rows()).toEqual([
-    "wiki — Search Google",
+    "pedia — Search Google",
     "WikipediaSwitch to Tab →",
     "https://wiki.test/",
   ]);
@@ -71,7 +71,7 @@ test("lists the matching open tabs then history pages, picked with the arrows, a
     `/command/overlay/height/${SEARCH_ROW + 3 * RESULT_ROW + 16}`,
     { method: "POST" },
   );
-  expect(picked()).toBe("wiki — Search Google");
+  expect(picked()).toBe("pedia — Search Google");
   fireEvent.keyDown(field(), { key: "ArrowDown" });
   expect(picked()).toBe("WikipediaSwitch to Tab →");
   fireEvent.submit(field());
@@ -85,6 +85,37 @@ test("lists the matching open tabs then history pages, picked with the arrows, a
     `/command/open/${encodeURIComponent("https://wiki.test/")}`,
     { method: "POST" },
   );
+});
+
+test("completes the typed address with the best result's, selected, which typing replaces", () => {
+  render(<Overlay />);
+  show();
+  fireEvent.keyDown(field(), { key: "g" });
+  fireEvent.change(field(), { target: { value: "gi" } });
+  answer("gi", [], [{ url: "https://www.github.com/arbalete/issues", title: "Issues" }]);
+  const input = field() as HTMLInputElement;
+  expect(input.value).toBe("github.com");
+  expect([input.selectionStart, input.selectionEnd]).toEqual([2, 10]);
+  expect(picked()).toBe("github.com");
+  fireEvent.submit(input);
+  expect(fetch).toHaveBeenLastCalledWith(
+    `/command/open/${encodeURIComponent("https://www.github.com/")}`,
+    { method: "POST" },
+  );
+  // Typing on keeps completing; a "/" completes the whole address.
+  fireEvent.keyDown(input, { key: "/" });
+  fireEvent.change(input, { target: { value: "github.com/" } });
+  expect(input.value).toBe("github.com/arbalete/issues");
+  // Deleting drops the completion, and does not complete again.
+  fireEvent.keyDown(input, { key: "Backspace" });
+  fireEvent.change(input, { target: { value: "github.com/" } });
+  expect(input.value).toBe("github.com/");
+  // → keeps it.
+  fireEvent.keyDown(input, { key: "a" });
+  fireEvent.change(input, { target: { value: "github.com/a" } });
+  expect(input.value).toBe("github.com/arbalete/issues");
+  fireEvent.keyDown(input, { key: "ArrowRight" });
+  expect(input.value).toBe("github.com/arbalete/issues");
 });
 
 test("answers to an older search are ignored", () => {
