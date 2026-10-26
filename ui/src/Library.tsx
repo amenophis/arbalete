@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { type ClosedTab, type Profile, type Space, send, useAppEvent } from "./bridge";
 import { type Download, DownloadsList } from "./Downloads";
+import { HistoryList } from "./History";
 import { Icon } from "./Icon";
 import { ManageSpaces, matches } from "./ManageSpaces";
 
-export type Section = "spaces" | "closed" | "downloads";
+export type Section = "spaces" | "closed" | "history" | "downloads";
 
 // The sections the library holds so far, in its rail.
 export const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -19,6 +20,11 @@ export const SECTIONS: { id: Section; label: string; icon: string }[] = [
     icon: "M2.8 8a5.2 5.2 0 1 0 1.5-3.7M2.6 2.4v2.4H5M8 5.2V8l2 1.3",
   },
   {
+    id: "history",
+    label: "History",
+    icon: "M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.6h2.6M8 5v3.2l2.2 1.3",
+  },
+  {
     id: "downloads",
     label: "Downloads",
     icon: "M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10",
@@ -28,7 +34,7 @@ export const SECTIONS: { id: Section; label: string; icon: string }[] = [
 // The page before the first Space: a rail of sections, the one picked last kept until the app
 // quits, and the picked section's content under a field searching it. Spaces are managed there;
 // the tabs closed since launch reopen in the displayed Space, whose page `onBack` slides back to;
-// the downloads are all listed.
+// the history searches the displayed Space's profile; the downloads are all listed.
 export function Library({
   closed,
   downloads,
@@ -54,6 +60,7 @@ export function Library({
   // The Space menu's Manage Spaces opens the library on its Spaces.
   useAppEvent("arbalete:library", () => pick("spaces"));
   useAppEvent("arbalete:show-downloads", () => pick("downloads"));
+  useAppEvent("arbalete:show-history", () => pick("history"));
   const pick = (next: Section) => {
     setSection(next);
     setQuery("");
@@ -111,6 +118,7 @@ export function Library({
           />
         )}
         {section === "closed" && <ClosedTabs closed={closed} query={query} onReopen={onBack} />}
+        {section === "history" && <HistoryList query={query} now={Date.now()} onOpen={onBack} />}
         {section === "downloads" && (
           <DownloadsList downloads={downloads} query={query} now={Date.now()} />
         )}

@@ -216,6 +216,11 @@ define_class!(
             crate::shell::run(Command::Find { text: None, forward: false });
         }
 
+        #[unsafe(method(arbaleteHistory:))]
+        fn history(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowHistory);
+        }
+
         #[unsafe(method(arbaleteDownloads:))]
         fn downloads(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowDownloads);
@@ -458,6 +463,13 @@ pub fn setup_menu() {
                     ns_string!("Forward"),
                     sel!(arbaleteForward:),
                     ns_string!("]"),
+                ),
+                NSMenuItem::separatorItem(mtm),
+                item(
+                    mtm,
+                    ns_string!("Show All History"),
+                    sel!(arbaleteHistory:),
+                    ns_string!("y"),
                 ),
             ],
         ),

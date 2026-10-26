@@ -90,6 +90,40 @@ impl History {
             "SELECT url, title, visit_count, last_visit FROM urls ORDER BY last_visit DESC",
         )
     }
+
+    /// The `limit` most recently visited urls whose address or title holds `text`, ignoring case;
+    /// all of them for an empty `text`.
+    pub fn search(&self, text: &str, limit: usize) -> rusqlite::Result<Vec<Entry>> {
+        // `%`, `_` and the escape character itself match literally.
+        let pattern = format!(
+            "%{}%",
+            text.replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let mut statement = self.0.prepare(
+            "SELECT url, title, visit_count, last_visit FROM urls
+             WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\'
+             ORDER BY last_visit DESC LIMIT ?2",
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = statement.query_map(params![pattern, limit], |row| {
+            Ok(Entry {
+                url: row.get(0)?,
+                title: row.get(1)?,
+                visit_count: row.get(2)?,
+                last_visit: row.get(3)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Forgets a url.
+    pub fn remove(&self, url: &str) -> rusqlite::Result<()> {
+        self.0
+            .execute("DELETE FROM urls WHERE url = ?1", params![url])?;
+        Ok(())
+    }
 }
 
 fn is_web(url: &str) -> bool {
@@ -206,6 +240,43 @@ mod tests {
         let entries = browsing.entries().unwrap();
         assert_eq!(entries.len(), 20_001);
         assert!(entries.contains(&entry("https://mail.example.com/", "", 100, 99)));
+    }
+
+    #[test]
+    fn searches_addresses_and_titles_the_most_recent_first() {
+        let dir = TestDir::new("history-search");
+        let mut history = History::open(&dir.0.join(FILE_NAME)).unwrap();
+        history
+            .merge(&[
+                entry("https://mail.example.com/", "Inbox", 1, 1_000),
+                entry("https://news.example.net/", "Mail delivery news", 1, 3_000),
+                entry("https://docs.example.org/100%_done", "Docs", 1, 2_000),
+            ])
+            .unwrap();
+        let urls = |text: &str, limit: usize| -> Vec<String> {
+            let entries = history.search(text, limit).unwrap();
+            entries.into_iter().map(|entry| entry.url).collect()
+        };
+        assert_eq!(
+            urls("MAIL", 10),
+            ["https://news.example.net/", "https://mail.example.com/"]
+        );
+        assert_eq!(urls("", 2).len(), 2);
+        assert_eq!(urls("%_", 10), ["https://docs.example.org/100%_done"]);
+        assert!(urls("_x", 10).is_empty());
+    }
+
+    #[test]
+    fn forgets_a_url() {
+        let dir = TestDir::new("history-remove");
+        let history = History::open(&dir.0.join(FILE_NAME)).unwrap();
+        history.visit("https://mail.example.com/", 1_000).unwrap();
+        history.visit("https://news.example.net/", 2_000).unwrap();
+        history.remove("https://mail.example.com/").unwrap();
+        assert_eq!(
+            history.entries().unwrap(),
+            vec![entry("https://news.example.net/", "", 1, 2_000)]
+        );
     }
 
     #[test]

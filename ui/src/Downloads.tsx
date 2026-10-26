@@ -2,6 +2,7 @@ import { useState } from "react";
 import { send, useAppEvent } from "./bridge";
 import { Icon } from "./Icon";
 import { matches } from "./ManageSpaces";
+import { byDay, host } from "./time";
 
 export type Download = {
   id: number;
@@ -63,14 +64,9 @@ export function DownloadsList({
     .filter((download) => matches(query, download.name, download.url))
     .reverse();
   if (found.length === 0) return <p className="library-empty">No download matches</p>;
-  const days = new Map<string, Download[]>();
-  for (const download of found) {
-    const name = day(download.startedAt, now);
-    days.set(name, [...(days.get(name) ?? []), download]);
-  }
   return (
     <div className="downloads-list">
-      {[...days].map(([name, list]) => (
+      {byDay(found, (download) => download.startedAt, now).map(([name, list]) => (
         <section key={name} aria-label={name}>
           <h3>{name}</h3>
           <ul>
@@ -150,25 +146,6 @@ export function detail(download: Download): string {
   if (!download.speed) return progress;
   const left = Math.ceil((download.total - download.received) / download.speed);
   return `${progress} · ${duration(left)} left`;
-}
-
-// "Today", "Yesterday", then the date.
-export function day(time: number, now: number): string {
-  const start = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const days = Math.round(
-    (start(new Date(now)).getTime() - start(new Date(time)).getTime()) / 86_400_000,
-  );
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  return new Date(time).toLocaleDateString(undefined, { dateStyle: "long" });
-}
-
-function host(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
 }
 
 function size(bytes: number): string {

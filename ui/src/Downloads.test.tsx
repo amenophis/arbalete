@@ -4,11 +4,11 @@ import {
   type Download,
   Downloads,
   DownloadsList,
-  day,
   detail,
   RECENT_MS,
   useDownloads,
 } from "./Downloads";
+import { day } from "./time";
 
 const fetch = vi.fn();
 
