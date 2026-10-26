@@ -735,6 +735,11 @@ button.folder:hover {
   list-style: none;
 }
 
+/* The tab switcher: the results alone, without the search row above them. */
+.overlay.overlay-results {
+  border-top: 0;
+}
+
 .overlay-result {
   display: flex;
   align-items: center;

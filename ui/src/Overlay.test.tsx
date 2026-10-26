@@ -152,6 +152,27 @@ test("hides on escape and when it loses the focus", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/overlay/hide", { method: "POST" });
 });
 
+test("the tab switcher lists the tabs selected last, the picked one highlighted, and fits them", () => {
+  render(<Overlay />);
+  const tabs = [
+    { id: 3, url: "https://a.test/", title: "A", favicon: null },
+    { id: 4, url: "https://b.test/", title: "", favicon: null },
+  ];
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalete:switch", { detail: { tabs, picked: 1 } }));
+  });
+  expect(screen.queryByRole("textbox")).toBeNull();
+  const list = screen.getByRole("list", { name: "Recent tabs" });
+  expect(list.textContent).toBe("Ahttps://b.test/");
+  expect(picked()).toBe("https://b.test/");
+  expect(fetch).toHaveBeenLastCalledWith(`/command/overlay/height/${2 * RESULT_ROW + 16}`, {
+    method: "POST",
+  });
+  // Shown again as the Command Bar, it is the field again.
+  show();
+  expect(field()).toBeDefined();
+});
+
 test("tells addresses from searches", () => {
   expect(toUrl("about:blank")).toBe("about:blank");
   expect(toUrl("http://example.com")).toBe("http://example.com");

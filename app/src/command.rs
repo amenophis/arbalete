@@ -36,6 +36,13 @@ pub enum Command {
     ShowDownloads,
     /// Opens the library on the history, from the menu.
     ShowHistory,
+    /// Opens the library on the section it showed last, from the menu.
+    ShowLibraryPage,
+    /// Picks the next tab selected before, or the previous one, in the tab switcher, which ⌃⇥
+    /// shows: from the app's keyboard monitor.
+    SwitchTab(bool),
+    /// Shows the tab picked in the switcher once ⌃ is released: from the keyboard monitor.
+    EndTabSwitch,
     /// Asks for the `limit` latest pages of the history whose address or title holds `text`:
     /// `history/search/<limit>/<percent-encoded text>`.
     SearchHistory {
