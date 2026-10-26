@@ -935,6 +935,64 @@ button.folder:hover {
 }
 
 /* The Library button, then one icon per Space in the middle, then the "+" menu. */
+/* The session's downloads, above the footer: a row each, with the file's name over its progress. */
+.downloads {
+  flex: none;
+  margin: 4px 0 0;
+  padding: 4px 0 0;
+  border-top: 1px solid var(--hover);
+  list-style: none;
+}
+
+.tab-row.download > .tab {
+  position: relative;
+  padding-right: 62px;
+}
+
+.tab-row.download > .tab:disabled {
+  color: inherit;
+}
+
+.download-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.download-detail {
+  overflow: hidden;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.6;
+}
+
+.download progress {
+  position: absolute;
+  right: 10px;
+  bottom: 3px;
+  left: 10px;
+  height: 2px;
+  appearance: none;
+  border: 0;
+  background: var(--hover);
+}
+
+.download progress::-webkit-progress-bar {
+  background: none;
+}
+
+.download progress::-webkit-progress-value {
+  background: var(--accent);
+}
+
+/* The Finder button sits left of the ×. */
+.tab-row.download > .reveal {
+  right: 32px;
+  display: grid;
+  place-items: center;
+}
+
 .switcher {
   position: relative;
   display: flex;

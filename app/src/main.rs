@@ -1,4 +1,5 @@
 mod command;
+mod downloads;
 #[cfg(target_os = "macos")]
 mod mac;
 mod menu;
@@ -74,9 +75,10 @@ fn default_data_dir() -> PathBuf {
     }
 }
 
-/// The home directory whose browsers are imported. `ARBALETE_HOME` overrides it, so that tests
-/// import their own data and never the machine's.
-fn import_home() -> PathBuf {
+/// The user's home directory: its browsers are imported, and its Downloads folder receives the
+/// downloads. `ARBALETE_HOME` overrides it, so that tests import their own data and download into
+/// their own folder, never the machine's.
+fn user_home() -> PathBuf {
     std::env::var_os("ARBALETE_HOME").map_or_else(home, PathBuf::from)
 }
 

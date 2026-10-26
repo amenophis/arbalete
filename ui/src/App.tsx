@@ -11,6 +11,7 @@ import {
   useAppState,
   useRenaming,
 } from "./bridge";
+import { Downloads } from "./Downloads";
 import { favoriteColumns, previewTiles, type TilePreview, useDrag } from "./drag";
 import { useFaviconColor } from "./faviconColor";
 import { Icon } from "./Icon";
@@ -139,6 +140,7 @@ export function App() {
           {state && <NewSpace index={count} shown={pager.settled === count} />}
         </div>
       </div>
+      <Downloads />
       <div className="switcher">
         <LibraryButton
           closed={state?.closed ?? []}

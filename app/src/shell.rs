@@ -3,7 +3,8 @@
 //! The `cef` crate's default callbacks return 0, which means "no" or "cancel": every callback the app
 //! relies on is implemented explicitly.
 
-use crate::command::{Command, HitTarget, Target, Zoom};
+use crate::command::{Command, DownloadAction, HitTarget, Target, Zoom};
+use crate::downloads::{self, Download};
 use crate::menu::{self, Action};
 use arbalete_core::history::{self, History};
 use arbalete_core::import::browsers::{self, Family};
@@ -119,6 +120,10 @@ thread_local! {
     static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The text last searched for, which ⌘G searches again.
     static FIND_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+    /// The session's downloads, most recent last.
+    static DOWNLOADS: RefCell<Vec<Download>> = const { RefCell::new(Vec::new()) };
+    /// What cancels each download in progress, by id.
+    static DOWNLOAD_CALLBACKS: RefCell<HashMap<u32, DownloadItemCallback>> = RefCell::default();
     /// The browsers the import assistant lists, which its choices refer to by index.
     static SOURCES: RefCell<Vec<browsers::Browser>> = const { RefCell::new(Vec::new()) };
     /// An import is reading the browsers' data, on a thread of its own.
@@ -415,6 +420,41 @@ fn send_state() {
     let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
+}
+
+/// Sends the downloads to both sidebars, which show them at their bottom.
+fn send_downloads() {
+    let json = DOWNLOADS.with_borrow(|downloads| serde_json::to_string(downloads).expect("JSON"));
+    let event = format!(r#"new CustomEvent("arbalete:downloads", {{ detail: {json} }})"#);
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
+}
+
+fn download_command(action: DownloadAction, id: u32) {
+    let path = DOWNLOADS.with_borrow(|downloads| {
+        let download = downloads.iter().find(|download| download.id == id)?;
+        Some(download.path.clone())
+    });
+    let Some(path) = path else { return };
+    match action {
+        DownloadAction::Cancel => {
+            if let Some(callback) =
+                DOWNLOAD_CALLBACKS.with_borrow(|callbacks| callbacks.get(&id).cloned())
+            {
+                callback.cancel();
+            }
+        }
+        #[cfg(target_os = "macos")]
+        DownloadAction::Open => crate::mac::open_file(&path),
+        #[cfg(target_os = "macos")]
+        DownloadAction::Show => crate::mac::show_file(&path),
+        #[cfg(not(target_os = "macos"))]
+        DownloadAction::Open | DownloadAction::Show => {}
+        DownloadAction::Remove => {
+            DOWNLOADS.with_borrow_mut(|downloads| downloads.retain(|download| download.id != id));
+            send_downloads();
+        }
+    }
 }
 
 /// Dispatches a DOM event, given as JavaScript, in one of the UI's views.
@@ -776,7 +816,7 @@ fn restore(path: PathBuf) {
     };
     SESSION_FILE.set(Some(path));
     STATE.with_borrow_mut(|state| favicon::sweep(&mut state.sidebar, profile_dir));
-    if first_launch && !browsers::detect(&crate::import_home()).is_empty() {
+    if first_launch && !browsers::detect(&crate::user_home()).is_empty() {
         IMPORT_AT_LAUNCH.set(true);
     } else if STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_none()) {
         open_tab(START_URL);
@@ -797,7 +837,7 @@ fn show_import() {
     if IMPORTING.get() {
         return;
     }
-    SOURCES.set(browsers::detect(&crate::import_home()));
+    SOURCES.set(browsers::detect(&crate::user_home()));
     if IMPORT.with_borrow(Option::is_none) {
         let url = format!("{UI_ORIGIN}index.html#import");
         let view = browser_view(UiClient::new(), &url, no_width, None);
@@ -1598,7 +1638,11 @@ wrap_request_context_handler! {
 pub fn run(command: Command) {
     let browser = content().and_then(|view| view.browser());
     match (command, browser) {
-        (Command::Ready, _) => send_state(),
+        (Command::Ready, _) => {
+            send_state();
+            send_downloads();
+        }
+        (Command::Download(action, id), _) => download_command(action, id),
         (Command::Select(id), _) => select_tab(id),
         (Command::NextTab, _) => select_found(|s| s.next_tab(s.displayed().id, true)),
         (Command::PreviousTab, _) => select_found(|s| s.next_tab(s.displayed().id, false)),
@@ -2108,6 +2152,77 @@ wrap_client! {
 
         fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
             Some(ContentMenuHandler::new())
+        }
+
+        fn download_handler(&self) -> Option<DownloadHandler> {
+            Some(ContentDownloadHandler::new())
+        }
+    }
+}
+
+// Saves downloads in the Downloads folder without asking, under a name no file or other download
+// has yet, and tells the sidebars how they go.
+wrap_download_handler! {
+    struct ContentDownloadHandler {}
+
+    impl DownloadHandler {
+        fn can_download(&self, _browser: Option<&mut Browser>, _url: Option<&CefString>, _request_method: Option<&CefString>) -> i32 {
+            1
+        }
+
+        fn on_before_download(&self, _browser: Option<&mut Browser>, item: Option<&mut DownloadItem>, suggested_name: Option<&CefString>, callback: Option<&mut BeforeDownloadCallback>) -> i32 {
+            let (Some(item), Some(callback)) = (item, callback) else { return 0 };
+            let dir = crate::user_home().join("Downloads");
+            if let Err(error) = std::fs::create_dir_all(&dir) {
+                eprintln!("cannot create the Downloads folder: {error}");
+                return 0;
+            }
+            let name = suggested_name.map(CefString::to_string).unwrap_or_default();
+            let path = DOWNLOADS.with_borrow(|downloads| {
+                downloads::unique_path(&dir, &name, |path| {
+                    path.exists() || downloads.iter().any(|download| download.path == path)
+                })
+            });
+            callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+            DOWNLOADS.with_borrow_mut(|downloads| downloads.push(Download::new(item.id(), path)));
+            send_downloads();
+            1
+        }
+
+        fn on_download_updated(&self, _browser: Option<&mut Browser>, item: Option<&mut DownloadItem>, callback: Option<&mut DownloadItemCallback>) {
+            let Some(item) = item else { return };
+            let id = item.id();
+            let state = if item.is_complete() == 1 {
+                downloads::State::Complete
+            } else if item.is_canceled() == 1 {
+                downloads::State::Canceled
+            } else if item.is_interrupted() == 1 {
+                downloads::State::Failed
+            } else {
+                downloads::State::InProgress
+            };
+            DOWNLOAD_CALLBACKS.with_borrow_mut(|callbacks| match (state, callback) {
+                (downloads::State::InProgress, Some(callback)) => {
+                    callbacks.insert(id, callback.clone());
+                }
+                _ => {
+                    callbacks.remove(&id);
+                }
+            });
+            let changed = DOWNLOADS.with_borrow_mut(|downloads| {
+                let Some(download) = downloads.iter_mut().find(|download| download.id == id) else {
+                    return false;
+                };
+                let before = download.clone();
+                download.received = item.received_bytes();
+                download.total = item.total_bytes().max(0);
+                download.speed = item.current_speed();
+                download.state = state;
+                *download != before
+            });
+            if changed {
+                send_downloads();
+            }
         }
     }
 }
