@@ -3,7 +3,7 @@
 //! The `cef` crate's default callbacks return 0, which means "no" or "cancel": every callback the app
 //! relies on is implemented explicitly.
 
-use crate::command::{Command, HitTarget, Target};
+use crate::command::{Command, HitTarget, Target, Zoom};
 use crate::menu::{self, Action};
 use arbalete_core::history::{self, History};
 use arbalete_core::import::browsers::{self, Family};
@@ -1617,6 +1617,22 @@ pub fn run(command: Command) {
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
+        (Command::ForceReload, Some(browser)) => browser.reload_ignore_cache(),
+        (Command::Stop, Some(browser)) => browser.stop_load(),
+        (Command::Zoom(zoom), Some(browser)) => {
+            if let Some(host) = browser.host() {
+                host.zoom(match zoom {
+                    Zoom::In => ZoomCommand::IN,
+                    Zoom::Out => ZoomCommand::OUT,
+                    Zoom::Reset => ZoomCommand::RESET,
+                });
+            }
+        }
+        (Command::Print, Some(browser)) => {
+            if let Some(host) = browser.host() {
+                host.print();
+            }
+        }
         (_, None) => {}
     }
 }

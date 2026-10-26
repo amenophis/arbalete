@@ -11,6 +11,14 @@ pub enum Command {
     Back,
     Forward,
     Reload,
+    /// Reloads the page without its cache, from the menu.
+    ForceReload,
+    /// Stops loading the page, from the menu.
+    Stop,
+    /// Zooms the page, from the menu.
+    Zoom(Zoom),
+    /// Prints the page, from the menu.
+    Print,
     /// Shows a tab in the content view: `select/<tab id>`.
     Select(NodeId),
     /// Shows the next tab in the sidebar, `next`, or the previous one, `previous`.
@@ -148,6 +156,14 @@ pub enum Command {
 }
 
 /// What a menu is about.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Zoom {
+    In,
+    Out,
+    /// Back to the page's actual size.
+    Reset,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Target {
