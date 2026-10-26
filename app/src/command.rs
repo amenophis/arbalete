@@ -30,6 +30,8 @@ pub enum Command {
     },
     /// Hides the find bar and stops finding: `find/hide`.
     HideFind,
+    /// Acts on a download from the sidebar: `download/<cancel, open, show or remove>/<id>`.
+    Download(DownloadAction, u32),
     /// Shows a tab in the content view: `select/<tab id>`.
     Select(NodeId),
     /// Shows the next tab in the sidebar, `next`, or the previous one, `previous`.
@@ -168,6 +170,18 @@ pub enum Command {
 
 /// What a menu is about.
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DownloadAction {
+    /// Stops a download in progress.
+    Cancel,
+    /// Opens a finished download's file.
+    Open,
+    /// Shows a finished download's file in the file manager.
+    Show,
+    /// Removes a download from the list, leaving its file.
+    Remove,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Zoom {
     In,
     Out,
@@ -246,6 +260,19 @@ impl Command {
             "import/full-disk-access" => Some(Self::OpenFullDiskAccess),
             "find/hide" => Some(Self::HideFind),
             _ => {
+                if let Some((action, id)) = path
+                    .strip_prefix("download/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let action = match action {
+                        "cancel" => DownloadAction::Cancel,
+                        "open" => DownloadAction::Open,
+                        "show" => DownloadAction::Show,
+                        "remove" => DownloadAction::Remove,
+                        _ => return None,
+                    };
+                    return id.parse().ok().map(|id| Self::Download(action, id));
+                }
                 if let Some((direction, text)) =
                     path.strip_prefix("find/").and_then(|r| r.split_once('/'))
                 {
@@ -579,6 +606,21 @@ mod tests {
         );
         assert_eq!(Command::parse("open/%zz"), None);
         assert_eq!(Command::parse("open/%C3"), None);
+    }
+
+    #[test]
+    fn parses_download_commands() {
+        use super::DownloadAction;
+        assert_eq!(
+            Command::parse("download/cancel/3"),
+            Some(Command::Download(DownloadAction::Cancel, 3))
+        );
+        assert_eq!(
+            Command::parse("download/show/12"),
+            Some(Command::Download(DownloadAction::Show, 12))
+        );
+        assert_eq!(Command::parse("download/delete/3"), None);
+        assert_eq!(Command::parse("download/open/x"), None);
     }
 
     #[test]

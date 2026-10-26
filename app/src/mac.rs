@@ -18,7 +18,7 @@ use objc2_app_kit::{
     NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
     NSRightArrowFunctionKey, NSUpArrowFunctionKey, NSView, NSWindowButton, NSWorkspace,
 };
-use objc2_foundation::{NSArray, NSNumber, NSString, ns_string};
+use objc2_foundation::{NSArray, NSNumber, NSString, NSURL, ns_string};
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -729,6 +729,21 @@ pub fn confirm(question: &str, detail: &str, button: &str) -> bool {
         .setHasDestructiveAction(true);
     alert.addButtonWithTitle(ns_string!("Cancel"));
     alert.runModal() == NSAlertFirstButtonReturn
+}
+
+/// Opens a file with its default app.
+pub fn open_file(path: &std::path::Path) {
+    NSWorkspace::sharedWorkspace().openURL(&file_url(path));
+}
+
+/// Shows a file selected in a Finder window.
+pub fn show_file(path: &std::path::Path) {
+    let urls = NSArray::from_retained_slice(&[file_url(path)]);
+    NSWorkspace::sharedWorkspace().activateFileViewerSelectingURLs(&urls);
+}
+
+fn file_url(path: &std::path::Path) -> Retained<NSURL> {
+    NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()))
 }
 
 /// Puts a link on the clipboard.
