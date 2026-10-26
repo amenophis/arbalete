@@ -2,7 +2,7 @@
 //! (app/src/mac.rs) and runs the item picked (shell::perform).
 
 use crate::command::{Command, Target};
-use arbalete_core::sidebar::{NodeId, NodeKind, Sidebar, Space};
+use arbalete_core::sidebar::{MAX_FAVORITES, NodeId, NodeKind, Sidebar, Space};
 use serde_json::json;
 
 pub enum Entry {
@@ -39,9 +39,9 @@ pub enum Action {
 pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
     match target {
         Target::Node(id) => match &sidebar.node(id)?.kind {
-            NodeKind::Tab(tab) if sidebar.is_favorite(id) => Some(favorite(id, &tab.url)),
+            NodeKind::Tab(tab) if sidebar.is_favorite(id) => Some(favorite(sidebar, id, &tab.url)),
             NodeKind::Tab(tab) => Some(tab_menu(sidebar, id, &tab.url)),
-            NodeKind::Folder { .. } => Some(folder(id)),
+            NodeKind::Folder { title, .. } => Some(folder(sidebar, id, title)),
             // A split's menus are its tabs', from each half of its row.
             NodeKind::Container | NodeKind::Split => None,
         },
@@ -66,26 +66,47 @@ pub fn find(entries: Vec<Entry>, id: &str) -> Option<Action> {
 }
 
 fn tab_menu(sidebar: &Sidebar, tab: NodeId, url: &str) -> Vec<Entry> {
-    let pin = if sidebar.is_pinned(tab) {
-        "Unpin Tab"
-    } else {
-        "Pin Tab"
-    };
-    let current = sidebar.space_of(tab);
+    let pinned = sidebar.is_pinned(tab);
+    let pin = if pinned { "Unpin Tab" } else { "Pin Tab" };
+    let mut menu = vec![
+        copy_link(url),
+        item("pin", pin, Action::Run(Command::Pin(Some(tab)))),
+        Entry::Separator,
+        duplicate(tab),
+        move_to(sidebar, tab),
+        Entry::Separator,
+        item("close", "Close Tab", Action::Run(Command::Close(Some(tab)))),
+    ];
+    // Pinned tabs stay: only "Today" tabs close those below them.
+    if !pinned {
+        menu.push(Entry::Item(Item {
+            id: "close-below".to_string(),
+            title: "Close Tabs Below".to_string(),
+            checked: false,
+            enabled: has_rows_below(sidebar, sidebar.row_of(tab)),
+            action: Action::Run(Command::CloseTabsBelow(tab)),
+        }));
+    }
+    menu
+}
+
+/// The Spaces a tab or a folder may move to, its own checked, and a new one.
+fn move_to(sidebar: &Sidebar, id: NodeId) -> Entry {
+    let current = sidebar.space_of(id);
     let mut spaces: Vec<_> = sidebar
         .spaces()
         .iter()
         .map(|space| {
-            let id = serde_json::to_string(&space.id).expect("an id");
+            let space_id = serde_json::to_string(&space.id).expect("an id");
             Entry::Item(Item {
-                id: format!("move/{id}"),
+                id: format!("move/{space_id}"),
                 title: match &space.emoji {
                     Some(emoji) => format!("{emoji}  {}", space.title),
                     None => space.title.clone(),
                 },
                 checked: Some(space.id) == current,
                 enabled: true,
-                action: Action::Run(Command::MoveToSpace(tab, space.id)),
+                action: Action::Run(Command::MoveToSpace(id, space.id)),
             })
         })
         .collect();
@@ -94,16 +115,25 @@ fn tab_menu(sidebar: &Sidebar, tab: NodeId, url: &str) -> Vec<Entry> {
         item(
             "new-space",
             "New Space…",
-            Action::Ask("arbalete:new-space", json!(tab)),
+            Action::Ask("arbalete:new-space", json!(id)),
         ),
     ]);
-    vec![
-        copy_link(url),
-        item("pin", pin, Action::Run(Command::Pin(Some(tab)))),
-        Entry::Submenu("Move to".to_string(), spaces),
-        Entry::Separator,
-        item("close", "Close Tab", Action::Run(Command::Close(Some(tab)))),
-    ]
+    Entry::Submenu("Move to".to_string(), spaces)
+}
+
+fn duplicate(id: NodeId) -> Entry {
+    item(
+        "duplicate",
+        "Duplicate",
+        Action::Run(Command::DuplicateRow(id)),
+    )
+}
+
+/// Rows follow `row` in its parent.
+fn has_rows_below(sidebar: &Sidebar, row: NodeId) -> bool {
+    let parent = sidebar.node(row).and_then(|node| node.parent);
+    let siblings = parent.and_then(|parent| sidebar.node(parent));
+    siblings.is_some_and(|parent| parent.children.last() != Some(&row))
 }
 
 fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
@@ -176,7 +206,13 @@ fn profiles(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
     profiles
 }
 
-fn folder(folder: NodeId) -> Vec<Entry> {
+fn folder(sidebar: &Sidebar, folder: NodeId, title: &str) -> Vec<Entry> {
+    let delete = Action::Confirm {
+        question: format!("Delete the folder “{title}”?"),
+        detail: "Its tabs will be closed.",
+        button: "Delete",
+        command: Command::DeleteFolder(folder),
+    };
     vec![
         item(
             "rename",
@@ -188,18 +224,37 @@ fn folder(folder: NodeId) -> Vec<Entry> {
             "New Folder",
             Action::Run(Command::NewFolder(Some(folder))),
         ),
+        item(
+            "to-space",
+            &format!("Turn “{title}” into Space"),
+            Action::Run(Command::FolderToSpace(folder)),
+        ),
+        Entry::Separator,
+        duplicate(folder),
+        move_to(sidebar, folder),
         Entry::Separator,
         item(
             "close-tabs",
             "Close Tabs in Folder",
             Action::Run(Command::CloseFolderTabs(folder)),
         ),
+        item("delete", "Delete Folder", delete),
     ]
 }
 
-fn favorite(tab: NodeId, url: &str) -> Vec<Entry> {
+fn favorite(sidebar: &Sidebar, tab: NodeId, url: &str) -> Vec<Entry> {
+    let parent = sidebar.node(tab).and_then(|node| node.parent);
+    let count = parent.and_then(|parent| sidebar.node(parent));
     vec![
         copy_link(url),
+        Entry::Item(Item {
+            id: "duplicate".to_string(),
+            title: "Duplicate".to_string(),
+            checked: false,
+            // The favorites hold at most MAX_FAVORITES tabs.
+            enabled: count.is_some_and(|favorites| favorites.children.len() < MAX_FAVORITES),
+            action: Action::Run(Command::DuplicateRow(tab)),
+        }),
         Entry::Separator,
         item(
             "remove",
@@ -270,6 +325,8 @@ mod tests {
             [
                 "Copy Link",
                 "Pin Tab",
+                "-",
+                "Duplicate",
                 "Move to ▸",
                 "  ✓ Home",
                 "  💼  Work",
@@ -277,6 +334,7 @@ mod tests {
                 "  New Space…",
                 "-",
                 "Close Tab",
+                "(Close Tabs Below)",
             ]
         );
         let work_id = serde_json::to_string(&work).unwrap();
@@ -296,7 +354,25 @@ mod tests {
             choose(&sidebar, tab, "close"),
             Some(Action::Run(Command::Close(Some(tab))))
         );
+        assert_eq!(
+            choose(&sidebar, tab, "duplicate"),
+            Some(Action::Run(Command::DuplicateRow(tab)))
+        );
         assert_eq!(choose(&sidebar, tab, "unknown"), None);
+    }
+
+    #[test]
+    fn a_today_tab_closes_the_tabs_below_it_when_there_are_some() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let tab = sidebar.open_tab(home, "https://a.test/").unwrap();
+        sidebar.open_tab(home, "https://b.test/").unwrap();
+        let menu = build(&sidebar, Target::Node(tab)).unwrap();
+        assert_eq!(titles(&menu).last().unwrap(), "Close Tabs Below");
+        assert_eq!(
+            choose(&sidebar, tab, "close-below"),
+            Some(Action::Run(Command::CloseTabsBelow(tab)))
+        );
     }
 
     #[test]
@@ -306,6 +382,8 @@ mod tests {
         let tab = sidebar.add_tab(pinned, "a", "a").unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
         assert_eq!(titles(&menu)[1], "Unpin Tab");
+        // Pinned tabs stay: none closes those below it.
+        assert_eq!(titles(&menu).last().unwrap(), "Close Tab");
         assert_eq!(
             choose(&sidebar, tab, "pin"),
             Some(Action::Run(Command::Pin(Some(tab))))
@@ -313,14 +391,50 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_renames_holds_a_new_folder_and_closes_its_tabs() {
+    fn a_folder_renames_holds_a_new_folder_moves_and_closes_its_tabs() {
         let mut sidebar = Sidebar::default();
         let pinned = sidebar.spaces()[0].pinned;
         let folder = sidebar.add_folder(pinned, "Folder").unwrap();
         let menu = build(&sidebar, Target::Node(folder)).unwrap();
         assert_eq!(
             titles(&menu),
-            ["Rename Folder", "New Folder", "-", "Close Tabs in Folder"]
+            [
+                "Rename Folder",
+                "New Folder",
+                "Turn “Folder” into Space",
+                "-",
+                "Duplicate",
+                "Move to ▸",
+                "  ✓ Home",
+                "  -",
+                "  New Space…",
+                "-",
+                "Close Tabs in Folder",
+                "Delete Folder",
+            ]
+        );
+        assert_eq!(
+            choose(&sidebar, folder, "to-space"),
+            Some(Action::Run(Command::FolderToSpace(folder)))
+        );
+        assert_eq!(
+            choose(&sidebar, folder, "duplicate"),
+            Some(Action::Run(Command::DuplicateRow(folder)))
+        );
+        let home = sidebar.spaces()[0].id;
+        let home_id = serde_json::to_string(&home).unwrap();
+        assert_eq!(
+            choose(&sidebar, folder, &format!("move/{home_id}")),
+            Some(Action::Run(Command::MoveToSpace(folder, home)))
+        );
+        assert_eq!(
+            choose(&sidebar, folder, "delete"),
+            Some(Action::Confirm {
+                question: "Delete the folder “Folder”?".into(),
+                detail: "Its tabs will be closed.",
+                button: "Delete",
+                command: Command::DeleteFolder(folder),
+            })
         );
         assert_eq!(
             choose(&sidebar, folder, "rename"),
@@ -342,7 +456,10 @@ mod tests {
         let favorites = sidebar.profiles()[0].favorites;
         let tab = sidebar.add_tab(favorites, "https://a.test/", "a").unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
-        assert_eq!(titles(&menu), ["Copy Link", "-", "Remove from Favorites"]);
+        assert_eq!(
+            titles(&menu),
+            ["Copy Link", "Duplicate", "-", "Remove from Favorites"]
+        );
         assert_eq!(
             choose(&sidebar, tab, "remove"),
             Some(Action::Run(Command::RemoveFavorite(tab)))

@@ -624,18 +624,23 @@ impl Sidebar {
     }
 
     /// Moves a tab, with the split it is in, to the end of another Space's "Today" tabs, unpinned,
-    /// and deselects it in the Space it leaves. Favorites belong to no Space: they stay where they
-    /// are, like a tab moved to its own Space.
-    pub fn move_to_space(&mut self, tab: NodeId, space: SpaceId) -> Result<(), Error> {
-        let today = self.space(space)?.today;
-        self.check_tab(tab)?;
-        let Some(from) = self.space_of(tab).filter(|&from| from != space) else {
+    /// or a folder, with what it holds, to the end of its pinned tabs, and deselects what moved
+    /// in the Space it leaves. Favorites belong to no Space: they stay where they are, like a
+    /// node moved to its own Space.
+    pub fn move_to_space(&mut self, id: NodeId, space: SpaceId) -> Result<(), Error> {
+        let (pinned, today) = self.space(space).map(|s| (s.pinned, s.today))?;
+        let (row, to) = if self.folder_mut(id).is_ok() {
+            (id, pinned)
+        } else {
+            self.check_tab(id)?;
+            (self.row_of(id), today)
+        };
+        let Some(from) = self.space_of(id).filter(|&from| from != space) else {
             return Ok(());
         };
-        let row = self.row_of(tab);
-        self.move_node(row, today, usize::MAX)?;
+        self.move_node(row, to, usize::MAX)?;
         let selected = self.space(from)?.selected;
-        if selected.is_some_and(|selected| self.row_of(selected) == row) {
+        if selected.is_some_and(|selected| self.ancestors(selected).any(|id| id == row)) {
             self.space_mut(from)?.selected = None;
         }
         Ok(())
@@ -687,8 +692,87 @@ impl Sidebar {
     /// the tabs removed, in the order the sidebar shows them, so they may be reopened.
     pub fn clear_today(&mut self, space: SpaceId) -> Result<Vec<Tab>, Error> {
         let today = self.space(space)?.today;
+        let rows = self.nodes[&today].children.clone();
+        self.remove_rows(&rows)
+    }
+
+    /// Removes the rows after `tab`'s among its parent's, as `clear_today` removes them.
+    pub fn remove_below(&mut self, tab: NodeId) -> Result<Vec<Tab>, Error> {
+        self.check_tab(tab)?;
+        let row = self.row_of(tab);
+        let siblings = &self.nodes[&self.movable(row)?].children;
+        let index = siblings.iter().position(|&id| id == row);
+        let rows = siblings[index.expect("a child of its parent") + 1..].to_vec();
+        self.remove_rows(&rows)
+    }
+
+    /// Removes a folder with what it holds, as `clear_today` removes rows.
+    pub fn remove_folder(&mut self, folder: NodeId) -> Result<Vec<Tab>, Error> {
+        self.folder_mut(folder)?;
+        self.remove_rows(&[folder])
+    }
+
+    /// Makes a folder a Space of its own, named after it, in its Space's profile, and displays
+    /// it: what the folder held becomes the new Space's pinned tabs, the tab selected among them
+    /// its selected one.
+    pub fn folder_to_space(&mut self, folder: NodeId) -> Result<SpaceId, Error> {
+        let title = self.folder_mut(folder)?.0.clone();
+        let from = self.space_of(folder).ok_or(Error::UnknownNode)?;
+        let profile = self.space(from)?.profile;
+        let space = self.create_space(&title, profile)?;
+        let pinned = self.space(space)?.pinned;
+        for id in self.nodes[&folder].children.clone() {
+            self.move_node(id, pinned, usize::MAX)?;
+        }
+        let selected = self.space(from)?.selected;
+        if selected.is_some_and(|tab| self.space_of(tab) == Some(space)) {
+            self.space_mut(from)?.selected = None;
+            self.space_mut(space)?.selected = selected;
+        }
+        self.remove(folder)?;
+        Ok(space)
+    }
+
+    /// Copies a tab, a folder with what it holds, or a tab's split, right after it, and returns
+    /// the copy. A tab of a split is copied alone, after its split.
+    pub fn duplicate_below(&mut self, id: NodeId) -> Result<NodeId, Error> {
+        let row = if self.is_tab(id) { self.row_of(id) } else { id };
+        let parent = self.movable(row)?;
+        if self.is_tab(id) {
+            self.check_room(parent)?;
+        }
+        let copy = self.copy_into(id, parent);
+        let children = self.children_mut(parent);
+        children.pop();
+        let index = children.iter().position(|&child| child == row);
+        children.insert(index.expect("a child of its parent") + 1, copy);
+        Ok(copy)
+    }
+
+    /// Adds a copy of a node and what it holds at the end of `parent`, its tabs opened from none.
+    fn copy_into(&mut self, id: NodeId, parent: NodeId) -> NodeId {
+        let mut kind = self.nodes[&id].kind.clone();
+        if let NodeKind::Tab(tab) = &mut kind {
+            tab.opener = None;
+        }
+        let copy = self.insert(Some(parent), kind);
+        for child in self.nodes[&id].children.clone() {
+            self.copy_into(child, copy);
+        }
+        copy
+    }
+
+    /// Removes rows with what they hold, and returns their tabs, in the order the sidebar shows
+    /// them, so they may be reopened.
+    fn remove_rows(&mut self, rows: &[NodeId]) -> Result<Vec<Tab>, Error> {
         let mut tabs = Vec::new();
-        self.push_tabs(today, &mut tabs);
+        for &row in rows {
+            if self.is_tab(row) {
+                tabs.push(row);
+            } else {
+                self.push_tabs(row, &mut tabs);
+            }
+        }
         let removed = tabs
             .iter()
             .filter_map(|&id| match &self.nodes[&id].kind {
@@ -696,8 +780,8 @@ impl Sidebar {
                 _ => None,
             })
             .collect();
-        for id in self.nodes[&today].children.clone() {
-            self.remove(id)?;
+        for &row in rows {
+            self.remove(row)?;
         }
         Ok(removed)
     }
@@ -948,6 +1032,123 @@ mod tests {
 
     fn children(sidebar: &Sidebar, id: NodeId) -> Vec<NodeId> {
         sidebar.node(id).unwrap().children.clone()
+    }
+
+    #[test]
+    fn duplicates_a_tab_a_folder_or_a_tab_of_a_split_right_after_it() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let a = sidebar.open_tab(home.id, "https://a.test/").unwrap();
+        let b = sidebar.open_tab(home.id, "https://b.test/").unwrap();
+        let copy = sidebar.duplicate_below(a).unwrap();
+        assert_eq!(children(&sidebar, home.today), [a, copy, b]);
+        let NodeKind::Tab(tab) = &sidebar.node(copy).unwrap().kind else {
+            panic!("a tab");
+        };
+        assert_eq!((tab.url.as_str(), tab.opener), ("https://a.test/", None));
+        // A folder is copied with what it holds.
+        let folder = sidebar.add_folder(home.pinned, "Work").unwrap();
+        let inner = sidebar.add_tab(folder, "https://w.test/", "W").unwrap();
+        let folder_copy = sidebar.duplicate_below(folder).unwrap();
+        assert_eq!(children(&sidebar, home.pinned), [folder, folder_copy]);
+        let copied = children(&sidebar, folder_copy);
+        assert_eq!(copied.len(), 1);
+        assert_ne!(copied[0], inner);
+        assert_eq!(sidebar.folder_tabs(folder_copy).unwrap(), copied);
+        // A tab of a split is copied alone, after the split.
+        let split = sidebar.split(b, copy).unwrap();
+        let alone = sidebar.duplicate_below(b).unwrap();
+        assert_eq!(children(&sidebar, home.today), [a, split, alone]);
+        assert_eq!(sidebar.duplicate_below(home.today), Err(Error::RootNode));
+    }
+
+    #[test]
+    fn full_favorites_take_no_copy() {
+        let mut sidebar = Sidebar::default();
+        let favorites = sidebar.profiles()[0].favorites;
+        let mut last = None;
+        for i in 0..MAX_FAVORITES {
+            last = Some(
+                sidebar
+                    .add_tab(favorites, &format!("https://{i}.test/"), "")
+                    .unwrap(),
+            );
+        }
+        assert_eq!(
+            sidebar.duplicate_below(last.unwrap()),
+            Err(Error::FavoritesFull)
+        );
+    }
+
+    #[test]
+    fn removes_the_rows_below_a_tab_and_returns_their_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let a = sidebar.open_tab(home.id, "https://a.test/").unwrap();
+        let b = sidebar.open_tab(home.id, "https://b.test/").unwrap();
+        let folder = sidebar.add_folder(home.today, "Below").unwrap();
+        sidebar.add_tab(folder, "https://c.test/", "C").unwrap();
+        let removed = sidebar.remove_below(a).unwrap();
+        let urls: Vec<_> = removed.iter().map(|tab| tab.url.as_str()).collect();
+        assert_eq!(urls, ["https://b.test/", "https://c.test/"]);
+        assert_eq!(children(&sidebar, home.today), [a]);
+        assert!(sidebar.node(b).is_none());
+        assert_eq!(sidebar.remove_below(a).unwrap(), []);
+        assert_eq!(sidebar.remove_below(folder), Err(Error::UnknownNode));
+    }
+
+    #[test]
+    fn removes_a_folder_and_returns_its_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_folder(home.pinned, "Work").unwrap();
+        let tab = sidebar.add_tab(folder, "https://w.test/", "W").unwrap();
+        sidebar.select(home.id, tab).unwrap();
+        let removed = sidebar.remove_folder(folder).unwrap();
+        assert_eq!(removed.len(), 1);
+        assert!(children(&sidebar, home.pinned).is_empty());
+        assert_eq!(sidebar.displayed().selected, None);
+        let today = sidebar.open_tab(home.id, "https://t.test/").unwrap();
+        assert_eq!(sidebar.remove_folder(today), Err(Error::NotAFolder));
+    }
+
+    #[test]
+    fn moves_a_folder_to_another_spaces_pinned_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let folder = sidebar.add_folder(home.today, "Docs").unwrap();
+        let tab = sidebar.add_tab(folder, "https://d.test/", "D").unwrap();
+        sidebar.select(home.id, tab).unwrap();
+        sidebar.move_to_space(folder, work).unwrap();
+        let work = sidebar.spaces()[1].clone();
+        assert_eq!(children(&sidebar, work.pinned), [folder]);
+        assert!(children(&sidebar, home.today).is_empty());
+        assert_eq!(sidebar.displayed().selected, None);
+        // Pinned, its tabs keep their url.
+        assert!(sidebar.is_pinned(tab));
+    }
+
+    #[test]
+    fn turns_a_folder_into_a_space_of_the_same_profile() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_folder(home.pinned, "Research").unwrap();
+        let tab = sidebar.add_tab(folder, "https://r.test/", "R").unwrap();
+        let nested = sidebar.add_folder(folder, "Papers").unwrap();
+        sidebar.select(home.id, tab).unwrap();
+        let space = sidebar.folder_to_space(folder).unwrap();
+        let created = sidebar.displayed().clone();
+        assert_eq!(created.id, space);
+        assert_eq!(
+            (created.title.as_str(), created.profile),
+            ("Research", home.profile)
+        );
+        assert_eq!(children(&sidebar, created.pinned), [tab, nested]);
+        assert_eq!(created.selected, Some(tab));
+        assert_eq!(sidebar.spaces()[0].selected, None);
+        assert!(sidebar.node(folder).is_none());
+        assert_eq!(sidebar.folder_to_space(tab), Err(Error::NotAFolder));
     }
 
     #[test]
@@ -1800,8 +2001,10 @@ mod tests {
         sidebar.move_to_space(favorite, work).unwrap();
         assert_eq!(children(&sidebar, home.pinned), [pinned]);
         assert_eq!(children(&sidebar, favorites), [favorite]);
-        let folder = sidebar.add_folder(home.pinned, "Folder").unwrap();
-        assert_eq!(sidebar.move_to_space(folder, work), Err(Error::NotATab));
+        assert_eq!(
+            sidebar.move_to_space(home.pinned, work),
+            Err(Error::NotATab)
+        );
         assert_eq!(
             sidebar.move_to_space(NodeId(999), work),
             Err(Error::UnknownNode)

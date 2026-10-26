@@ -9,7 +9,9 @@ use crate::menu::{self, Action};
 use arbalete_core::history::{self, History};
 use arbalete_core::import::browsers::{self, Family};
 use arbalete_core::import::{self, Choice, safari};
-use arbalete_core::sidebar::{Color, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab};
+use arbalete_core::sidebar::{
+    Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab,
+};
 use arbalete_core::{favicon, store};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
 use cef::*;
@@ -1302,32 +1304,56 @@ fn close_folder_tabs(folder: NodeId) {
     }
 }
 
-/// Closes every "Today" tab of the displayed Space, which may be reopened; when the selected tab
-/// was one of them, shows the tab closing it would have shown, if it is left, or the overlay.
+/// Closes every "Today" tab of the displayed Space, which may be reopened.
 fn clear_today() {
-    let next = STATE.with_borrow(|state| {
-        let sidebar = &state.sidebar;
-        let selected = sidebar.displayed().selected?;
-        let today = !sidebar.is_pinned(selected) && !sidebar.is_favorite(selected);
-        today.then(|| sidebar.next_after_close(selected))
-    });
-    let now = SystemTime::now();
-    let (removed, profile) = update_sidebar(|sidebar| {
+    close_rows(|sidebar| {
         let space = sidebar.displayed();
         let (id, profile) = (space.id, space.profile);
-        let removed = sidebar.clear_today(id).expect("the displayed Space");
-        (removed, profile)
+        Ok((sidebar.clear_today(id)?, profile))
     });
+}
+
+/// Closes the rows after a tab's, as clear_today closes "Today" tabs.
+fn close_tabs_below(tab: NodeId) {
+    close_rows(|sidebar| {
+        let profile = sidebar.profile_of(tab).ok_or(Error::UnknownNode)?;
+        Ok((sidebar.remove_below(tab)?, profile))
+    });
+}
+
+/// Removes a folder and closes its tabs, as clear_today closes "Today" tabs.
+fn delete_folder(folder: NodeId) {
+    close_rows(|sidebar| {
+        let profile = sidebar.profile_of(folder).ok_or(Error::UnknownNode)?;
+        Ok((sidebar.remove_folder(folder)?, profile))
+    });
+}
+
+/// Removes rows with `remove`, which returns their tabs and their profile; the tabs may be
+/// reopened. When the selected tab was one of them, shows the tab closing it would have shown,
+/// if it is left, or the overlay. Like a selection, an unknown row from a menu is ignored.
+fn close_rows(remove: impl FnOnce(&mut Sidebar) -> Result<(Vec<Tab>, ProfileId), Error>) {
+    let (selected, next) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let selected = sidebar.displayed().selected;
+        (
+            selected,
+            selected.and_then(|tab| sidebar.next_after_close(tab)),
+        )
+    });
+    let Ok((removed, profile)) = update_sidebar(remove) else {
+        return;
+    };
+    let now = SystemTime::now();
     STATE.with_borrow_mut(|state| {
         state
             .closed
             .extend(removed.into_iter().map(|tab| (tab, profile, now)))
     });
     send_state();
-    if let Some(next) = next {
-        let next =
-            next.filter(|&id| STATE.with_borrow_mut(|state| state.sidebar.tab_mut(id).is_some()));
-        show_next(next);
+    let open = |id: NodeId| STATE.with_borrow_mut(|state| state.sidebar.tab_mut(id).is_some());
+    if selected.is_some_and(|tab| !open(tab)) {
+        show_next(next.filter(|&id| open(id)));
     }
 }
 
@@ -1350,11 +1376,22 @@ fn remove_favorite(tab: NodeId) {
 }
 
 /// Moves a tab to another Space; the selected tab takes the Space along, so it stays in view.
-fn move_to_space(tab: NodeId, space: SpaceId) {
-    let selected = STATE.with_borrow(|state| state.sidebar.displayed().selected == Some(tab));
-    // Like a selection, an unknown tab or Space from a menu is ignored.
-    if update_sidebar(|sidebar| sidebar.move_to_space(tab, space)).is_ok() && selected {
-        select_tab(tab);
+fn move_to_space(id: NodeId, space: SpaceId) {
+    // The selected tab, if it moves: the tab itself, or one in the folder.
+    let selected = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let selected = sidebar.displayed().selected?;
+        let moves = sidebar.row_of(selected) == sidebar.row_of(id)
+            || sidebar
+                .folder_tabs(id)
+                .is_ok_and(|tabs| tabs.contains(&selected));
+        moves.then_some(selected)
+    });
+    // Like a selection, an unknown tab, folder or Space from a menu is ignored.
+    if update_sidebar(|sidebar| sidebar.move_to_space(id, space)).is_ok()
+        && let Some(selected) = selected
+    {
+        select_tab(selected);
     }
 }
 
@@ -1461,10 +1498,11 @@ fn create_space(title: &str, emoji: &str, color: Color, tab: Option<NodeId>) {
         let space = sidebar.create_space(title, profile)?;
         sidebar.set_space_emoji(space, emoji)?;
         sidebar.set_space_color(space, color)?;
+        // A tab moved there is selected; a folder moved there is not a tab to select.
         if let Some(tab) = tab
             && sidebar.move_to_space(tab, space).is_ok()
         {
-            sidebar.select(space, tab)?;
+            let _ = sidebar.select(space, tab);
         }
         Ok::<_, arbalete_core::sidebar::Error>(())
     });
@@ -1799,7 +1837,17 @@ pub fn run(command: Command) {
                 crate::mac::copy(&url);
             }
         }
-        (Command::MoveToSpace(tab, space), _) => move_to_space(tab, space),
+        (Command::MoveToSpace(id, space), _) => move_to_space(id, space),
+        (Command::DuplicateRow(id), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.duplicate_below(id));
+        }
+        (Command::CloseTabsBelow(tab), _) => close_tabs_below(tab),
+        (Command::DeleteFolder(folder), _) => delete_folder(folder),
+        (Command::FolderToSpace(folder), _) => {
+            if update_sidebar(|sidebar| sidebar.folder_to_space(folder)).is_ok() {
+                show_selected();
+            }
+        }
         (Command::Menu(target), _) => show_menu(target),
         (Command::MenuTargets { revealed, targets }, _) => {
             MENU_TARGETS.with_borrow_mut(|all| all[usize::from(revealed)] = targets);

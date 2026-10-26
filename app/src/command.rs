@@ -91,8 +91,16 @@ pub enum Command {
     ClearToday,
     /// Puts the url of the displayed Space's selected tab on the clipboard: `link/copy`.
     CopyLink,
-    /// Moves a tab to another Space's "Today" tabs, from its menu.
+    /// Moves a tab to another Space's "Today" tabs, or a folder to its pinned tabs, from its menu.
     MoveToSpace(NodeId, SpaceId),
+    /// Copies a tab or a folder right after it, from its menu.
+    DuplicateRow(NodeId),
+    /// Closes the rows after a tab's, which may be reopened, from its menu.
+    CloseTabsBelow(NodeId),
+    /// Removes a folder and closes its tabs, which may be reopened, from its menu.
+    DeleteFolder(NodeId),
+    /// Makes a folder a Space of its own and shows it, from its menu.
+    FolderToSpace(NodeId),
     /// Opens the native menu of a sidebar row at the pointer: `menu/node/<tab or folder id>`, or
     /// of a Space's header, `menu/space/<space id>`.
     Menu(Target),
