@@ -65,10 +65,15 @@ const FLOATING_DOCK_DURATION: u32 = 50;
 const FRAME_MS: i64 = 8;
 
 /// The overlay's size: one text field for now (ui/src/Overlay.tsx).
-const OVERLAY_SIZE: Size = Size {
-    width: 600,
-    height: 56,
-};
+/// The Command Bar's width, at most, and its search row's height: its results add to it
+/// (ui/src/Overlay.tsx). Its top sits at this share of the window's height, like Arc's.
+const OVERLAY_WIDTH: i32 = 720;
+const OVERLAY_ROW: i32 = 62;
+const OVERLAY_TOP: f32 = 0.29;
+
+/// The open tabs and history pages the Command Bar shows for a text, at most.
+const OVERLAY_TABS: usize = 3;
+const OVERLAY_PAGES: usize = 5;
 
 /// The find bar's size, and its margin from the card's top right corner (ui/src/Find.tsx).
 const FIND_SIZE: Size = Size {
@@ -508,24 +513,112 @@ fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) 
     }
 }
 
+/// Shows the Command Bar above the page, empty to open a tab, or hides it.
 fn show_overlay(visible: bool) {
+    open_overlay(visible, None);
+}
+
+/// Shows the Command Bar holding the selected tab's address, to edit it; without one, empty.
+fn edit_url() {
+    let url =
+        STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()));
+    open_overlay(true, url);
+}
+
+fn open_overlay(visible: bool, url: Option<String>) {
     let Some(overlay) = OVERLAY.with_borrow(Clone::clone) else {
         return;
     };
     if visible {
-        let window = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
-        let width = window.map_or(0, |size| size.width);
-        overlay.set_bounds(Some(&Rect {
-            x: (width - OVERLAY_SIZE.width) / 2,
-            y: 96,
-            width: OVERLAY_SIZE.width,
-            height: OVERLAY_SIZE.height,
-        }));
-        dispatch(&OVERLAY_VIEW, r#"new Event("arbalete:show")"#);
+        place_overlay(OVERLAY_ROW);
+        let detail = json!({ "url": url });
+        dispatch(
+            &OVERLAY_VIEW,
+            &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
+        );
     }
     overlay.set_visible(visible.into());
     if visible && let Some(view) = overlay.contents_view() {
+        #[cfg(target_os = "macos")]
+        if let Some(host) = OVERLAY_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host()) {
+            crate::mac::round_command_bar(host.window_handle());
+        }
         view.request_focus();
+    }
+}
+
+/// Centers the Command Bar on the window, `height` tall.
+fn place_overlay(height: i32) {
+    let (Some(overlay), Some(size)) = (
+        OVERLAY.with_borrow(Clone::clone),
+        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+    ) else {
+        return;
+    };
+    let width = OVERLAY_WIDTH.min(size.width - 2 * CARD_MARGIN);
+    overlay.set_bounds(Some(&Rect {
+        x: (size.width - width) / 2,
+        y: (size.height as f32 * OVERLAY_TOP) as i32,
+        width,
+        height,
+    }));
+}
+
+/// Sends the Command Bar the open tabs, in every Space and the favorites, then the displayed
+/// Space's profile history pages, whose address or title holds `text`.
+fn search_overlay(text: &str) {
+    let wanted = text.trim().to_lowercase();
+    let (tabs, profile) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let tabs: Vec<_> = if wanted.is_empty() {
+            Vec::new()
+        } else {
+            sidebar
+                .tabs()
+                .filter(|(_, tab)| {
+                    tab.title.to_lowercase().contains(&wanted)
+                        || tab.url.to_lowercase().contains(&wanted)
+                })
+                .take(OVERLAY_TABS)
+                .map(|(id, tab)| (id, tab.clone()))
+                .collect()
+        };
+        (tabs, sidebar.displayed().profile)
+    });
+    let pages = if wanted.is_empty() {
+        Vec::new()
+    } else {
+        with_history(profile, |history| {
+            history.search(text.trim(), OVERLAY_PAGES + OVERLAY_TABS)
+        })
+        .and_then(Result::ok)
+        .unwrap_or_default()
+    };
+    let pages: Vec<_> = pages
+        .iter()
+        .filter(|page| tabs.iter().all(|(_, tab)| tab.url != page.url))
+        .take(OVERLAY_PAGES)
+        .map(|page| json!({ "url": page.url, "title": page.title }))
+        .collect();
+    let tabs: Vec<_> = tabs
+        .iter()
+        .map(|(id, tab)| json!({ "id": id, "url": tab.url, "title": tab.title, "favicon": tab.favicon }))
+        .collect();
+    let detail = json!({ "text": text, "tabs": tabs, "pages": pages });
+    dispatch(
+        &OVERLAY_VIEW,
+        &format!(r#"new CustomEvent("arbalete:results", {{ detail: {detail} }})"#),
+    );
+}
+
+/// Loads an address in the selected tab, or in a new one when none is selected.
+fn navigate(url: &str) {
+    show_overlay(false);
+    let selected = STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_some());
+    if selected {
+        load(url);
+    } else {
+        open_tab(url);
     }
 }
 
@@ -1801,6 +1894,12 @@ pub fn run(command: Command) {
         (Command::PreviousSpace, _) => show_found_space(|s| s.next_space(false)),
         (Command::ShowOverlay, _) => show_overlay(true),
         (Command::HideOverlay, _) => show_overlay(false),
+        (Command::EditUrl, _) => edit_url(),
+        (Command::SearchOverlay(text), _) => search_overlay(&text),
+        (Command::OverlayHeight(height), _) => {
+            place_overlay(i32::try_from(height).unwrap_or(OVERLAY_ROW));
+        }
+        (Command::Navigate(url), _) => navigate(&url),
         (Command::ToggleSidebar, _) => {
             let has_tab = STATE.with_borrow(|state| state.sidebar.displayed().selected.is_some());
             set_sidebar(toggled(SIDEBAR_MODE.get(), has_tab));

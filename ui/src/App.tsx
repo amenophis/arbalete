@@ -106,7 +106,15 @@ export function App() {
       </div>
       {/* Kept empty without a selected tab, so the sections below do not move. */}
       <div className="url" title={active?.url}>
-        <span className="title">{active && domain(active.url)}</span>
+        {/* A click edits the address in the Command Bar, as ⌘L does. */}
+        <button
+          type="button"
+          className="title url-edit"
+          aria-label="Edit address"
+          onClick={() => send("overlay/edit")}
+        >
+          {active && domain(active.url)}
+        </button>
         {active && <CopyLink />}
         {active && page?.loading && (
           <progress className="progress" aria-label="Loading" value={page.progress} />

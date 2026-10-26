@@ -133,6 +133,13 @@ test("shows the active tab and the loading progress", () => {
   expect(screen.getByRole("button", { name: "Example" }).getAttribute("aria-current")).toBe("page");
 });
 
+test("a click on the url bar edits the address in the Command Bar", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "Edit address" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/overlay/edit", { method: "POST" });
+});
+
 test("shows a page's domain in the url bar", () => {
   expect(domain("https://www.wikipedia.org/wiki/Arrow")).toBe("wikipedia.org");
   expect(domain("http://docs.example.com:8080/guide?q=1")).toBe("docs.example.com");
