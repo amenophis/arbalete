@@ -2105,6 +2105,58 @@ wrap_client! {
         fn find_handler(&self) -> Option<FindHandler> {
             Some(ContentFindHandler::new())
         }
+
+        fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+            Some(ContentMenuHandler::new())
+        }
+    }
+}
+
+/// The items Arbalete adds to a page's menu, numbered from the first id CEF leaves to apps.
+const OPEN_LINK: i32 = 26500;
+const COPY_LINK: i32 = OPEN_LINK + 1;
+const OPEN_IMAGE: i32 = OPEN_LINK + 2;
+const COPY_IMAGE: i32 = OPEN_LINK + 3;
+
+// Adds what a browser offers on a link or an image above Chromium's own items.
+wrap_context_menu_handler! {
+    struct ContentMenuHandler {}
+
+    impl ContextMenuHandler {
+        fn on_before_context_menu(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, model: Option<&mut MenuModel>) {
+            let (Some(params), Some(model)) = (params, model) else { return };
+            let mut items = Vec::new();
+            if !CefString::from(&params.link_url()).to_string().is_empty() {
+                items.extend([(OPEN_LINK, "Open Link in New Tab"), (COPY_LINK, "Copy Link Address")]);
+            }
+            if params.media_type() == ContextMenuMediaType::IMAGE {
+                items.extend([(OPEN_IMAGE, "Open Image in New Tab"), (COPY_IMAGE, "Copy Image Address")]);
+            }
+            if items.is_empty() {
+                return;
+            }
+            if model.count() > 0 {
+                model.insert_separator_at(0);
+            }
+            for (id, label) in items.into_iter().rev() {
+                model.insert_item_at(0, id, Some(&CefString::from(label)));
+            }
+        }
+
+        fn on_context_menu_command(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, command_id: i32, _event_flags: EventFlags) -> i32 {
+            let Some(params) = params else { return 0 };
+            let link = CefString::from(&params.link_url()).to_string();
+            let image = CefString::from(&params.source_url()).to_string();
+            let action = match command_id {
+                OPEN_LINK => Action::Run(Command::Open(link)),
+                COPY_LINK => Action::CopyLink(link),
+                OPEN_IMAGE => Action::Run(Command::Open(image)),
+                COPY_IMAGE => Action::CopyLink(image),
+                _ => return 0,
+            };
+            perform(action);
+            1
+        }
     }
 }
 
