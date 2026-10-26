@@ -131,8 +131,12 @@ thread_local! {
     /// The first launch shows the import assistant with the window, instead of the start page.
     static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
+    /// The sidebar sent the window's colors, which show the card.
+    static COLORED: Cell<bool> = const { Cell::new(false) };
     /// The docked sidebar shows the library, wider (LIBRARY_WIDTH).
     static LIBRARY: Cell<bool> = const { Cell::new(false) };
+    /// The library shows the Spaces, filling the window while it is shown, the card hidden.
+    static WIDE_LIBRARY: Cell<bool> = const { Cell::new(false) };
     /// Under way while the sidebar moves to its mode.
     static SLIDE: RefCell<Option<Slide>> = const { RefCell::new(None) };
     /// The sidebar's draggable regions, which move the window while the sidebar is shown, with
@@ -213,13 +217,22 @@ impl SidebarMode {
     }
 }
 
-/// The docked sidebar's width: wider for the library.
+/// The docked sidebar's width: wider for the library, the window's for its Spaces.
 fn docked_width() -> i32 {
-    if LIBRARY.get() {
+    if fills_window() {
+        WINDOW
+            .with_borrow(|window| window.as_ref().map(|window| window.size().width))
+            .unwrap_or(LIBRARY_WIDTH)
+    } else if LIBRARY.get() {
         LIBRARY_WIDTH
     } else {
         SIDEBAR_WIDTH
     }
+}
+
+/// The docked library shows the Spaces, over the whole window: the card is hidden.
+fn fills_window() -> bool {
+    LIBRARY.get() && WIDE_LIBRARY.get() && SIDEBAR_MODE.get() == SidebarMode::Shown
 }
 
 /// Where the card and the revealed sidebar stand.
@@ -718,7 +731,11 @@ fn update_drag_regions() {
     };
     let mode = SIDEBAR_MODE.get();
     let size = window.size();
-    let mut regions = margin_regions(&size, &mode.layout(&size).card, mode.margins_start());
+    let mut regions = if fills_window() {
+        Vec::new()
+    } else {
+        margin_regions(&size, &mode.layout(&size).card, mode.margins_start())
+    };
     if mode == SidebarMode::Shown {
         regions.extend(DRAG_REGIONS.with_borrow(Clone::clone));
     }
@@ -756,7 +773,15 @@ fn place_card() {
     };
     let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
     let Some(size) = size else { return };
+    if fills_window() {
+        card.set_visible(0);
+        return;
+    }
     card.set_bounds(Some(&SIDEBAR_MODE.get().layout(&size).card));
+    // Once the sidebar sent the window's colors, which first show it.
+    if COLORED.get() {
+        card.set_visible(1);
+    }
 }
 
 /// Moves the card `offset` points right of where it rests beside the docked sidebar, which pages
@@ -787,11 +812,22 @@ fn show_library() {
     }
 }
 
+/// Fills the window with the library while it shows the Spaces, or rests it beside the card.
+fn widen_library(wide: bool) {
+    if WIDE_LIBRARY.replace(wide) != wide && LIBRARY.get() {
+        relayout_library();
+    }
+}
+
 /// Gives the docked sidebar the library's width, or its own, and places the card beside it.
 fn widen_for_library(library: bool) {
-    if LIBRARY.replace(library) == library {
-        return;
+    if LIBRARY.replace(library) != library {
+        relayout_library();
     }
+}
+
+/// Sizes the docked sidebar and places the card after the library's width changed.
+fn relayout_library() {
     if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
         sidebar.invalidate_layout();
     }
@@ -1584,8 +1620,9 @@ fn set_window_colors(window_color: u32, card_color: u32) {
     if let Some(panel) = card_panel() {
         panel.set_background_color(card_color);
     }
+    COLORED.set(true);
     if let Some(card) = CARD.with_borrow(Clone::clone) {
-        card.set_visible(1);
+        card.set_visible((!fills_window()).into());
     }
 }
 
@@ -1739,6 +1776,7 @@ pub fn run(command: Command) {
         (Command::RevealSidebar | Command::ConcealSidebar, _) => {}
         (Command::CardOffset(offset), _) => shift_card(offset),
         (Command::ShowLibrary, _) => show_library(),
+        (Command::WideLibrary(wide), _) => widen_library(wide),
         (Command::Open(url), _) => {
             show_overlay(false);
             open_tab(&url);

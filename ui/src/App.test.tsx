@@ -894,9 +894,8 @@ test("asks the app to paint the window with the displayed Space's color, blendin
     receive({});
     const blue = { color: COLORS.blue, strength: 1 };
     const green = { color: COLORS.green, strength: 1 };
-    expect(fetch).toHaveBeenLastCalledWith(
+    expect(commands()).toContain(
       `/command/${windowColors(blue, COLORS.blue, "#1b0e1f", "#1e1a28")}`,
-      { method: "POST" },
     );
     receive({}, 3, favorites, 14);
     // The window's color blends on the way, an empty Space's card keeps the displayed Space's.

@@ -55,11 +55,15 @@ test("a rail of sections opens on the Spaces, and the one picked shows under its
     "Downloads",
   ]);
   expect(section("Spaces").getAttribute("aria-selected")).toBe("true");
-  expect(search().getAttribute("placeholder")).toBe("Search Spaces…");
+  // The Spaces, which fit at a glance, have no search field.
+  expect(screen.queryByRole("searchbox")).toBeNull();
   expect(
     screen.getAllByRole("listitem").filter((item) => item.matches(".space-card")),
   ).toHaveLength(2);
+  // The Spaces fill the window; the other sections rest beside the page.
+  expect(fetch).toHaveBeenLastCalledWith("/command/library/wide", { method: "POST" });
   fireEvent.click(section("Recently Closed"));
+  expect(fetch).toHaveBeenLastCalledWith("/command/library/narrow", { method: "POST" });
   expect(section("Recently Closed").getAttribute("aria-selected")).toBe("true");
   expect(section("Spaces").getAttribute("aria-selected")).toBe("false");
   expect(search().getAttribute("placeholder")).toBe("Search Recently Closed…");
@@ -128,17 +132,8 @@ test("searching the closed tabs keeps those whose title or url holds the text, w
   fireEvent.change(search(), { target: { value: "nothing" } });
   expect(screen.getByText("No closed tab matches")).toBeDefined();
   // Another section starts with an empty field.
-  fireEvent.click(section("Spaces"));
+  fireEvent.click(section("History"));
   expect((search() as HTMLInputElement).value).toBe("");
-});
-
-test("searching the Spaces keeps those whose name or a pinned tab's title holds the text", () => {
-  renderLibrary();
-  const cards = () => [...document.querySelectorAll(".space-card-name")].map((c) => c.textContent);
-  fireEvent.change(search(), { target: { value: "home" } });
-  expect(cards()).toEqual(["Home"]);
-  fireEvent.change(search(), { target: { value: "mail" } });
-  expect(cards()).toEqual(["Work"]);
 });
 
 test("the rail's arrow goes back to the Space", () => {

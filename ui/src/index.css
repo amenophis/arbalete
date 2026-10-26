@@ -196,11 +196,6 @@ body {
   flex: 1;
 }
 
-.page-buttons {
-  display: flex;
-  gap: 2px;
-}
-
 .toolbar button {
   display: grid;
   place-items: center;
@@ -1492,23 +1487,16 @@ button.folder:hover {
   opacity: 0.75;
 }
 
-/* While the pages head for the library, the url bar, the downloads and the Spaces' footer fold
-   away, so that it takes the sidebar's whole height (Pager.render in pager.ts), and the page's
-   navigation buttons fade out. */
-.sidebar > :is(.url, .downloads, .switcher),
-.page-buttons {
+/* While the pages head for the library, the toolbar, the url bar, the downloads and the Spaces'
+   footer fold away, so that it takes the sidebar's whole height (Pager.render in pager.ts). */
+.sidebar > :is(.toolbar, .url, .downloads, .switcher) {
   interpolate-size: allow-keywords;
   transition-property: height, margin, padding, opacity, visibility;
   transition-duration: 0.2s;
   transition-behavior: allow-discrete;
 }
 
-.sidebar[data-library] .page-buttons {
-  opacity: 0;
-  visibility: hidden;
-}
-
-.sidebar[data-library] > :is(.url, .downloads, .switcher) {
+.sidebar[data-library] > :is(.toolbar, .url, .downloads, .switcher) {
   overflow: hidden;
   height: 0;
   margin: 0;
@@ -1519,17 +1507,24 @@ button.folder:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar > :is(.url, .downloads, .switcher),
-  .page-buttons {
+  .sidebar > :is(.toolbar, .url, .downloads, .switcher) {
     transition: none;
   }
 }
 
-/* The library: a rail of sections at the left, the picked one's content at the right. */
+/* The library: a rail of sections at the left, under the window buttons, a line apart from the
+   picked one's content at the right. Both take the whole height, the space beside the window
+   buttons moving the window. */
 .library {
   flex-direction: row;
-  gap: 4px;
+  gap: 12px;
+  padding-top: 0;
   padding-bottom: 4px;
+  -webkit-app-region: drag;
+}
+
+.library :is(button, input, li, .space-cards, .downloads-list, .history-list, .closed-tabs) {
+  -webkit-app-region: no-drag;
 }
 
 .library-rail {
@@ -1538,6 +1533,8 @@ button.folder:hover {
   flex-direction: column;
   justify-content: space-between;
   width: 112px;
+  padding: 40px 6px 0 0;
+  border-right: 1px solid var(--hover);
 }
 
 .library-rail [role="tablist"] {
@@ -1598,12 +1595,18 @@ button.folder:hover {
   opacity: 1;
 }
 
+/* The search field sits beside the window buttons; the Spaces, without one, below them. */
 .library-panel {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+  padding-top: 4px;
+}
+
+.library-panel[data-section="spaces"] {
+  padding-top: 40px;
 }
 
 .library-search {

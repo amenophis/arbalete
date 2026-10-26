@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { send, useAppEvent } from "./bridge";
 import { Icon } from "./Icon";
-import { matches } from "./ManageSpaces";
+import { matches } from "./search";
 import { byDay, host } from "./time";
 
 export type Download = {

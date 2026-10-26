@@ -65,6 +65,9 @@ pub enum Command {
     /// Widens the sidebar for the library, the card resting beside it: `library/show`. Any card
     /// offset gives the sidebar its own width back.
     ShowLibrary,
+    /// The library fills the window, its Spaces shown, `library/wide`, or rests beside the card,
+    /// `library/narrow`.
+    WideLibrary(bool),
     /// Opens a tab: `open/<percent-encoded url>`.
     Open(String),
     /// Closes a tab, `close/<tab id>`, or the selected one, `close`.
@@ -255,6 +258,8 @@ impl Command {
             "sidebar/reveal" => Some(Self::RevealSidebar),
             "sidebar/conceal" => Some(Self::ConcealSidebar),
             "library/show" => Some(Self::ShowLibrary),
+            "library/wide" => Some(Self::WideLibrary(true)),
+            "library/narrow" => Some(Self::WideLibrary(false)),
             "close" => Some(Self::Close(None)),
             "reopen" => Some(Self::Reopen(0)),
             "pin" => Some(Self::Pin(None)),
@@ -583,6 +588,14 @@ mod tests {
     #[test]
     fn parses_library_commands() {
         assert_eq!(Command::parse("library/show"), Some(Command::ShowLibrary));
+        assert_eq!(
+            Command::parse("library/wide"),
+            Some(Command::WideLibrary(true))
+        );
+        assert_eq!(
+            Command::parse("library/narrow"),
+            Some(Command::WideLibrary(false))
+        );
         assert_eq!(
             Command::parse("card/offset/180"),
             Some(Command::CardOffset(180))

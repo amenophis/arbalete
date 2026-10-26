@@ -6,13 +6,6 @@ import { ROW_SLIDE, rowRects, slideFrom } from "./motion";
 import { NameField } from "./Profiles";
 import { SpaceEditor } from "./Spaces";
 
-// Whether any of `texts` holds what is typed in a library section's search field, whatever the
-// case.
-export function matches(query: string, ...texts: string[]): boolean {
-  const wanted = query.trim().toLowerCase();
-  return texts.some((text) => text.toLowerCase().includes(wanted));
-}
-
 // How long a click on a Space's name waits for a second one, which renames it instead.
 export const RENAME_CLICK_MS = 250;
 
@@ -28,19 +21,17 @@ export function spaceMoveCommand(order: number[], id: number, drop: CardDrop): s
   return index === from ? null : `space/move/${id}/${index}`;
 }
 
-// One card per Space, side by side in sidebar order, those matching `query`. A card shows its
+// One card per Space, side by side in sidebar order. A card shows its
 // Space's color, name, profile and pinned tabs; clicking it shows the Space, dragging it by its
 // handle moves it among the others. The "+" after them creates a Space.
 export function ManageSpaces({
   spaces,
   profiles,
-  query,
   onShow,
   onNewSpace,
 }: {
   spaces: Space[];
   profiles: Profile[];
-  query: string;
   onShow: (index: number) => void;
   onNewSpace: () => void;
 }) {
@@ -54,9 +45,6 @@ export function ManageSpaces({
     for (const card of list.current.querySelectorAll(".dragged")) card.classList.remove("dragged");
     slideFrom(drop.before, list.current, ROW_SLIDE);
   }, [spaces]);
-  const shown = spaces.filter((space) =>
-    matches(query, space.title, ...space.pinned.map((item) => item.title)),
-  );
   const order = spaces.map((space) => space.id);
   const onDrag = (event: PointerEvent, id: number) => {
     if (event.button !== 0 || !list.current) return;
@@ -70,7 +58,7 @@ export function ManageSpaces({
   };
   return (
     <ul className="space-cards" ref={list} onWheel={scrollSideways}>
-      {shown.map((space) => (
+      {spaces.map((space) => (
         <SpaceCard
           key={space.id}
           space={space}
