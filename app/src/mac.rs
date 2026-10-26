@@ -1,6 +1,6 @@
 //! The NSApplication subclass CEF requires on macOS, and the menus.
 
-use crate::command::Command;
+use crate::command::{Command, Zoom};
 use crate::menu::{Action, Entry};
 use crate::swipe::{Phase, Scroll};
 use block2::RcBlock;
@@ -175,6 +175,36 @@ define_class!(
         fn reload(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Reload);
         }
+
+        #[unsafe(method(arbaleteForceReload:))]
+        fn force_reload(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ForceReload);
+        }
+
+        #[unsafe(method(arbaleteStop:))]
+        fn stop(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Stop);
+        }
+
+        #[unsafe(method(arbaleteZoomIn:))]
+        fn zoom_in(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Zoom(Zoom::In));
+        }
+
+        #[unsafe(method(arbaleteZoomOut:))]
+        fn zoom_out(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Zoom(Zoom::Out));
+        }
+
+        #[unsafe(method(arbaleteActualSize:))]
+        fn actual_size(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Zoom(Zoom::Reset));
+        }
+
+        #[unsafe(method(arbaletePrint:))]
+        fn print(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Print);
+        }
     }
 
     unsafe impl CrAppControlProtocol for ArbaleteApplication {
@@ -337,19 +367,60 @@ pub fn setup_menu() {
                     sel!(arbaleteImport:),
                     ns_string!(""),
                 ),
+                NSMenuItem::separatorItem(mtm),
+                item(
+                    mtm,
+                    ns_string!("Print…"),
+                    sel!(arbaletePrint:),
+                    ns_string!("p"),
+                ),
             ],
         ),
+        (ns_string!("Edit"), edit_menu(mtm)),
         (ns_string!("Tabs"), tabs_menu(mtm)),
         (ns_string!("Spaces"), spaces_menu(mtm)),
         (
             ns_string!("View"),
             vec![
                 sidebar_item(mtm),
+                NSMenuItem::separatorItem(mtm),
+                item(
+                    mtm,
+                    ns_string!("Stop Loading"),
+                    sel!(arbaleteStop:),
+                    ns_string!("."),
+                ),
                 item(
                     mtm,
                     ns_string!("Reload Page"),
                     sel!(arbaleteReload:),
                     ns_string!("r"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Force Reload Page"),
+                    sel!(arbaleteForceReload:),
+                    ns_string!("R"),
+                ),
+                NSMenuItem::separatorItem(mtm),
+                item(
+                    mtm,
+                    ns_string!("Actual Size"),
+                    sel!(arbaleteActualSize:),
+                    ns_string!("0"),
+                ),
+                // "=" rather than "+", which needs ⇧ on most keyboards.
+                item(
+                    mtm,
+                    ns_string!("Zoom In"),
+                    sel!(arbaleteZoomIn:),
+                    ns_string!("="),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Zoom Out"),
+                    sel!(arbaleteZoomOut:),
+                    ns_string!("-"),
                 ),
             ],
         ),
@@ -370,6 +441,7 @@ pub fn setup_menu() {
                 ),
             ],
         ),
+        (ns_string!("Window"), window_menu(mtm)),
     ] {
         let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), title);
         for item in items {
@@ -378,8 +450,61 @@ pub fn setup_menu() {
         let menu_item = NSMenuItem::new(mtm);
         menu_item.setSubmenu(Some(&menu));
         menu_bar.addItem(&menu_item);
+        // AppKit lists the open windows in it.
+        if title == ns_string!("Window") {
+            NSApp(mtm).setWindowsMenu(Some(&menu));
+        }
     }
     NSApp(mtm).setMainMenu(Some(&menu_bar));
+}
+
+/// Standard editing actions: they reach the focused web view, page or UI, through the responder
+/// chain, which Chromium answers.
+fn edit_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
+    let paste_and_match_style = item(
+        mtm,
+        ns_string!("Paste and Match Style"),
+        sel!(pasteAndMatchStyle:),
+        ns_string!("V"),
+    );
+    paste_and_match_style.setKeyEquivalentModifierMask(
+        NSEventModifierFlags::Command | NSEventModifierFlags::Option | NSEventModifierFlags::Shift,
+    );
+    vec![
+        item(mtm, ns_string!("Undo"), sel!(undo:), ns_string!("z")),
+        item(mtm, ns_string!("Redo"), sel!(redo:), ns_string!("Z")),
+        NSMenuItem::separatorItem(mtm),
+        item(mtm, ns_string!("Cut"), sel!(cut:), ns_string!("x")),
+        item(mtm, ns_string!("Copy"), sel!(copy:), ns_string!("c")),
+        item(mtm, ns_string!("Paste"), sel!(paste:), ns_string!("v")),
+        paste_and_match_style,
+        item(mtm, ns_string!("Delete"), sel!(delete:), ns_string!("")),
+        item(
+            mtm,
+            ns_string!("Select All"),
+            sel!(selectAll:),
+            ns_string!("a"),
+        ),
+    ]
+}
+
+fn window_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
+    vec![
+        item(
+            mtm,
+            ns_string!("Minimize"),
+            sel!(performMiniaturize:),
+            ns_string!("m"),
+        ),
+        item(mtm, ns_string!("Zoom"), sel!(performZoom:), ns_string!("")),
+        NSMenuItem::separatorItem(mtm),
+        item(
+            mtm,
+            ns_string!("Bring All to Front"),
+            sel!(arrangeInFront:),
+            ns_string!(""),
+        ),
+    ]
 }
 
 fn sidebar_item(mtm: MainThreadMarker) -> Retained<NSMenuItem> {
