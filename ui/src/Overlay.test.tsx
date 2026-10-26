@@ -16,9 +16,9 @@ const commands = () => fetch.mock.calls.map(([url]) => url as string);
 const rows = () => screen.queryAllByRole("button").map((row) => row.textContent);
 const picked = () => document.querySelector("[aria-current]")?.textContent;
 
-function show(url: string | null = null) {
+function show(url: string | null = null, favicon: string | null = null) {
   act(() => {
-    dispatchEvent(new CustomEvent("arbalete:show", { detail: { url } }));
+    dispatchEvent(new CustomEvent("arbalete:show", { detail: { url, favicon } }));
   });
 }
 
@@ -129,17 +129,22 @@ test("answers to an older search are ignored", () => {
 
 test("⌘L edits the selected tab's address, loaded in that tab", () => {
   render(<Overlay />);
-  show("https://example.com/page");
+  show("https://example.com/page", "https://ui.test/example.png");
   expect((field() as HTMLInputElement).value).toBe("https://example.com/page");
+  // The field shows the page's icon.
+  expect(document.querySelector(".overlay-search img")?.getAttribute("src")).toBe(
+    "https://ui.test/example.png",
+  );
   fireEvent.change(field(), { target: { value: "https://example.com/other" } });
   fireEvent.submit(field());
   expect(fetch).toHaveBeenLastCalledWith(
     `/command/navigate/${encodeURIComponent("https://example.com/other")}`,
     { method: "POST" },
   );
-  // Shown again for a new tab, it is empty and opens one.
+  // Shown again for a new tab, it is empty, with the search icon, and opens one.
   show();
   expect((field() as HTMLInputElement).value).toBe("");
+  expect(document.querySelector(".overlay-search img")).toBeNull();
   expect(rows()).toEqual([]);
 });
 
