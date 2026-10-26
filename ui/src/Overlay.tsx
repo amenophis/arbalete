@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { send, useAppEvent } from "./bridge";
 import { Icon } from "./Icon";
 
@@ -25,19 +25,24 @@ const SEARCH_URL = "https://www.google.com/search?q=";
 // The Command Bar, shown above the page by the app (open_overlay in app/src/shell.rs): empty, it
 // opens a tab; holding the selected tab's address (⌘L), it loads another in that tab. Below what
 // is typed, the address it opens or a search, then the open tabs and the history pages matching
-// it; the arrows pick one, Enter or a click opens it, Escape closes the bar.
+// it; the arrows pick one, Enter or a click opens it, Escape closes the bar. Typing forward
+// completes the field with the best result's address, selected: typing on replaces it, deleting
+// drops it, → or End keeps it.
 export function Overlay() {
   const input = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [editing, setEditing] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
   const [picked, setPicked] = useState(0);
+  const [completing, setCompleting] = useState(false);
+  const deleting = useRef(false);
   useAppEvent<{ url: string | null } | null>("arbalete:show", (detail) => {
     const url = detail?.url ?? null;
     setText(url ?? "");
     setEditing(url !== null);
     setResults(null);
     setPicked(0);
+    setCompleting(false);
     requestAnimationFrame(() => {
       input.current?.focus();
       input.current?.select();
@@ -47,7 +52,12 @@ export function Overlay() {
   useAppEvent<Results>("arbalete:results", (detail) => {
     if (detail.text === text) setResults(detail);
   });
-  const rows = resultRows(text, results);
+  const completion = completing ? complete(text, results) : null;
+  const value = text + (completion?.suffix ?? "");
+  useLayoutEffect(() => {
+    if (value !== text) input.current?.setSelectionRange(text.length, value.length);
+  }, [text, value]);
+  const rows = resultRows(text, results, completion);
   useEffect(() => {
     const height = rows.length
       ? SEARCH_ROW + rows.length * RESULT_ROW + 2 * RESULTS_PADDING
@@ -62,10 +72,11 @@ export function Overlay() {
       send(`${editing ? "navigate" : "open"}/${encodeURIComponent(row.url)}`);
     }
   };
-  const type = (value: string) => {
-    setText(value);
+  const type = (typed: string) => {
+    setCompleting(!deleting.current && typed.length > text.length);
+    setText(typed);
     setPicked(0);
-    send(`overlay/search/${encodeURIComponent(value)}`);
+    send(`overlay/search/${encodeURIComponent(typed)}`);
   };
   return (
     <form
@@ -82,11 +93,16 @@ export function Overlay() {
           ref={input}
           aria-label="Search or enter URL"
           placeholder="Search or Enter URL…"
-          value={text}
+          value={value}
           spellCheck={false}
           onChange={(event) => type(event.currentTarget.value)}
           onKeyDown={(event) => {
+            deleting.current = event.key === "Backspace" || event.key === "Delete";
             if (event.key === "Escape") send("overlay/hide");
+            if (completion && (event.key === "ArrowRight" || event.key === "End")) {
+              setText(value);
+              setCompleting(false);
+            }
             const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
             if (step && rows.length) {
               event.preventDefault();
@@ -133,19 +149,26 @@ function RowIcon({ row }: { row: Row }) {
   );
 }
 
-// What is typed, opened as an address or searched, then the matching open tabs and history pages.
-export function resultRows(text: string, results: Results | null): Row[] {
+// What is typed, opened as an address, completed or not, or searched, then the matching open tabs
+// and history pages.
+export function resultRows(
+  text: string,
+  results: Results | null,
+  completion: Completion | null = null,
+): Row[] {
   const typed = text.trim();
   if (!typed) return [];
   const url = toUrl(typed);
-  const go: Row = url
-    ? { kind: "go", url, title: typed, search: false }
-    : {
-        kind: "go",
-        url: SEARCH_URL + encodeURIComponent(typed),
-        title: `${typed} — Search Google`,
-        search: true,
-      };
+  const go: Row = completion
+    ? { kind: "go", url: completion.url, title: typed + completion.suffix, search: false }
+    : url
+      ? { kind: "go", url, title: typed, search: false }
+      : {
+          kind: "go",
+          url: SEARCH_URL + encodeURIComponent(typed),
+          title: `${typed} — Search Google`,
+          search: true,
+        };
   return [
     go,
     ...(results?.tabs ?? []).map(
@@ -155,6 +178,26 @@ export function resultRows(text: string, results: Results | null): Row[] {
       (page): Row => ({ kind: "page", ...page, title: page.title || page.url }),
     ),
   ];
+}
+
+type Completion = { suffix: string; url: string };
+
+// What completes typed text: the address of the first result, history pages then open tabs,
+// that starts with it, without scheme nor "www.": up to the end of its host, or all of it once a
+// "/" is typed. It opens that site's home, or that page.
+export function complete(text: string, results: Results | null): Completion | null {
+  const typed = text.toLowerCase();
+  if (!typed || /\s/.test(typed) || !results) return null;
+  for (const { url } of [...results.pages, ...results.tabs]) {
+    const address = url.replace(/^[a-z][a-z\d+.-]*:\/\//i, "").replace(/^www\./i, "");
+    if (!address.toLowerCase().startsWith(typed)) continue;
+    const page = typed.includes("/");
+    const whole = page ? address.replace(/\/$/, "") : address.split("/")[0];
+    if (whole.length > typed.length) {
+      return { suffix: whole.slice(typed.length), url: page ? url : `${new URL(url).origin}/` };
+    }
+  }
+  return null;
 }
 
 // The address typed text stands for, or null when it is a search: a URL with a scheme stays as it

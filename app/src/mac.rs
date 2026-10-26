@@ -797,9 +797,15 @@ pub fn round_card(view: *mut c_void) {
     round(view, CARD_RADIUS);
 }
 
-/// Rounds the corners of the Command Bar's window and outlines it, like the card's.
+/// Rounds the corners of the Command Bar's window and outlines it, like the card's, above the
+/// page with the system's shadow, which follows the rounded corners once they are drawn.
 pub fn round_command_bar(view: *mut c_void) {
     round(view, COMMAND_BAR_RADIUS);
+    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
+    if let Some(window) = unsafe { view.cast::<NSView>().as_ref() }.and_then(NSView::window) {
+        window.setHasShadow(true);
+        window.invalidateShadow();
+    }
 }
 
 fn round(view: *mut c_void, radius: f64) {
