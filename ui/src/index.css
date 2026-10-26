@@ -196,6 +196,11 @@ body {
   flex: 1;
 }
 
+.page-buttons {
+  display: flex;
+  gap: 2px;
+}
+
 .toolbar button {
   display: grid;
   place-items: center;
@@ -1488,12 +1493,19 @@ button.folder:hover {
 }
 
 /* While the pages head for the library, the url bar, the downloads and the Spaces' footer fold
-   away, so that it takes the sidebar's whole height (Pager.render in pager.ts). */
-.sidebar > :is(.url, .downloads, .switcher) {
+   away, so that it takes the sidebar's whole height (Pager.render in pager.ts), and the page's
+   navigation buttons fade out. */
+.sidebar > :is(.url, .downloads, .switcher),
+.page-buttons {
   interpolate-size: allow-keywords;
   transition-property: height, margin, padding, opacity, visibility;
   transition-duration: 0.2s;
   transition-behavior: allow-discrete;
+}
+
+.sidebar[data-library] .page-buttons {
+  opacity: 0;
+  visibility: hidden;
 }
 
 .sidebar[data-library] > :is(.url, .downloads, .switcher) {
@@ -1507,7 +1519,8 @@ button.folder:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar > :is(.url, .downloads, .switcher) {
+  .sidebar > :is(.url, .downloads, .switcher),
+  .page-buttons {
     transition: none;
   }
 }
