@@ -201,6 +201,21 @@ define_class!(
             crate::shell::run(Command::Zoom(Zoom::Reset));
         }
 
+        #[unsafe(method(arbaleteFind:))]
+        fn find(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowFind);
+        }
+
+        #[unsafe(method(arbaleteFindNext:))]
+        fn find_next(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Find { text: None, forward: true });
+        }
+
+        #[unsafe(method(arbaleteFindPrevious:))]
+        fn find_previous(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::Find { text: None, forward: false });
+        }
+
         #[unsafe(method(arbaletePrint:))]
         fn print(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Print);
@@ -484,6 +499,25 @@ fn edit_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
             ns_string!("Select All"),
             sel!(selectAll:),
             ns_string!("a"),
+        ),
+        NSMenuItem::separatorItem(mtm),
+        item(
+            mtm,
+            ns_string!("Find…"),
+            sel!(arbaleteFind:),
+            ns_string!("f"),
+        ),
+        item(
+            mtm,
+            ns_string!("Find Next"),
+            sel!(arbaleteFindNext:),
+            ns_string!("g"),
+        ),
+        item(
+            mtm,
+            ns_string!("Find Previous"),
+            sel!(arbaleteFindPrevious:),
+            ns_string!("G"),
         ),
     ]
 }

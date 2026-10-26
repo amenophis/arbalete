@@ -67,6 +67,13 @@ const OVERLAY_SIZE: Size = Size {
     height: 56,
 };
 
+/// The find bar's size, and its margin from the card's top right corner (ui/src/Find.tsx).
+const FIND_SIZE: Size = Size {
+    width: 380,
+    height: 44,
+};
+const FIND_MARGIN: i32 = 10;
+
 /// The import assistant's size, at most (ui/src/Import.tsx).
 const IMPORT_SIZE: Size = Size {
     width: 560,
@@ -107,6 +114,11 @@ thread_local! {
     /// sessions never import.
     static IMPORT_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// The find bar, at the card's top right corner; created the first time it is shown.
+    static FIND_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// The text last searched for, which ⌘G searches again.
+    static FIND_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
     /// The browsers the import assistant lists, which its choices refer to by index.
     static SOURCES: RefCell<Vec<browsers::Browser>> = const { RefCell::new(Vec::new()) };
     /// An import is reading the browsers' data, on a thread of its own.
@@ -813,6 +825,97 @@ fn show_import() {
     // A page still loading asks for them once it listens (Command::ImportReady).
     send_sources();
     if let Some(view) = controller.contents_view() {
+        view.request_focus();
+    }
+}
+
+/// Shows the find bar, with the text last searched for selected.
+fn show_find() {
+    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+        return;
+    };
+    if FIND.with_borrow(Option::is_none) {
+        let url = format!("{UI_ORIGIN}index.html#find");
+        let view = browser_view(UiClient::new(), &url, no_width, None);
+        let controller = window
+            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
+            .expect("find");
+        FIND_VIEW.set(Some(view));
+        FIND.set(Some(controller));
+    }
+    place_find();
+    let Some(controller) = FIND.with_borrow(Clone::clone) else {
+        return;
+    };
+    controller.set_visible(1);
+    let text = FIND_TEXT.with_borrow(|text| serde_json::to_string(text).expect("a string"));
+    dispatch(
+        &FIND_VIEW,
+        &format!(r#"new CustomEvent("arbalete:show", {{ detail: {text} }})"#),
+    );
+    if let Some(view) = controller.contents_view() {
+        view.request_focus();
+    }
+}
+
+/// Keeps the find bar at the card's top right corner.
+fn place_find() {
+    let Some(controller) = FIND.with_borrow(Clone::clone) else {
+        return;
+    };
+    let Some(size) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
+        return;
+    };
+    let card = SIDEBAR_MODE.get().layout(&size).card;
+    let width = FIND_SIZE.width.min(card.width - 2 * FIND_MARGIN);
+    controller.set_bounds(Some(&Rect {
+        x: card.x + card.width - width - FIND_MARGIN,
+        y: card.y + FIND_MARGIN,
+        width,
+        height: FIND_SIZE.height,
+    }));
+}
+
+/// Finds text in the shown page; the same text again goes to the next match. `None` searches the
+/// last text again, or shows the find bar when there is none.
+fn find(browser: &Browser, text: Option<String>, forward: bool) {
+    let text = text.unwrap_or_else(|| FIND_TEXT.with_borrow(Clone::clone));
+    if text.is_empty() {
+        if let Some(host) = browser.host() {
+            host.stop_finding(1);
+        }
+        FIND_TEXT.with_borrow_mut(String::clear);
+        return show_find_if_hidden();
+    }
+    let next = FIND_TEXT.replace(text.clone()) == text;
+    if let Some(host) = browser.host() {
+        host.find(
+            Some(&CefString::from(text.as_str())),
+            forward.into(),
+            0,
+            next.into(),
+        );
+    }
+}
+
+/// From ⌘G with nothing to search again.
+fn show_find_if_hidden() {
+    let hidden = FIND.with_borrow(|find| find.as_ref().is_none_or(|find| find.is_visible() == 0));
+    if hidden {
+        show_find();
+    }
+}
+
+/// Hides the find bar and the page's highlights, keeping the active match selected and the text,
+/// which ⌘G searches again.
+fn hide_find(browser: Option<&Browser>) {
+    if let Some(controller) = FIND.with_borrow(Clone::clone) {
+        controller.set_visible(0);
+    }
+    if let Some(host) = browser.and_then(Browser::host) {
+        host.stop_finding(0);
+    }
+    if let Some(view) = content() {
         view.request_focus();
     }
 }
@@ -1628,6 +1731,9 @@ pub fn run(command: Command) {
                 });
             }
         }
+        (Command::ShowFind, _) => show_find(),
+        (Command::Find { text, forward }, Some(browser)) => find(&browser, text, forward),
+        (Command::HideFind, browser) => hide_find(browser.as_ref()),
         (Command::Print, Some(browser)) => {
             if let Some(host) = browser.host() {
                 host.print();
@@ -1729,6 +1835,7 @@ wrap_window_delegate! {
             if SLIDE.with_borrow(Option::is_none) {
                 place_card();
                 place_reveal();
+                place_find();
             }
             update_drag_regions();
         }
@@ -1790,7 +1897,7 @@ wrap_window_delegate! {
         /// Asks every browser to close; the window closes once they all can.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             CLOSING.set(true);
-            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW]
+            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW, &FIND_VIEW]
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
                 .collect();
@@ -1993,6 +2100,27 @@ wrap_client! {
 
         fn load_handler(&self) -> Option<LoadHandler> {
             Some(ContentLoadHandler::new(self.profile))
+        }
+
+        fn find_handler(&self) -> Option<FindHandler> {
+            Some(ContentFindHandler::new())
+        }
+    }
+}
+
+// Tells the find bar how many matches the shown page has, and which one is active, once the
+// search ends: the updates before it count matches without an active one.
+wrap_find_handler! {
+    struct ContentFindHandler {}
+
+    impl FindHandler {
+        fn on_find_result(&self, browser: Option<&mut Browser>, _identifier: i32, count: i32, _selection_rect: Option<&Rect>, active_match_ordinal: i32, final_update: i32) {
+            if final_update == 1 && is_shown(browser) {
+                dispatch(
+                    &FIND_VIEW,
+                    &format!(r#"new CustomEvent("arbalete:found", {{ detail: {{ count: {count}, active: {active_match_ordinal} }} }})"#),
+                );
+            }
         }
     }
 }

@@ -690,6 +690,47 @@ button.folder:hover {
   font-size: 16px;
 }
 
+.find {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100vh;
+  padding: 0 6px 0 12px;
+  color: var(--text);
+}
+
+.find input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: inherit;
+  font-size: 14px;
+}
+
+.find-count {
+  padding: 0 6px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.find button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+}
+
+.find button:hover {
+  background: var(--hover);
+}
+
 .divider-row {
   display: flex;
   align-items: center;
