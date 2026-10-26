@@ -306,7 +306,7 @@ impl UiState {
             })).collect::<Vec<_>>(),
             "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, profile, at)| json!({
                 "url": tab.url,
-                "title": tab.title,
+                "title": tab.label(),
                 "favicon": favicon_url(*profile, tab),
                 "closedAt": at.duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64),
             })).collect::<Vec<_>>(),
@@ -390,8 +390,9 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
     json!({
         "id": id,
         "url": tab.url,
-        "title": tab.title,
+        "title": tab.label(),
         "favicon": favicon_url(profile, tab),
+        "muted": tab.muted,
     })
 }
 
@@ -581,7 +582,7 @@ fn search_overlay(text: &str) {
             sidebar
                 .tabs()
                 .filter(|(_, tab)| {
-                    tab.title.to_lowercase().contains(&wanted)
+                    tab.label().to_lowercase().contains(&wanted)
                         || tab.url.to_lowercase().contains(&wanted)
                 })
                 .take(OVERLAY_TABS)
@@ -607,7 +608,7 @@ fn search_overlay(text: &str) {
         .collect();
     let tabs: Vec<_> = tabs
         .iter()
-        .map(|(id, tab)| json!({ "id": id, "url": tab.url, "title": tab.title, "favicon": tab.favicon }))
+        .map(|(id, tab)| json!({ "id": id, "url": tab.url, "title": tab.label(), "favicon": tab.favicon }))
         .collect();
     let detail = json!({ "text": text, "tabs": tabs, "pages": pages });
     dispatch(
@@ -1520,6 +1521,13 @@ pub fn perform(action: Action) {
         #[cfg(target_os = "macos")]
         Action::CopyLink(url) => crate::mac::copy(&url),
         #[cfg(target_os = "macos")]
+        Action::EditPinnedUrl { tab, url } => {
+            let detail = "This is what opens first when you click this tab.";
+            if let Some(url) = crate::mac::prompt("Edit Pinned URL", detail, &url, "Save") {
+                run(Command::SetPinnedUrl(tab, url));
+            }
+        }
+        #[cfg(target_os = "macos")]
         Action::Confirm {
             question,
             detail,
@@ -1531,7 +1539,7 @@ pub fn perform(action: Action) {
             }
         }
         #[cfg(not(target_os = "macos"))]
-        Action::CopyLink(_) | Action::Confirm { .. } => {}
+        Action::CopyLink(_) | Action::Confirm { .. } | Action::EditPinnedUrl { .. } => {}
     }
 }
 
@@ -1702,10 +1710,21 @@ fn show_selected() {
         Some(Some(view)) => {
             show_content(profile, &view);
             load(&url);
+            mute_selected();
         }
         // The view shows the selected tab once its browser is created.
         Some(None) => {}
         None => create_profile_context(profile),
+    }
+}
+
+/// Mutes the shown page as its tab says, or gives it its sound back: one content view shows every
+/// tab of a profile, in turn.
+fn mute_selected() {
+    let muted =
+        STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_some_and(|tab| tab.muted));
+    if let Some(host) = content().and_then(|view| view.browser()?.host()) {
+        host.set_audio_muted(muted.into());
     }
 }
 
@@ -1962,8 +1981,16 @@ pub fn run(command: Command) {
         (Command::ToggleFolder(id), _) => {
             let _ = update_sidebar(|sidebar| sidebar.toggle_folder(id));
         }
-        (Command::RenameFolder(id, title), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.rename_folder(id, &title));
+        (Command::Rename(id, title), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.rename(id, &title));
+        }
+        (Command::SetPinnedUrl(tab, url), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.set_saved_url(tab, &url));
+        }
+        (Command::ToggleMute(tab), _) => {
+            if update_sidebar(|sidebar| sidebar.toggle_mute(tab)).is_ok() {
+                mute_selected();
+            }
         }
         (Command::Move(id, parent, index), _) => {
             let _ = update_sidebar(|sidebar| sidebar.move_node(id, parent, index));
@@ -3151,6 +3178,8 @@ mod tests {
             favicon: Some(String::new()),
             opener: None,
             saved_url: None,
+            name: None,
+            muted: false,
         };
         let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(60);
         state.closed.push((tab, profile, at));
@@ -3202,7 +3231,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "color": "purple", "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "color": "blue", "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);

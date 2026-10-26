@@ -2,7 +2,7 @@
 //! (app/src/mac.rs) and runs the item picked (shell::perform).
 
 use crate::command::{Command, Target};
-use arbalete_core::sidebar::{MAX_FAVORITES, NodeId, NodeKind, Sidebar, Space};
+use arbalete_core::sidebar::{MAX_FAVORITES, NodeId, NodeKind, Sidebar, Space, Tab};
 use serde_json::json;
 
 pub enum Entry {
@@ -26,6 +26,11 @@ pub enum Action {
     /// Asks the sidebar to do what only it does, like editing a name: a DOM event and its detail.
     Ask(&'static str, serde_json::Value),
     CopyLink(String),
+    /// Asks for the url a pinned tab goes back to, in a dialog holding the current one.
+    EditPinnedUrl {
+        tab: NodeId,
+        url: String,
+    },
     /// Runs a command once the user confirms it, with a button named `button`.
     Confirm {
         question: String,
@@ -40,7 +45,7 @@ pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
     match target {
         Target::Node(id) => match &sidebar.node(id)?.kind {
             NodeKind::Tab(tab) if sidebar.is_favorite(id) => Some(favorite(sidebar, id, &tab.url)),
-            NodeKind::Tab(tab) => Some(tab_menu(sidebar, id, &tab.url)),
+            NodeKind::Tab(tab) => Some(tab_menu(sidebar, id, tab)),
             NodeKind::Folder { title, .. } => Some(folder(sidebar, id, title)),
             // A split's menus are its tabs', from each half of its row.
             NodeKind::Container | NodeKind::Split => None,
@@ -65,18 +70,51 @@ pub fn find(entries: Vec<Entry>, id: &str) -> Option<Action> {
     })
 }
 
-fn tab_menu(sidebar: &Sidebar, tab: NodeId, url: &str) -> Vec<Entry> {
-    let pinned = sidebar.is_pinned(tab);
+fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
+    let pinned = sidebar.is_pinned(id);
     let pin = if pinned { "Unpin Tab" } else { "Pin Tab" };
+    let mute = if tab.muted { "Unmute Tab" } else { "Mute Tab" };
     let mut menu = vec![
-        copy_link(url),
-        item("pin", pin, Action::Run(Command::Pin(Some(tab)))),
+        copy_link(&tab.url),
+        item(
+            "rename",
+            "Rename Tab",
+            Action::Ask("arbalete:rename", json!(id)),
+        ),
+        item("mute", mute, Action::Run(Command::ToggleMute(id))),
+        Entry::Separator,
+        item("pin", pin, Action::Run(Command::Pin(Some(id)))),
+    ];
+    if let Some(saved) = tab.saved_url.as_deref().filter(|_| pinned) {
+        menu.push(Entry::Submenu(
+            "Edit Pinned Page".to_string(),
+            vec![
+                Entry::Item(Item {
+                    id: "pinned-url/current".to_string(),
+                    title: "Replace Pinned URL with Current".to_string(),
+                    checked: false,
+                    enabled: saved != tab.url,
+                    action: Action::Run(Command::SetPinnedUrl(id, tab.url.clone())),
+                }),
+                item(
+                    "pinned-url/edit",
+                    "Edit…",
+                    Action::EditPinnedUrl {
+                        tab: id,
+                        url: saved.to_string(),
+                    },
+                ),
+            ],
+        ));
+    }
+    let tab = id;
+    menu.extend([
         Entry::Separator,
         duplicate(tab),
         move_to(sidebar, tab),
         Entry::Separator,
         item("close", "Close Tab", Action::Run(Command::Close(Some(tab)))),
-    ];
+    ]);
     // Pinned tabs stay: only "Today" tabs close those below them.
     if !pinned {
         menu.push(Entry::Item(Item {
@@ -324,6 +362,9 @@ mod tests {
             titles(&menu),
             [
                 "Copy Link",
+                "Rename Tab",
+                "Mute Tab",
+                "-",
                 "Pin Tab",
                 "-",
                 "Duplicate",
@@ -358,6 +399,17 @@ mod tests {
             choose(&sidebar, tab, "duplicate"),
             Some(Action::Run(Command::DuplicateRow(tab)))
         );
+        assert_eq!(
+            choose(&sidebar, tab, "rename"),
+            Some(Action::Ask("arbalete:rename", json!(tab)))
+        );
+        assert_eq!(
+            choose(&sidebar, tab, "mute"),
+            Some(Action::Run(Command::ToggleMute(tab)))
+        );
+        sidebar.toggle_mute(tab).unwrap();
+        let menu = build(&sidebar, Target::Node(tab)).unwrap();
+        assert_eq!(titles(&menu)[2], "Unmute Tab");
         assert_eq!(choose(&sidebar, tab, "unknown"), None);
     }
 
@@ -381,7 +433,28 @@ mod tests {
         let pinned = sidebar.spaces()[0].pinned;
         let tab = sidebar.add_tab(pinned, "a", "a").unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
-        assert_eq!(titles(&menu)[1], "Unpin Tab");
+        assert_eq!(titles(&menu)[4], "Unpin Tab");
+        // Its saved url is the current one: there is nothing to replace it with yet.
+        assert_eq!(
+            titles(&menu)[5..8],
+            [
+                "Edit Pinned Page ▸",
+                "  (Replace Pinned URL with Current)",
+                "  Edit…",
+            ]
+        );
+        assert_eq!(
+            choose(&sidebar, tab, "pinned-url/edit"),
+            Some(Action::EditPinnedUrl {
+                tab,
+                url: "a".into()
+            })
+        );
+        sidebar.tab_mut(tab).unwrap().url = "b".to_string();
+        assert_eq!(
+            choose(&sidebar, tab, "pinned-url/current"),
+            Some(Action::Run(Command::SetPinnedUrl(tab, "b".into())))
+        );
         // Pinned tabs stay: none closes those below it.
         assert_eq!(titles(&menu).last().unwrap(), "Close Tab");
         assert_eq!(

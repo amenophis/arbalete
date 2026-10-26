@@ -16,9 +16,10 @@ use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSColor, NSControlStateValueOn,
     NSDownArrowFunctionKey, NSEvent, NSEventMask, NSEventModifierFlags, NSEventPhase, NSEventType,
     NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
-    NSRightArrowFunctionKey, NSUpArrowFunctionKey, NSView, NSWindowButton, NSWorkspace,
+    NSRightArrowFunctionKey, NSTextField, NSUpArrowFunctionKey, NSView, NSWindowButton,
+    NSWorkspace,
 };
-use objc2_foundation::{NSArray, NSNumber, NSString, NSURL, ns_string};
+use objc2_foundation::{NSArray, NSNumber, NSSize, NSString, NSURL, ns_string};
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -767,6 +768,22 @@ pub fn confirm(question: &str, detail: &str, button: &str) -> bool {
         .setHasDestructiveAction(true);
     alert.addButtonWithTitle(ns_string!("Cancel"));
     alert.runModal() == NSAlertFirstButtonReturn
+}
+
+/// Asks for a text in a dialog, its field holding `value`, selected: what was entered, unless the
+/// dialog was cancelled.
+pub fn prompt(question: &str, detail: &str, value: &str, button: &str) -> Option<String> {
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let alert = NSAlert::new(mtm);
+    alert.setMessageText(&NSString::from_str(question));
+    alert.setInformativeText(&NSString::from_str(detail));
+    alert.addButtonWithTitle(&NSString::from_str(button));
+    alert.addButtonWithTitle(ns_string!("Cancel"));
+    let field = NSTextField::textFieldWithString(&NSString::from_str(value), mtm);
+    field.setFrameSize(NSSize::new(300.0, 24.0));
+    alert.setAccessoryView(Some(&field));
+    alert.window().setInitialFirstResponder(Some(&field));
+    (alert.runModal() == NSAlertFirstButtonReturn).then(|| field.stringValue().to_string())
 }
 
 /// Opens a file with its default app.

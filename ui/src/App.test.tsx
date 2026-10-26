@@ -15,7 +15,7 @@ afterEach(cleanup);
 
 const today: Item[] = [
   { id: 3, url: "https://example.com/", title: "Example", favicon: null },
-  { id: 4, url: "https://example.org/", title: "Other", favicon: null },
+  { id: 4, url: "https://example.org/", title: "Other", favicon: null, muted: true },
   {
     id: 20,
     split: [
@@ -447,6 +447,36 @@ test("renames the folder the app has just created", () => {
   const input = screen.getByRole("textbox", { name: "Folder name" }) as HTMLInputElement;
   expect(input.value).toBe("Archive");
   expect(document.activeElement).toBe(input);
+});
+
+test("Rename Tab edits a tab's name in place; a blank name gives back its page's title", () => {
+  render(<App />);
+  receive({});
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalete:rename", { detail: 3 }));
+  });
+  let input = screen.getByRole("textbox", { name: "Tab name" }) as HTMLInputElement;
+  expect(input.value).toBe("Example");
+  expect(document.activeElement).toBe(input);
+  fireEvent.change(input, { target: { value: " Mine " } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(fetch).toHaveBeenLastCalledWith("/command/rename/3/Mine", { method: "POST" });
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalete:rename", { detail: 3 }));
+  });
+  input = screen.getByRole("textbox", { name: "Tab name" }) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "  " } });
+  fireEvent.blur(input);
+  expect(fetch).toHaveBeenLastCalledWith("/command/rename/3/", { method: "POST" });
+  expect(shown().queryByRole("textbox")).toBeNull();
+});
+
+test("a muted tab says so on its row", () => {
+  render(<App />);
+  receive({});
+  const muted = (name: string) => shown().getByRole("button", { name }).querySelector(".muted");
+  expect(muted("Other")?.getAttribute("title")).toBe("Muted");
+  expect(muted("Example")).toBeNull();
 });
 
 test("opens the profiles from the footer's menu, and closes them with Escape", () => {

@@ -578,6 +578,14 @@ button.folder:hover {
   background: var(--active);
 }
 
+/* A muted tab's icon, at the row's end, left of where its close button shows. */
+.tab .muted {
+  display: grid;
+  flex: none;
+  margin-right: 26px;
+  opacity: 0.6;
+}
+
 /* A split's row is a 36 px pill, like a tab's, holding a filled 28 px pill per tab, as its preview
    shows it while a tab is dragged over a row (splitPreview in drag.ts). Selected, the row lights up
    and the tab shown is the brighter pill. */
@@ -846,7 +854,9 @@ button.folder:hover {
   opacity: 0.9;
 }
 
-.folder input {
+/* A folder's or a tab's name being edited, in place of its title. */
+.folder input,
+.tab input {
   flex: 1;
   min-width: 0;
   padding: 2px 4px;

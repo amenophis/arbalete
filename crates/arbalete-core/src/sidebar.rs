@@ -99,6 +99,19 @@ pub struct Tab {
     /// The url a pinned tab goes back to when it is closed.
     #[serde(default)]
     pub saved_url: Option<String>,
+    /// The name the user gave the tab, shown instead of its page's title.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The tab's page plays no sound.
+    #[serde(default)]
+    pub muted: bool,
+}
+
+impl Tab {
+    /// What the sidebar calls the tab: its name, or its page's title.
+    pub fn label(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.title)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -110,6 +123,8 @@ pub enum Error {
     NotAContainer,
     NotATab,
     NotAFolder,
+    /// Only pinned tabs have a url to go back to.
+    NotPinned,
     /// Folders, profiles and Spaces keep a title to be told apart.
     EmptyTitle,
     /// A folder cannot move inside itself or one of its descendants.
@@ -384,6 +399,8 @@ impl Sidebar {
             favicon: None,
             opener: space.selected,
             saved_url: None,
+            name: None,
+            muted: false,
         };
         Ok(self.insert(Some(today), NodeKind::Tab(tab)))
     }
@@ -406,6 +423,8 @@ impl Sidebar {
             favicon: None,
             opener: None,
             saved_url: self.is_pinned(parent).then(|| url.to_string()),
+            name: None,
+            muted: false,
         };
         self.show_favorites_hint(parent);
         Ok(self.insert(Some(parent), NodeKind::Tab(tab)))
@@ -456,6 +475,38 @@ impl Sidebar {
         let (title, _) = self.folder_mut(id)?;
         *title = new_title.to_string();
         Ok(())
+    }
+
+    /// Renames a folder, or a tab: a blank name gives a tab its page's title back.
+    pub fn rename(&mut self, id: NodeId, name: &str) -> Result<(), Error> {
+        if self.folder_mut(id).is_ok() {
+            return self.rename_folder(id, name);
+        }
+        let tab = self.tab_mut(id).ok_or(Error::NotATab)?;
+        let name = name.trim();
+        tab.name = (!name.is_empty()).then(|| name.to_string());
+        Ok(())
+    }
+
+    /// Changes the url a pinned tab goes back to when it is closed.
+    pub fn set_saved_url(&mut self, tab: NodeId, url: &str) -> Result<(), Error> {
+        self.check_tab(tab)?;
+        if !self.is_pinned(tab) {
+            return Err(Error::NotPinned);
+        }
+        let url = url.trim();
+        if url.is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        self.tab_mut(tab).expect("a tab").saved_url = Some(url.to_string());
+        Ok(())
+    }
+
+    /// Mutes a tab, or gives it its sound back, and returns whether it is muted.
+    pub fn toggle_mute(&mut self, tab: NodeId) -> Result<bool, Error> {
+        let tab = self.tab_mut(tab).ok_or(Error::NotATab)?;
+        tab.muted = !tab.muted;
+        Ok(tab.muted)
     }
 
     /// Collapses an expanded folder, or expands a collapsed one.
@@ -1149,6 +1200,52 @@ mod tests {
         assert_eq!(sidebar.spaces()[0].selected, None);
         assert!(sidebar.node(folder).is_none());
         assert_eq!(sidebar.folder_to_space(tab), Err(Error::NotAFolder));
+    }
+
+    #[test]
+    fn names_a_tab_until_its_name_is_blanked() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let tab = sidebar.open_tab(home.id, "https://a.test/").unwrap();
+        sidebar.tab_mut(tab).unwrap().title = "Page".to_string();
+        sidebar.rename(tab, "  Mine ").unwrap();
+        assert_eq!(sidebar.tab_mut(tab).unwrap().label(), "Mine");
+        sidebar.rename(tab, " ").unwrap();
+        assert_eq!(sidebar.tab_mut(tab).unwrap().label(), "Page");
+        let folder = sidebar.add_folder(home.pinned, "Folder").unwrap();
+        sidebar.rename(folder, "Work").unwrap();
+        assert_eq!(sidebar.rename(folder, " "), Err(Error::EmptyTitle));
+        assert_eq!(sidebar.rename(home.today, "x"), Err(Error::NotATab));
+    }
+
+    #[test]
+    fn changes_the_url_a_pinned_tab_goes_back_to() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let pinned = sidebar
+            .add_tab(home.pinned, "https://a.test/", "A")
+            .unwrap();
+        sidebar.set_saved_url(pinned, " https://b.test/ ").unwrap();
+        assert_eq!(
+            sidebar.tab_mut(pinned).unwrap().saved_url.as_deref(),
+            Some("https://b.test/")
+        );
+        assert_eq!(sidebar.set_saved_url(pinned, " "), Err(Error::EmptyTitle));
+        let today = sidebar.open_tab(home.id, "https://t.test/").unwrap();
+        assert_eq!(
+            sidebar.set_saved_url(today, "https://b.test/"),
+            Err(Error::NotPinned)
+        );
+    }
+
+    #[test]
+    fn mutes_and_unmutes_a_tab() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let tab = sidebar.open_tab(home.id, "https://a.test/").unwrap();
+        assert_eq!(sidebar.toggle_mute(tab), Ok(true));
+        assert_eq!(sidebar.toggle_mute(tab), Ok(false));
+        assert_eq!(sidebar.toggle_mute(home.today), Err(Error::NotATab));
     }
 
     #[test]
