@@ -369,7 +369,10 @@ function Items({
         id={item.id}
         title={item.title || item.url}
         favicon={item.favicon}
+        muted={item.muted ?? false}
         active={item.id === active}
+        renaming={item.id === renaming}
+        onRename={onRename}
       />
     ),
   );
@@ -420,43 +423,82 @@ const FolderRow = memo(function FolderRow({
       </button>
     );
   }
+  return (
+    <div className="folder">
+      {arrow}
+      <NameField id={id} title={title} label="Folder name" onDone={() => onRename(null)} />
+    </div>
+  );
+});
+
+// A row's name being edited. Enter and leaving the field save it, Escape keeps the old one. A
+// blank folder name keeps the old one; a blank tab name gives the tab its page's title back.
+function NameField({
+  id,
+  title,
+  label,
+  blank = false,
+  onDone,
+}: {
+  id: number;
+  title: string;
+  label: string;
+  blank?: boolean;
+  onDone: () => void;
+}) {
   const keyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") event.currentTarget.value = title;
     if (event.key === "Escape" || event.key === "Enter") event.currentTarget.blur();
   };
   return (
-    <div className="folder">
-      {arrow}
-      <input
-        className="title"
-        aria-label="Folder name"
-        defaultValue={title}
-        // biome-ignore lint/a11y/noAutofocus: the field appears because the user asked to rename.
-        autoFocus
-        onFocus={(event) => event.currentTarget.select()}
-        onKeyDown={keyDown}
-        onBlur={(event) => {
-          const value = event.currentTarget.value.trim();
-          if (value && value !== title) send(`rename/${id}/${encodeURIComponent(value)}`);
-          onRename(null);
-        }}
-      />
-    </div>
+    <input
+      className="title"
+      aria-label={label}
+      defaultValue={title}
+      // biome-ignore lint/a11y/noAutofocus: the field appears because the user asked to rename.
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onKeyDown={keyDown}
+      onBlur={(event) => {
+        const value = event.currentTarget.value.trim();
+        if ((value || blank) && value !== title) {
+          send(`rename/${id}/${encodeURIComponent(value)}`);
+        }
+        onDone();
+      }}
+    />
   );
-});
+}
 
 // Every state update brings new tab objects: primitive props let unchanged rows skip rendering.
+// Its menu's Rename Tab edits its name in place; a muted tab says so.
 const TabItem = memo(function TabItem({
   id,
   title,
   favicon,
+  muted,
   active,
+  renaming,
+  onRename,
 }: {
   id: number;
   title: string;
   favicon: string | null;
+  muted: boolean;
   active: boolean;
+  renaming: boolean;
+  onRename: Rename;
 }) {
+  if (renaming) {
+    return (
+      <li className="tab-row" data-id={id}>
+        <div className="tab">
+          <TabIcon favicon={favicon} />
+          <NameField id={id} title={title} label="Tab name" blank onDone={() => onRename(null)} />
+        </div>
+      </li>
+    );
+  }
   return (
     <li className="tab-row" data-id={id}>
       <button
@@ -467,6 +509,11 @@ const TabItem = memo(function TabItem({
       >
         <TabIcon favicon={favicon} />
         <span className="title">{title}</span>
+        {muted && (
+          <span className="muted" title="Muted" aria-hidden="true">
+            <Icon d="M2.5 6v4h2.5L8.5 13V3L5 6zM11 6l3 4M14 6l-3 4" size={14} />
+          </span>
+        )}
       </button>
       {/* On the selected row, closing may only deselect a pinned tab (close_tab in shell.rs). */}
       <button

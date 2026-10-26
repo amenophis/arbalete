@@ -169,6 +169,8 @@ export type Tab = {
   url: string;
   title: string;
   favicon: string | null;
+  // Sidebar rows only: the tab plays no sound.
+  muted?: boolean;
 };
 
 export function useAppState(): State | undefined {

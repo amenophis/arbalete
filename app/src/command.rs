@@ -124,8 +124,13 @@ pub enum Command {
     ChooseMenu(Target, String),
     /// Collapses or expands a folder: `toggle/<folder id>`.
     ToggleFolder(NodeId),
-    /// Renames a folder: `rename/<folder id>/<percent-encoded title>`.
-    RenameFolder(NodeId, String),
+    /// Renames a folder or a tab, a blank name giving a tab its page's title back:
+    /// `rename/<id>/<percent-encoded title>`.
+    Rename(NodeId, String),
+    /// Changes the url a pinned tab goes back to, from its menu.
+    SetPinnedUrl(NodeId, String),
+    /// Mutes a tab or gives it its sound back, from its menu.
+    ToggleMute(NodeId),
     /// Moves a tab or a folder to an index among a container's or a folder's children, as the
     /// app counts them once the node has left: `move/<id>/<parent id>/<index>`.
     Move(NodeId, NodeId, usize),
@@ -469,7 +474,7 @@ impl Command {
                     path.strip_prefix("rename/").and_then(|r| r.split_once('/'))
                 {
                     let id = serde_json::from_str(id).ok()?;
-                    return percent_decode(title).map(|title| Self::RenameFolder(id, title));
+                    return percent_decode(title).map(|title| Self::Rename(id, title));
                 }
                 if let Some((tab, target)) =
                     path.strip_prefix("split/").and_then(|r| r.split_once('/'))
@@ -750,8 +755,7 @@ mod tests {
             Command::parse("toggle/6"),
             Some(Command::ToggleFolder(_))
         ));
-        let Some(Command::RenameFolder(id, title)) = Command::parse("rename/6/Caf%C3%A9%2F2")
-        else {
+        let Some(Command::Rename(id, title)) = Command::parse("rename/6/Caf%C3%A9%2F2") else {
             panic!("not a rename")
         };
         assert_eq!(serde_json::to_string(&id).unwrap(), "6");
