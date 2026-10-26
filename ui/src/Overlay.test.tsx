@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { Overlay, toUrl } from "./Overlay";
+import { Overlay, RESULT_ROW, SEARCH_ROW, toUrl } from "./Overlay";
 
 const fetch = vi.fn();
 
@@ -11,27 +11,124 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-test("opens the typed address in a tab", () => {
+const field = () => screen.getByRole("textbox", { name: "Search or enter URL" });
+const commands = () => fetch.mock.calls.map(([url]) => url as string);
+const rows = () => screen.queryAllByRole("button").map((row) => row.textContent);
+const picked = () => document.querySelector("[aria-current]")?.textContent;
+
+function show(url: string | null = null) {
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalete:show", { detail: { url } }));
+  });
+}
+
+function answer(text: string, tabs: object[], pages: object[]) {
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalete:results", { detail: { text, tabs, pages } }));
+  });
+}
+
+test("opens the typed address in a new tab", () => {
   render(<Overlay />);
-  const input = screen.getByRole("textbox", { name: "Open a URL" });
-  fireEvent.change(input, { target: { value: "example.com/été" } });
-  fireEvent.submit(input);
+  show();
+  fireEvent.change(field(), { target: { value: "example.com/été" } });
+  expect(rows()).toEqual(["example.com/été"]);
+  fireEvent.submit(field());
   expect(fetch).toHaveBeenLastCalledWith(
     "/command/open/https%3A%2F%2Fexample.com%2F%C3%A9t%C3%A9",
-    {
-      method: "POST",
-    },
+    { method: "POST" },
   );
 });
 
-test("hides on escape", () => {
+test("searches what is not an address", () => {
   render(<Overlay />);
-  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+  show();
+  fireEvent.change(field(), { target: { value: "arc browser" } });
+  expect(commands()).toContain("/command/overlay/search/arc%20browser");
+  expect(rows()).toEqual(["arc browser — Search Google"]);
+  fireEvent.submit(field());
+  expect(fetch).toHaveBeenLastCalledWith(
+    `/command/open/${encodeURIComponent("https://www.google.com/search?q=arc%20browser")}`,
+    { method: "POST" },
+  );
+});
+
+test("lists the matching open tabs then history pages, picked with the arrows, and fits them", () => {
+  render(<Overlay />);
+  show();
+  fireEvent.change(field(), { target: { value: "wiki" } });
+  answer(
+    "wiki",
+    [{ id: 7, url: "https://en.wikipedia.org/", title: "Wikipedia", favicon: null }],
+    [{ url: "https://wiki.test/", title: "" }],
+  );
+  expect(rows()).toEqual([
+    "wiki — Search Google",
+    "WikipediaSwitch to Tab →",
+    "https://wiki.test/",
+  ]);
+  expect(fetch).toHaveBeenLastCalledWith(
+    `/command/overlay/height/${SEARCH_ROW + 3 * RESULT_ROW + 16}`,
+    { method: "POST" },
+  );
+  expect(picked()).toBe("wiki — Search Google");
+  fireEvent.keyDown(field(), { key: "ArrowDown" });
+  expect(picked()).toBe("WikipediaSwitch to Tab →");
+  fireEvent.submit(field());
+  expect(commands().slice(-2)).toEqual(["/command/select/7", "/command/overlay/hide"]);
+  // The arrows wrap around.
+  fireEvent.keyDown(field(), { key: "ArrowUp" });
+  fireEvent.keyDown(field(), { key: "ArrowUp" });
+  expect(picked()).toBe("https://wiki.test/");
+  fireEvent.click(screen.getByRole("button", { name: /wiki\.test/ }));
+  expect(fetch).toHaveBeenLastCalledWith(
+    `/command/open/${encodeURIComponent("https://wiki.test/")}`,
+    { method: "POST" },
+  );
+});
+
+test("answers to an older search are ignored", () => {
+  render(<Overlay />);
+  show();
+  fireEvent.change(field(), { target: { value: "wik" } });
+  fireEvent.change(field(), { target: { value: "wiki" } });
+  answer("wik", [], [{ url: "https://old.test/", title: "Old" }]);
+  expect(rows()).toEqual(["wiki — Search Google"]);
+});
+
+test("⌘L edits the selected tab's address, loaded in that tab", () => {
+  render(<Overlay />);
+  show("https://example.com/page");
+  expect((field() as HTMLInputElement).value).toBe("https://example.com/page");
+  fireEvent.change(field(), { target: { value: "https://example.com/other" } });
+  fireEvent.submit(field());
+  expect(fetch).toHaveBeenLastCalledWith(
+    `/command/navigate/${encodeURIComponent("https://example.com/other")}`,
+    { method: "POST" },
+  );
+  // Shown again for a new tab, it is empty and opens one.
+  show();
+  expect((field() as HTMLInputElement).value).toBe("");
+  expect(rows()).toEqual([]);
+});
+
+test("hides on escape and when it loses the focus", () => {
+  render(<Overlay />);
+  fireEvent.keyDown(field(), { key: "Escape" });
+  expect(fetch).toHaveBeenLastCalledWith("/command/overlay/hide", { method: "POST" });
+  fetch.mockClear();
+  fireEvent.blur(field());
   expect(fetch).toHaveBeenLastCalledWith("/command/overlay/hide", { method: "POST" });
 });
 
-test("keeps urls that have a scheme", () => {
+test("tells addresses from searches", () => {
   expect(toUrl("about:blank")).toBe("about:blank");
   expect(toUrl("http://example.com")).toBe("http://example.com");
   expect(toUrl("example.com")).toBe("https://example.com");
+  expect(toUrl("docs.example.com:8080/guide")).toBe("https://docs.example.com:8080/guide");
+  expect(toUrl("localhost:3000")).toBe("http://localhost:3000");
+  expect(toUrl("192.168.1.10")).toBe("https://192.168.1.10");
+  expect(toUrl("arc browser")).toBeNull();
+  expect(toUrl("weather")).toBeNull();
+  expect(toUrl("v1.2")).toBeNull();
 });

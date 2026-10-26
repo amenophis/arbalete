@@ -26,6 +26,9 @@ use std::ptr::NonNull;
 /// The page's corner radius, in points.
 const CARD_RADIUS: f64 = 8.0;
 
+/// The Command Bar's corner radius, in points.
+const COMMAND_BAR_RADIUS: f64 = 12.0;
+
 /// Core Graphics' color, which only passes through here: no need for its bindings.
 #[repr(C)]
 struct CGColor {
@@ -82,6 +85,11 @@ define_class!(
         #[unsafe(method(arbaleteNewTab:))]
         fn new_tab(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowOverlay);
+        }
+
+        #[unsafe(method(arbaleteOpenLocation:))]
+        fn open_location(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::EditUrl);
         }
 
         #[unsafe(method(arbaleteCloseTab:))]
@@ -359,6 +367,12 @@ pub fn setup_menu() {
                     ns_string!("New Tab"),
                     sel!(arbaleteNewTab:),
                     ns_string!("t"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Open Location…"),
+                    sel!(arbaleteOpenLocation:),
+                    ns_string!("l"),
                 ),
                 item(
                     mtm,
@@ -780,6 +794,15 @@ pub fn copy(url: &str) {
 /// Rounds the corners of the card's window, which draws the page, and outlines it. `view` is
 /// its content view, whose layer holds what the window's compositor draws.
 pub fn round_card(view: *mut c_void) {
+    round(view, CARD_RADIUS);
+}
+
+/// Rounds the corners of the Command Bar's window and outlines it, like the card's.
+pub fn round_command_bar(view: *mut c_void) {
+    round(view, COMMAND_BAR_RADIUS);
+}
+
+fn round(view: *mut c_void, radius: f64) {
     // SAFETY: CEF gives the window's NSView, which the window keeps alive.
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
@@ -792,7 +815,7 @@ pub fn round_card(view: *mut c_void) {
     view.setWantsLayer(true);
     let layer: Option<Retained<AnyObject>> = unsafe { msg_send![view, layer] };
     if let Some(layer) = layer {
-        let _: () = unsafe { msg_send![&*layer, setCornerRadius: CARD_RADIUS] };
+        let _: () = unsafe { msg_send![&*layer, setCornerRadius: radius] };
         let _: () = unsafe { msg_send![&*layer, setMasksToBounds: Bool::YES] };
         // A darker edge, drawn above the page.
         let edge = NSColor::colorWithWhite_alpha(0.0, 0.25);

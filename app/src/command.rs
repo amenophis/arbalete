@@ -53,6 +53,14 @@ pub enum Command {
     Favorite(usize),
     ShowOverlay,
     HideOverlay,
+    /// Shows the Command Bar holding the selected tab's address, to edit it: `overlay/edit`.
+    EditUrl,
+    /// Asks for the Command Bar's results for a text: `overlay/search/<percent-encoded text>`.
+    SearchOverlay(String),
+    /// Fits the Command Bar to its results: `overlay/height/<points>`.
+    OverlayHeight(u32),
+    /// Loads an address in the selected tab, or a new one without: `navigate/<percent-encoded url>`.
+    Navigate(String),
     /// Hides the sidebar, or shows it again: `sidebar/toggle`.
     ToggleSidebar,
     /// Shows the hidden sidebar above the page, `sidebar/reveal`, or hides it again,
@@ -262,6 +270,7 @@ impl Command {
             "reload" => Some(Self::Reload),
             "overlay/show" => Some(Self::ShowOverlay),
             "overlay/hide" => Some(Self::HideOverlay),
+            "overlay/edit" => Some(Self::EditUrl),
             "sidebar/toggle" => Some(Self::ToggleSidebar),
             "sidebar/reveal" => Some(Self::RevealSidebar),
             "sidebar/conceal" => Some(Self::ConcealSidebar),
@@ -490,6 +499,15 @@ impl Command {
                     let (tab, parent, index) = parse_place(args)?;
                     return Some(Self::Duplicate(tab, parent, index));
                 }
+                if let Some(text) = path.strip_prefix("overlay/search/") {
+                    return percent_decode(text).map(Self::SearchOverlay);
+                }
+                if let Some(height) = path.strip_prefix("overlay/height/") {
+                    return height.parse().ok().map(Self::OverlayHeight);
+                }
+                if let Some(url) = path.strip_prefix("navigate/") {
+                    return percent_decode(url).map(Self::Navigate);
+                }
                 percent_decode(path.strip_prefix("open/")?).map(Self::Open)
             }
         }
@@ -556,6 +574,20 @@ mod tests {
         assert_eq!(Command::parse("find/hide"), Some(Command::HideFind));
         assert_eq!(Command::parse("overlay/show"), Some(Command::ShowOverlay));
         assert_eq!(Command::parse("overlay/hide"), Some(Command::HideOverlay));
+        assert_eq!(Command::parse("overlay/edit"), Some(Command::EditUrl));
+        assert_eq!(
+            Command::parse("overlay/search/caf%C3%A9%20au"),
+            Some(Command::SearchOverlay("café au".to_string()))
+        );
+        assert_eq!(
+            Command::parse("overlay/height/326"),
+            Some(Command::OverlayHeight(326))
+        );
+        assert_eq!(Command::parse("overlay/height/-1"), None);
+        assert_eq!(
+            Command::parse("navigate/https%3A%2F%2Fexample.com%2F"),
+            Some(Command::Navigate("https://example.com/".to_string()))
+        );
         assert_eq!(Command::parse("close"), Some(Command::Close(None)));
         assert_eq!(Command::parse("reopen"), Some(Command::Reopen(0)));
         assert_eq!(Command::parse("reopen/2"), Some(Command::Reopen(2)));
