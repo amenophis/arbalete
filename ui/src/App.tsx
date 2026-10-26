@@ -53,8 +53,9 @@ export function App() {
   useAppEvent("arbalete:new-space", () => pager.go(count));
   // Spaces are managed from the library, for now.
   useAppEvent("arbalete:library", () => pager.go(-1));
-  // Window › Downloads (⇧⌘J) opens the library on them.
+  // Window › Downloads (⇧⌘J) and History › Show All History (⌘Y) open the library on them.
   useAppEvent("arbalete:show-downloads", () => pager.go(-1));
+  useAppEvent("arbalete:show-history", () => pager.go(-1));
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =

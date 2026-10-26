@@ -48,7 +48,12 @@ const search = () => screen.getByRole("searchbox");
 test("a rail of sections opens on the Spaces, and the one picked shows under its search field", () => {
   renderLibrary();
   const tabs = screen.getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(["Spaces", "Recently Closed", "Downloads"]);
+  expect(tabs.map((tab) => tab.textContent)).toEqual([
+    "Spaces",
+    "Recently Closed",
+    "History",
+    "Downloads",
+  ]);
   expect(section("Spaces").getAttribute("aria-selected")).toBe("true");
   expect(search().getAttribute("placeholder")).toBe("Search Spaces…");
   expect(

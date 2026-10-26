@@ -1585,22 +1585,39 @@ button.folder:hover {
   outline: 2px solid var(--accent);
 }
 
-/* Every download in the library, by day. */
-.downloads-list {
+/* Every download, and the history, in the library, by day. */
+.downloads-list,
+.history-list {
   overflow-y: auto;
 }
 
-.downloads-list h3 {
+.downloads-list h3,
+.history-list h3 {
   margin: 10px 8px 2px;
   font-size: 11px;
   font-weight: 600;
   opacity: 0.6;
 }
 
-.downloads-list ul {
+.downloads-list ul,
+.history-list ul {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.tab-row.visit > .tab {
+  padding-right: 34px;
+}
+
+.show-more {
+  margin: 6px 8px 10px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--hover);
+  color: inherit;
+  font: inherit;
 }
 
 .closed-tabs {

@@ -1617,6 +1617,13 @@ fn update_history<E: std::fmt::Display>(
     profile: ProfileId,
     change: impl FnOnce(&mut History) -> Result<(), E>,
 ) {
+    if let Some(Err(error)) = with_history(profile, change) {
+        eprintln!("cannot write the history: {error}");
+    }
+}
+
+/// Runs `f` on a profile's history, opened the first time, unless it cannot be opened.
+fn with_history<R>(profile: ProfileId, f: impl FnOnce(&mut History) -> R) -> Option<R> {
     HISTORIES.with_borrow_mut(|histories| {
         let history = match histories.entry(profile) {
             Entry::Occupied(entry) => entry.into_mut(),
@@ -1624,18 +1631,49 @@ fn update_history<E: std::fmt::Display>(
                 // An imported profile has no directory before its pages first load.
                 let dir = profile_dir(profile);
                 if let Err(error) = std::fs::create_dir_all(&dir) {
-                    return eprintln!("cannot create the profile's directory: {error}");
+                    eprintln!("cannot create the profile's directory: {error}");
+                    return None;
                 }
                 match History::open(&dir.join(history::FILE_NAME)) {
                     Ok(history) => entry.insert(history),
-                    Err(error) => return eprintln!("cannot open the history: {error}"),
+                    Err(error) => {
+                        eprintln!("cannot open the history: {error}");
+                        return None;
+                    }
                 }
             }
         };
-        if let Err(error) = change(history) {
-            eprintln!("cannot write the history: {error}");
-        }
-    });
+        Some(f(history))
+    })
+}
+
+/// Sends both sidebars the `limit` latest pages of the displayed Space's profile whose address or
+/// title holds `text`, for the library's history.
+fn search_history(text: &str, limit: usize) {
+    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+    let entries = with_history(profile, |history| history.search(text, limit))
+        .and_then(|found| {
+            found
+                .map_err(|error| eprintln!("cannot read the history: {error}"))
+                .ok()
+        })
+        .unwrap_or_default();
+    let entries: Vec<_> = entries
+        .iter()
+        .map(|entry| json!({ "url": entry.url, "title": entry.title, "lastVisit": entry.last_visit }))
+        .collect();
+    let detail = json!({ "text": text, "entries": entries });
+    let event = format!(r#"new CustomEvent("arbalete:history", {{ detail: {detail} }})"#);
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
+}
+
+/// Opens the library on the history, showing the sidebar first if it is hidden.
+fn show_history() {
+    if SIDEBAR_MODE.get() == SidebarMode::Hidden {
+        set_sidebar(SidebarMode::Shown);
+    }
+    dispatch(shown_sidebar(), r#"new Event("arbalete:show-history")"#);
 }
 
 fn now() -> i64 {
@@ -1672,6 +1710,12 @@ pub fn run(command: Command) {
         }
         (Command::Download(action, id), _) => download_command(action, id),
         (Command::ShowDownloads, _) => show_downloads(),
+        (Command::ShowHistory, _) => show_history(),
+        (Command::SearchHistory { text, limit }, _) => search_history(&text, limit),
+        (Command::RemoveHistory(url), _) => {
+            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            update_history(profile, |history| history.remove(&url));
+        }
         (Command::Select(id), _) => select_tab(id),
         (Command::NextTab, _) => select_found(|s| s.next_tab(s.displayed().id, true)),
         (Command::PreviousTab, _) => select_found(|s| s.next_tab(s.displayed().id, false)),
