@@ -31,6 +31,7 @@ function renderLibrary(closed: ClosedTab[] = [], onBack = () => {}) {
   return render(
     <Library
       closed={closed}
+      downloads={[]}
       spaces={spaces}
       profiles={[{ id: 1, name: "Default", color: "purple" }]}
       shown
@@ -47,7 +48,7 @@ const search = () => screen.getByRole("searchbox");
 test("a rail of sections opens on the Spaces, and the one picked shows under its search field", () => {
   renderLibrary();
   const tabs = screen.getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(["Spaces", "Recently Closed"]);
+  expect(tabs.map((tab) => tab.textContent)).toEqual(["Spaces", "Recently Closed", "Downloads"]);
   expect(section("Spaces").getAttribute("aria-selected")).toBe("true");
   expect(search().getAttribute("placeholder")).toBe("Search Spaces…");
   expect(
@@ -67,6 +68,7 @@ test("the section picked stays picked until the Space menu's Manage Spaces asks 
   rerender(
     <Library
       closed={[]}
+      downloads={[]}
       spaces={spaces}
       profiles={[]}
       shown={false}

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { type ClosedTab, type Profile, type Space, send, useAppEvent } from "./bridge";
+import { type Download, DownloadsList } from "./Downloads";
 import { Icon } from "./Icon";
 import { ManageSpaces, matches } from "./ManageSpaces";
 
-export type Section = "spaces" | "closed";
+export type Section = "spaces" | "closed" | "downloads";
 
 // The sections the library holds so far, in its rail.
 export const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -17,13 +18,20 @@ export const SECTIONS: { id: Section; label: string; icon: string }[] = [
     label: "Recently Closed",
     icon: "M2.8 8a5.2 5.2 0 1 0 1.5-3.7M2.6 2.4v2.4H5M8 5.2V8l2 1.3",
   },
+  {
+    id: "downloads",
+    label: "Downloads",
+    icon: "M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10",
+  },
 ];
 
 // The page before the first Space: a rail of sections, the one picked last kept until the app
 // quits, and the picked section's content under a field searching it. Spaces are managed there;
-// the tabs closed since launch reopen in the displayed Space, whose page `onBack` slides back to.
+// the tabs closed since launch reopen in the displayed Space, whose page `onBack` slides back to;
+// the downloads are all listed.
 export function Library({
   closed,
+  downloads,
   spaces,
   profiles,
   shown,
@@ -32,6 +40,7 @@ export function Library({
   onNewSpace,
 }: {
   closed: ClosedTab[];
+  downloads: Download[];
   spaces: Space[];
   profiles: Profile[];
   shown: boolean;
@@ -44,6 +53,7 @@ export function Library({
   const [query, setQuery] = useState("");
   // The Space menu's Manage Spaces opens the library on its Spaces.
   useAppEvent("arbalete:library", () => pick("spaces"));
+  useAppEvent("arbalete:show-downloads", () => pick("downloads"));
   const pick = (next: Section) => {
     setSection(next);
     setQuery("");
@@ -91,7 +101,7 @@ export function Library({
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
-        {section === "spaces" ? (
+        {section === "spaces" && (
           <ManageSpaces
             spaces={spaces}
             profiles={profiles}
@@ -99,8 +109,10 @@ export function Library({
             onShow={onShow}
             onNewSpace={onNewSpace}
           />
-        ) : (
-          <ClosedTabs closed={closed} query={query} onReopen={onBack} />
+        )}
+        {section === "closed" && <ClosedTabs closed={closed} query={query} onReopen={onBack} />}
+        {section === "downloads" && (
+          <DownloadsList downloads={downloads} query={query} now={Date.now()} />
         )}
       </div>
     </section>

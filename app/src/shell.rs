@@ -120,9 +120,9 @@ thread_local! {
     static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The text last searched for, which ⌘G searches again.
     static FIND_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
-    /// The session's downloads, most recent last.
+    /// The downloads, kept across sessions, most recent last.
     static DOWNLOADS: RefCell<Vec<Download>> = const { RefCell::new(Vec::new()) };
-    /// What cancels each download in progress, by id.
+    /// What cancels each download in progress, by its id in the list.
     static DOWNLOAD_CALLBACKS: RefCell<HashMap<u32, DownloadItemCallback>> = RefCell::default();
     /// The browsers the import assistant lists, which its choices refer to by index.
     static SOURCES: RefCell<Vec<browsers::Browser>> = const { RefCell::new(Vec::new()) };
@@ -422,12 +422,30 @@ fn send_state() {
     dispatch(&REVEAL_VIEW, &event);
 }
 
-/// Sends the downloads to both sidebars, which show them at their bottom.
+/// Saves the downloads list. A list that cannot be written is not worth stopping a download for.
+fn save_downloads() {
+    let path = DATA_DIR.get().expect("set").join(downloads::FILE_NAME);
+    if let Err(error) = DOWNLOADS.with_borrow(|list| downloads::save(list, &path)) {
+        eprintln!("cannot save the downloads: {error}");
+    }
+}
+
+/// Sends the downloads to both sidebars, which show the recent ones at their bottom and all of
+/// them in the library.
 fn send_downloads() {
     let json = DOWNLOADS.with_borrow(|downloads| serde_json::to_string(downloads).expect("JSON"));
     let event = format!(r#"new CustomEvent("arbalete:downloads", {{ detail: {json} }})"#);
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
+}
+
+/// Opens the library on its downloads, showing the sidebar first if it is hidden.
+fn show_downloads() {
+    if SIDEBAR_MODE.get() == SidebarMode::Hidden {
+        set_sidebar(SidebarMode::Shown);
+    }
+    let view = shown_sidebar();
+    dispatch(view, r#"new Event("arbalete:show-downloads")"#);
 }
 
 fn download_command(action: DownloadAction, id: u32) {
@@ -444,6 +462,15 @@ fn download_command(action: DownloadAction, id: u32) {
                 callback.cancel();
             }
         }
+        // A file deleted or moved since is shown missing.
+        DownloadAction::Open | DownloadAction::Show if !path.exists() => {
+            DOWNLOADS.with_borrow_mut(|list| {
+                if let Some(download) = list.iter_mut().find(|download| download.id == id) {
+                    download.missing = true;
+                }
+            });
+            send_downloads();
+        }
         #[cfg(target_os = "macos")]
         DownloadAction::Open => crate::mac::open_file(&path),
         #[cfg(target_os = "macos")]
@@ -452,6 +479,7 @@ fn download_command(action: DownloadAction, id: u32) {
         DownloadAction::Open | DownloadAction::Show => {}
         DownloadAction::Remove => {
             DOWNLOADS.with_borrow_mut(|downloads| downloads.retain(|download| download.id != id));
+            save_downloads();
             send_downloads();
         }
     }
@@ -1643,6 +1671,7 @@ pub fn run(command: Command) {
             send_downloads();
         }
         (Command::Download(action, id), _) => download_command(action, id),
+        (Command::ShowDownloads, _) => show_downloads(),
         (Command::Select(id), _) => select_tab(id),
         (Command::NextTab, _) => select_found(|s| s.next_tab(s.displayed().id, true)),
         (Command::PreviousTab, _) => select_found(|s| s.next_tab(s.displayed().id, false)),
@@ -1860,6 +1889,7 @@ wrap_browser_process_handler! {
         fn on_context_initialized(&self) {
             DATA_DIR.set(self.data_dir.clone()).expect("one context");
             restore(self.data_dir.join(store::FILE_NAME));
+            DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
             window_create_top_level(Some(&mut MainWindowDelegate::new()));
         }
     }
@@ -2184,14 +2214,24 @@ wrap_download_handler! {
                 })
             });
             callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
-            DOWNLOADS.with_borrow_mut(|downloads| downloads.push(Download::new(item.id(), path)));
+            let url = CefString::from(&item.url()).to_string();
+            DOWNLOADS.with_borrow_mut(|list| {
+                let id = downloads::next_id(list);
+                list.push(Download::new(id, item.id(), path, url, now()));
+            });
+            save_downloads();
             send_downloads();
             1
         }
 
         fn on_download_updated(&self, _browser: Option<&mut Browser>, item: Option<&mut DownloadItem>, callback: Option<&mut DownloadItemCallback>) {
             let Some(item) = item else { return };
-            let id = item.id();
+            let cef_id = item.id();
+            let Some(id) = DOWNLOADS.with_borrow(|list| {
+                list.iter().find(|download| download.cef_id == Some(cef_id)).map(|download| download.id)
+            }) else {
+                return;
+            };
             let state = if item.is_complete() == 1 {
                 downloads::State::Complete
             } else if item.is_canceled() == 1 {
@@ -2209,17 +2249,21 @@ wrap_download_handler! {
                     callbacks.remove(&id);
                 }
             });
-            let changed = DOWNLOADS.with_borrow_mut(|downloads| {
-                let Some(download) = downloads.iter_mut().find(|download| download.id == id) else {
-                    return false;
+            let (changed, finished) = DOWNLOADS.with_borrow_mut(|list| {
+                let Some(download) = list.iter_mut().find(|download| download.id == id) else {
+                    return (false, false);
                 };
                 let before = download.clone();
                 download.received = item.received_bytes();
                 download.total = item.total_bytes().max(0);
                 download.speed = item.current_speed();
                 download.state = state;
-                *download != before
+                (*download != before, before.state != state)
             });
+            // Only the end is saved: progress changes several times a second.
+            if finished {
+                save_downloads();
+            }
             if changed {
                 send_downloads();
             }
