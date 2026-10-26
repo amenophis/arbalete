@@ -396,6 +396,34 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   recordings, compare Arbalete side by side at the same window size, and fix every difference. Arbalete draws
   its own icons and copies no asset.
 
+Findings (menus, context menus, Settings, Library, Command Bar), missing features ranked by how much users coming
+from Arc rely on them. Items that belong to a phase above stay there.
+1. **Browser basics**: Edit and Window menus (Undo, Copy, Paste, Select All, Minimize reaching pages and fields),
+   find in page (⌘F, ⌘G), zoom (⌘0, ⌘+, ⌘-), print (⌘P), stop loading, force reload (⇧⌘R), the page, link and
+   image context menus.
+2. **Downloads**: rows at the bottom of the sidebar while downloading (size, time left, cancel), a Downloads view
+   (⇧⌘J) with search and an empty state, a download location per profile.
+3. **History view** (⌘Y): Arc shows Chromium's history page, which CEF's Alloy style does not have, so Arbalete
+   draws its own: search, one card per day, time, favicon, title and domain.
+4. **Row menus**: Rename and Duplicate for tabs, favorites and folders; Archive Tabs Below; for folders Delete,
+   Move to and Turn into Space; Edit Pinned Page (replace the saved URL with the current one, or edit it); Mute.
+5. **Shortcuts**: Copy URL (⇧⌘C), Clear Today (⇧⌘K), Library (⇧⌘L), ⌘{ and ⌘} for the previous and next tab, ⌃⇥
+   tab switcher. New Folder moves off ⇧⌘N, which Incognito takes.
+6. **Settings window**: search engine and suggestions per profile, warn before quitting, restore the previous
+   session, a list of every shortcut. Settings Arc leaves to Chromium (privacy, passwords, site settings) need
+   their own pages too.
+7. **Developer tools**: View Source, Developer Tools (⌥⌘I, F12), Inspect Elements, JavaScript Console.
+8. **Toolbar mode** (⇧⌘D): the address field and navigation buttons move from the sidebar to a thin bar above
+   the page; each split pane gets its own.
+9. **Windows**: New Window (⌘N), a small window without sidebar for links from other apps, with "Open in
+   <Space>" (Arc's Little Arc, ⌥⌘N).
+10. **Site controls** from the address field: copy URL, share, clear cache and cookies, site settings.
+11. **Library sections**: Downloads, Archived Tabs (phase 6), Media.
+- Not planned: AI features, Boosts, Easels, Live Folders, alternative app icons, account and gifting.
+- Auto-archive: Arc offers 12 hours (default), 24 hours, 7 days and 30 days; phase 6 keeps its wider list.
+- Onboarding: the audit was done with a signed-in account, which skipped the setup screens. Arbalete's first
+  launch will be designed later, from an account-free path, taking inspiration from Dia (Arc's successor).
+
 ### Later
 - **Sync through a folder the user already syncs.** No Arbalete account and no server: the user picks a folder
   synced by a service they already use (iCloud Drive, Google Drive for desktop, Dropbox, OneDrive, Nextcloud or
