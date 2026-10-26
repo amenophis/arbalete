@@ -1898,9 +1898,14 @@ pub fn run(command: Command) {
     }
 }
 
-/// Whether a point at `x` from the window's left edge is over the sidebar, shown or revealed.
+/// Whether a point at `x` from the window's left edge is over the sidebar, shown or revealed,
+/// where swipes page between Spaces. The library's Spaces over the window scroll instead: they
+/// are left by their back arrow or a click on a Space.
 #[cfg(target_os = "macos")]
 pub fn is_over_sidebar(x: f64) -> bool {
+    if fills_window() {
+        return false;
+    }
     let width = match SIDEBAR_MODE.get() {
         SidebarMode::Hidden => return false,
         SidebarMode::Shown => docked_width(),
