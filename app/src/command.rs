@@ -19,6 +19,17 @@ pub enum Command {
     Zoom(Zoom),
     /// Prints the page, from the menu.
     Print,
+    /// Shows the find bar above the page, from the menu.
+    ShowFind,
+    /// Finds text in the page, forward or backward: `find/forward/<percent-encoded text>`,
+    /// `find/backward/<text>`. The same text again goes to the next match. From the menu, the last
+    /// text, `None`.
+    Find {
+        text: Option<String>,
+        forward: bool,
+    },
+    /// Hides the find bar and stops finding: `find/hide`.
+    HideFind,
     /// Shows a tab in the content view: `select/<tab id>`.
     Select(NodeId),
     /// Shows the next tab in the sidebar, `next`, or the previous one, `previous`.
@@ -233,7 +244,19 @@ impl Command {
             "import/ready" => Some(Self::ImportReady),
             "import/close" => Some(Self::CloseImport),
             "import/full-disk-access" => Some(Self::OpenFullDiskAccess),
+            "find/hide" => Some(Self::HideFind),
             _ => {
+                if let Some((direction, text)) =
+                    path.strip_prefix("find/").and_then(|r| r.split_once('/'))
+                {
+                    let forward = match direction {
+                        "forward" => true,
+                        "backward" => false,
+                        _ => return None,
+                    };
+                    let text = Some(percent_decode(text)?);
+                    return Some(Self::Find { text, forward });
+                }
                 if let Some((window, card)) = path
                     .strip_prefix("window/colors/")
                     .and_then(|r| r.split_once('/'))
@@ -465,6 +488,7 @@ mod tests {
         assert_eq!(Command::parse("back"), Some(Command::Back));
         assert_eq!(Command::parse("forward"), Some(Command::Forward));
         assert_eq!(Command::parse("reload"), Some(Command::Reload));
+        assert_eq!(Command::parse("find/hide"), Some(Command::HideFind));
         assert_eq!(Command::parse("overlay/show"), Some(Command::ShowOverlay));
         assert_eq!(Command::parse("overlay/hide"), Some(Command::HideOverlay));
         assert_eq!(Command::parse("close"), Some(Command::Close(None)));
@@ -555,6 +579,25 @@ mod tests {
         );
         assert_eq!(Command::parse("open/%zz"), None);
         assert_eq!(Command::parse("open/%C3"), None);
+    }
+
+    #[test]
+    fn parses_find_commands() {
+        assert_eq!(
+            Command::parse("find/forward/caf%C3%A9%2F"),
+            Some(Command::Find {
+                text: Some("café/".to_string()),
+                forward: true,
+            })
+        );
+        assert_eq!(
+            Command::parse("find/backward/a"),
+            Some(Command::Find {
+                text: Some("a".to_string()),
+                forward: false,
+            })
+        );
+        assert_eq!(Command::parse("find/sideways/a"), None);
     }
 
     #[test]
