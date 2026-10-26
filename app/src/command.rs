@@ -32,6 +32,8 @@ pub enum Command {
     HideFind,
     /// Acts on a download from the sidebar: `download/<cancel, open, show or remove>/<id>`.
     Download(DownloadAction, u32),
+    /// Opens the library on the downloads, from the menu.
+    ShowDownloads,
     /// Shows a tab in the content view: `select/<tab id>`.
     Select(NodeId),
     /// Shows the next tab in the sidebar, `next`, or the previous one, `previous`.

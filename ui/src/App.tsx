@@ -11,7 +11,7 @@ import {
   useAppState,
   useRenaming,
 } from "./bridge";
-import { Downloads } from "./Downloads";
+import { Downloads, useDownloads } from "./Downloads";
 import { favoriteColumns, previewTiles, type TilePreview, useDrag } from "./drag";
 import { useFaviconColor } from "./faviconColor";
 import { Icon } from "./Icon";
@@ -34,6 +34,8 @@ function unlessTabbed(event: { target: EventTarget }) {
 }
 
 export function App() {
+  // Listening before useAppState tells the app the sidebar is ready, which sends the downloads.
+  const downloads = useDownloads();
   const state = useAppState();
   const [renaming, setRenaming] = useRenaming("arbalete:rename");
   const { indicator, preview, full, onPointerDown } = useDrag(state);
@@ -51,6 +53,8 @@ export function App() {
   useAppEvent("arbalete:new-space", () => pager.go(count));
   // Spaces are managed from the library, for now.
   useAppEvent("arbalete:library", () => pager.go(-1));
+  // Window › Downloads (⇧⌘J) opens the library on them.
+  useAppEvent("arbalete:show-downloads", () => pager.go(-1));
   const page = state?.page;
   const current = state?.pages.find((spacePage) => spacePage.space === state.space);
   const active =
@@ -129,6 +133,7 @@ export function App() {
           {state && (
             <Library
               closed={state.closed}
+              downloads={downloads}
               spaces={state.spaces}
               profiles={state.profiles}
               shown={pager.settled === -1}
@@ -140,7 +145,7 @@ export function App() {
           {state && <NewSpace index={count} shown={pager.settled === count} />}
         </div>
       </div>
-      <Downloads />
+      <Downloads downloads={downloads} now={Date.now()} />
       <div className="switcher">
         <LibraryButton
           closed={state?.closed ?? []}

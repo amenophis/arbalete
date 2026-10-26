@@ -216,6 +216,11 @@ define_class!(
             crate::shell::run(Command::Find { text: None, forward: false });
         }
 
+        #[unsafe(method(arbaleteDownloads:))]
+        fn downloads(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowDownloads);
+        }
+
         #[unsafe(method(arbaletePrint:))]
         fn print(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::Print);
@@ -531,6 +536,13 @@ fn window_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
             ns_string!("m"),
         ),
         item(mtm, ns_string!("Zoom"), sel!(performZoom:), ns_string!("")),
+        NSMenuItem::separatorItem(mtm),
+        item(
+            mtm,
+            ns_string!("Downloads"),
+            sel!(arbaleteDownloads:),
+            ns_string!("J"),
+        ),
         NSMenuItem::separatorItem(mtm),
         item(
             mtm,

@@ -1,26 +1,40 @@
-//! Downloads: where they are saved, and what the sidebar shows of them.
+//! Downloads: where they are saved, the list kept across sessions, and what the UI shows of
+//! them.
 
-use serde::Serialize;
-use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
+use std::{fs, io, path::Path, path::PathBuf};
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+/// The downloads list's file name in the data directory.
+pub const FILE_NAME: &str = "downloads.json";
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Download {
-    /// CEF's id, unique for the session.
+    /// Unique in the list, across sessions.
     pub id: u32,
+    /// CEF's id for a download of this session, which CEF reuses in the next one.
+    #[serde(skip)]
+    pub cef_id: Option<u32>,
     /// The file's name, as saved.
     pub name: String,
-    #[serde(skip)]
     pub path: PathBuf,
+    /// The address the file came from.
+    pub url: String,
     pub received: i64,
     /// 0 while the size is unknown.
     pub total: i64,
     /// Bytes per second.
+    #[serde(skip)]
     pub speed: i64,
     pub state: State,
+    /// When it started, in milliseconds since the Unix epoch.
+    pub started_at: i64,
+    /// The file is gone since it was saved: checked when the list is loaded.
+    #[serde(skip_deserializing)]
+    pub missing: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum State {
     InProgress,
@@ -30,22 +44,74 @@ pub enum State {
 }
 
 impl Download {
-    /// A download about to be saved at `path`.
-    pub fn new(id: u32, path: PathBuf) -> Self {
+    /// A download of this session, `cef_id` for CEF, about to be saved at `path`.
+    pub fn new(id: u32, cef_id: u32, path: PathBuf, url: String, started_at: i64) -> Self {
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         Self {
             id,
+            cef_id: Some(cef_id),
             name,
             path,
+            url,
             received: 0,
             total: 0,
             speed: 0,
             state: State::InProgress,
+            started_at,
+            missing: false,
         }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct Saved {
+    version: u32,
+    downloads: Vec<Download>,
+}
+
+const VERSION: u32 = 1;
+
+/// Writes the list atomically: a crash while saving leaves the previous file intact.
+pub fn save(downloads: &[Download], path: &Path) -> io::Result<()> {
+    let saved = Saved {
+        version: VERSION,
+        downloads: downloads.to_vec(),
+    };
+    let json = serde_json::to_vec_pretty(&saved).map_err(io::Error::other)?;
+    let temporary = path.with_extension("tmp");
+    fs::write(&temporary, json)?;
+    fs::rename(temporary, path)
+}
+
+/// Loads the list, empty when there is none or it cannot be read: a download still in progress
+/// when the app quit failed, and a finished one whose file is gone is marked missing.
+pub fn load(path: &Path) -> Vec<Download> {
+    let saved: Option<Saved> = fs::read(path)
+        .ok()
+        .and_then(|json| serde_json::from_slice(&json).ok());
+    let Some(saved) = saved.filter(|saved| saved.version == VERSION) else {
+        return Vec::new();
+    };
+    let mut downloads = saved.downloads;
+    for download in &mut downloads {
+        if download.state == State::InProgress {
+            download.state = State::Failed;
+        }
+        download.missing = download.state == State::Complete && !download.path.exists();
+    }
+    downloads
+}
+
+/// The id for a new download in the list.
+pub fn next_id(downloads: &[Download]) -> u32 {
+    downloads
+        .iter()
+        .map(|download| download.id + 1)
+        .max()
+        .unwrap_or(0)
 }
 
 /// A path in `dir` for a file named `name` that `taken` does not refuse: `report.pdf`, then
@@ -115,8 +181,74 @@ mod tests {
 
     #[test]
     fn names_a_download_after_its_file() {
-        let download = Download::new(7, PathBuf::from("/d/report (1).pdf"));
+        let download = Download::new(
+            0,
+            7,
+            PathBuf::from("/d/report (1).pdf"),
+            "https://example.com/report.pdf".into(),
+            1,
+        );
         assert_eq!(download.name, "report (1).pdf");
         assert_eq!(download.state, State::InProgress);
+    }
+
+    /// A directory of its own under the system's temporary directory, removed on drop.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("arbalete-{name}-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn keeps_the_list_across_sessions() {
+        let dir = TestDir::new("downloads");
+        let file = dir.0.join("report.pdf");
+        fs::write(&file, "pdf").unwrap();
+        let mut done = Download::new(0, 5, file, "https://example.com/r".into(), 10);
+        done.state = State::Complete;
+        let running = Download::new(
+            1,
+            6,
+            dir.0.join("big.iso"),
+            "https://example.com/b".into(),
+            20,
+        );
+        let mut gone = Download::new(
+            2,
+            7,
+            dir.0.join("gone.zip"),
+            "https://example.com/g".into(),
+            30,
+        );
+        gone.state = State::Complete;
+        let list = dir.0.join(FILE_NAME);
+        save(&[done.clone(), running, gone], &list).unwrap();
+
+        let loaded = load(&list);
+        assert_eq!(loaded[0].name, "report.pdf");
+        assert_eq!(loaded[0].cef_id, None);
+        assert!(!loaded[0].missing);
+        assert_eq!(loaded[1].state, State::Failed);
+        assert!(loaded[2].missing);
+        assert_eq!(next_id(&loaded), 3);
+    }
+
+    #[test]
+    fn loads_nothing_from_a_missing_or_invalid_file() {
+        let dir = TestDir::new("downloads-invalid");
+        assert!(load(&dir.0.join(FILE_NAME)).is_empty());
+        fs::write(dir.0.join(FILE_NAME), "not json").unwrap();
+        assert!(load(&dir.0.join(FILE_NAME)).is_empty());
+        assert_eq!(next_id(&[]), 0);
     }
 }
