@@ -71,6 +71,12 @@ const OVERLAY_WIDTH: i32 = 720;
 const OVERLAY_ROW: i32 = 62;
 const OVERLAY_TOP: f32 = 0.29;
 
+/// Editing the address, the Command Bar sits over the docked sidebar's url bar instead, wider
+/// than the sidebar, like Arc's: its left edge and top are the url bar's (ui/src/index.css).
+const URL_EDIT_WIDTH: i32 = 360;
+const URL_BAR_LEFT: i32 = 7;
+const URL_BAR_TOP: i32 = 44;
+
 /// How many tabs selected last the tab switcher lists, at most.
 const RECENT_TABS: usize = 10;
 
@@ -141,6 +147,8 @@ thread_local! {
     /// The first launch shows the import assistant with the window, instead of the start page.
     static IMPORT_AT_LAUNCH: Cell<bool> = const { Cell::new(false) };
     static SIDEBAR_MODE: Cell<SidebarMode> = const { Cell::new(SidebarMode::Shown) };
+    /// The Command Bar edits the address over the docked sidebar's url bar.
+    static OVER_URL_BAR: Cell<bool> = const { Cell::new(false) };
     /// The tabs selected last, the most recent first, which the tab switcher lists.
     static RECENT: RefCell<Vec<NodeId>> = const { RefCell::new(Vec::new()) };
     /// The tab switcher's tabs and the picked one's index, while ⌃ is held.
@@ -536,6 +544,7 @@ fn switch_tab(forward: bool) {
     if let Some(overlay) = OVERLAY.with_borrow(Clone::clone)
         && overlay.is_visible() == 0
     {
+        OVER_URL_BAR.set(false);
         place_overlay(OVERLAY_ROW);
         overlay.set_visible(1);
         round_overlay();
@@ -603,18 +612,29 @@ fn show_overlay(visible: bool) {
 
 /// Shows the Command Bar holding the selected tab's address, to edit it; without one, empty.
 fn edit_url() {
-    let url =
-        STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()));
-    open_overlay(true, url);
+    let tab = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let id = sidebar.displayed().selected?;
+        let NodeKind::Tab(tab) = &sidebar.node(id)?.kind else {
+            return None;
+        };
+        Some((tab.url.clone(), favicon_url(sidebar.profile_of(id)?, tab)))
+    });
+    open_overlay(true, tab);
 }
 
-fn open_overlay(visible: bool, url: Option<String>) {
+/// Shows the Command Bar, or hides it. Holding a tab's address and icon, it edits the address,
+/// over the docked sidebar's url bar; empty, it opens a tab, centered on the window.
+fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
     let Some(overlay) = OVERLAY.with_borrow(Clone::clone) else {
         return;
     };
     if visible {
+        let over_url_bar = tab.is_some() && SIDEBAR_MODE.get() == SidebarMode::Shown;
+        OVER_URL_BAR.set(over_url_bar);
         place_overlay(OVERLAY_ROW);
-        let detail = json!({ "url": url });
+        let (url, favicon) = tab.unzip();
+        let detail = json!({ "url": url, "favicon": favicon.flatten() });
         dispatch(
             &OVERLAY_VIEW,
             &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
@@ -635,7 +655,7 @@ fn round_overlay() {
     }
 }
 
-/// Centers the Command Bar on the window, `height` tall.
+/// Centers the Command Bar on the window, or places it over the url bar, `height` tall.
 fn place_overlay(height: i32) {
     let (Some(overlay), Some(size)) = (
         OVERLAY.with_borrow(Clone::clone),
@@ -643,13 +663,23 @@ fn place_overlay(height: i32) {
     ) else {
         return;
     };
-    let width = OVERLAY_WIDTH.min(size.width - 2 * CARD_MARGIN);
-    overlay.set_bounds(Some(&Rect {
-        x: (size.width - width) / 2,
-        y: (size.height as f32 * OVERLAY_TOP) as i32,
-        width,
-        height,
-    }));
+    let bounds = if OVER_URL_BAR.get() {
+        Rect {
+            x: URL_BAR_LEFT,
+            y: URL_BAR_TOP,
+            width: URL_EDIT_WIDTH.min(size.width - 2 * URL_BAR_LEFT),
+            height,
+        }
+    } else {
+        let width = OVERLAY_WIDTH.min(size.width - 2 * CARD_MARGIN);
+        Rect {
+            x: (size.width - width) / 2,
+            y: (size.height as f32 * OVERLAY_TOP) as i32,
+            width,
+            height,
+        }
+    };
+    overlay.set_bounds(Some(&bounds));
 }
 
 /// Sends the Command Bar the open tabs, in every Space and the favorites, then the displayed

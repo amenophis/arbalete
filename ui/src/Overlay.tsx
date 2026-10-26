@@ -25,7 +25,8 @@ const RESULTS_PADDING = 8;
 const SEARCH_URL = "https://www.google.com/search?q=";
 
 // The Command Bar, shown above the page by the app (open_overlay in app/src/shell.rs): empty, it
-// opens a tab; holding the selected tab's address (⌘L), it loads another in that tab. Below what
+// opens a tab; holding the selected tab's address and icon (⌘L), over the sidebar's url bar, it
+// loads another in that tab. Below what
 // is typed, the address it opens or a search, then the open tabs and the history pages matching
 // it; the arrows pick one, Enter or a click opens it, Escape closes the bar. Typing forward
 // completes the field with the best result's address, selected: typing on replaces it, deleting
@@ -34,6 +35,8 @@ export function Overlay() {
   const input = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [editing, setEditing] = useState(false);
+  // The edited page's icon, which the field shows instead of the search icon.
+  const [favicon, setFavicon] = useState<string | null>(null);
   const [results, setResults] = useState<Results | null>(null);
   const [picked, setPicked] = useState(0);
   const [completing, setCompleting] = useState(false);
@@ -42,10 +45,11 @@ export function Overlay() {
   // app/src/shell.rs): the app shows the picked tab once ⌃ is released.
   const [switching, setSwitching] = useState<Switching | null>(null);
   useAppEvent<Switching>("arbalete:switch", setSwitching);
-  useAppEvent<{ url: string | null } | null>("arbalete:show", (detail) => {
+  useAppEvent<{ url: string | null; favicon?: string | null } | null>("arbalete:show", (detail) => {
     const url = detail?.url ?? null;
     setText(url ?? "");
     setEditing(url !== null);
+    setFavicon(detail?.favicon ?? null);
     setResults(null);
     setPicked(0);
     setCompleting(false);
@@ -109,7 +113,11 @@ export function Overlay() {
       }}
     >
       <label className="overlay-search">
-        <Icon d="M7 11.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM10.3 10.3 13.5 13.5" size={18} />
+        {editing && favicon ? (
+          <img className="favicon" src={favicon} alt="" />
+        ) : (
+          <Icon d="M7 11.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM10.3 10.3 13.5 13.5" size={18} />
+        )}
         <input
           ref={input}
           aria-label="Search or enter URL"
