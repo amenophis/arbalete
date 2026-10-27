@@ -1,8 +1,16 @@
 //! Commands the UI sends to the app, as `https://arbalete.ui/command/<name>` requests.
 
 use arbalete_core::import::Choice;
+use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
 use serde::Deserialize;
+
+/// The app's settings the settings window turns on or off (app/src/settings.rs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Setting {
+    WarnBeforeQuit,
+    RestoreSession,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -158,6 +166,17 @@ pub enum Command {
     RenameProfile(ProfileId, String),
     /// Changes a profile's color: `profile/color/<profile id>/<color>`, like `blue`.
     ColorProfile(ProfileId, Color),
+    /// Changes what a profile's Command Bar searches with:
+    /// `profile/search/<profile id>/<engine>`, like `duckduckgo`.
+    SetSearchEngine(ProfileId, SearchEngine),
+    /// Shows the settings window, from the menu: `settings/show`.
+    ShowSettings,
+    /// Closes the settings window: `settings/hide`.
+    HideSettings,
+    /// The settings window is listening: send it the settings, `settings/ready`.
+    SettingsReady,
+    /// Turns a setting on or off: `settings/<warn-before-quit or restore-session>/<true or false>`.
+    SetSetting(Setting, bool),
     /// Shows a Space in the sidebar, and its selected tab in the content view: `space/<space id>`.
     ShowSpace(SpaceId),
     /// Shows a Space by its number in sidebar order, from 1 to 9: `space/number/<n>`.
@@ -302,6 +321,9 @@ impl Command {
             "space/previous" => Some(Self::PreviousSpace),
             "import/show" => Some(Self::ShowImport),
             "import/ready" => Some(Self::ImportReady),
+            "settings/show" => Some(Self::ShowSettings),
+            "settings/ready" => Some(Self::SettingsReady),
+            "settings/hide" => Some(Self::HideSettings),
             "import/close" => Some(Self::CloseImport),
             "import/full-disk-access" => Some(Self::OpenFullDiskAccess),
             "find/hide" => Some(Self::HideFind),
@@ -365,6 +387,25 @@ impl Command {
                 {
                     let id = serde_json::from_str(id).ok()?;
                     return percent_decode(name).map(|name| Self::RenameProfile(id, name));
+                }
+                if let Some((id, engine)) = path
+                    .strip_prefix("profile/search/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    let engine = serde_json::from_value(engine.into()).ok()?;
+                    return Some(Self::SetSearchEngine(id, engine));
+                }
+                if let Some((setting, on)) = path
+                    .strip_prefix("settings/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let setting = match setting {
+                        "warn-before-quit" => Setting::WarnBeforeQuit,
+                        "restore-session" => Setting::RestoreSession,
+                        _ => return None,
+                    };
+                    return on.parse().ok().map(|on| Self::SetSetting(setting, on));
                 }
                 if let Some((id, color)) = path
                     .strip_prefix("profile/color/")
@@ -574,7 +615,8 @@ fn percent_decode(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, Target};
+    use super::{Command, Setting, Target};
+    use arbalete_core::search::SearchEngine;
     use arbalete_core::sidebar::Color;
 
     #[test]
@@ -1025,6 +1067,36 @@ mod tests {
     fn parses_import_commands() {
         assert_eq!(Command::parse("import/show"), Some(Command::ShowImport));
         assert_eq!(Command::parse("import/ready"), Some(Command::ImportReady));
+    }
+
+    #[test]
+    fn parses_settings_commands() {
+        assert_eq!(Command::parse("settings/show"), Some(Command::ShowSettings));
+        assert_eq!(
+            Command::parse("settings/ready"),
+            Some(Command::SettingsReady)
+        );
+        assert_eq!(Command::parse("settings/hide"), Some(Command::HideSettings));
+        assert_eq!(
+            Command::parse("settings/warn-before-quit/true"),
+            Some(Command::SetSetting(Setting::WarnBeforeQuit, true))
+        );
+        assert_eq!(
+            Command::parse("settings/restore-session/false"),
+            Some(Command::SetSetting(Setting::RestoreSession, false))
+        );
+        assert_eq!(Command::parse("settings/unknown/true"), None);
+        assert_eq!(Command::parse("settings/restore-session/yes"), None);
+        let Some(Command::SetSearchEngine(id, engine)) =
+            Command::parse("profile/search/1/duckduckgo")
+        else {
+            panic!("a search engine");
+        };
+        assert_eq!(
+            (serde_json::to_string(&id).unwrap(), engine),
+            ("1".to_string(), SearchEngine::DuckDuckGo)
+        );
+        assert_eq!(Command::parse("profile/search/1/altavista"), None);
         assert_eq!(Command::parse("import/close"), Some(Command::CloseImport));
         assert_eq!(
             Command::parse("import/full-disk-access"),

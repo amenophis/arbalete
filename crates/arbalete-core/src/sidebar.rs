@@ -4,6 +4,7 @@
 //! Space has two root containers: its pinned tabs and its "Today" tabs. Tabs, folders and splits are
 //! nodes of a single tree, stored flat and linked by `parent` and `children`.
 
+use crate::search::SearchEngine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -28,6 +29,9 @@ pub struct Profile {
     /// favorite brings it back for when they are empty again.
     #[serde(default)]
     pub favorites_hint_hidden: bool,
+    /// What the Command Bar searches with, in this profile's Spaces.
+    #[serde(default)]
+    pub search_engine: SearchEngine,
 }
 
 /// How many favorites a profile holds at most: the grid keeps 3 rows of 4 tiles.
@@ -256,6 +260,7 @@ impl Sidebar {
             color: Color::default(),
             favorites,
             favorites_hint_hidden: false,
+            search_engine: SearchEngine::default(),
         });
         id
     }
@@ -280,6 +285,11 @@ impl Sidebar {
 
     pub fn set_profile_color(&mut self, id: ProfileId, color: Color) -> Result<(), Error> {
         self.profile_mut(id)?.color = color;
+        Ok(())
+    }
+
+    pub fn set_search_engine(&mut self, id: ProfileId, engine: SearchEngine) -> Result<(), Error> {
+        self.profile_mut(id)?.search_engine = engine;
         Ok(())
     }
 
@@ -1283,6 +1293,20 @@ mod tests {
         assert_eq!(sidebar.create_profile(" "), Err(Error::EmptyTitle));
         assert_eq!(sidebar.profiles().len(), 2);
         assert_eq!(sidebar.spaces().len(), 2);
+    }
+
+    #[test]
+    fn a_profile_searches_with_google_until_another_engine_is_picked() {
+        let mut sidebar = Sidebar::default();
+        let id = sidebar.profiles()[0].id;
+        assert_eq!(sidebar.profiles()[0].search_engine, SearchEngine::Google);
+        sidebar.set_search_engine(id, SearchEngine::Ecosia).unwrap();
+        assert_eq!(sidebar.profiles()[0].search_engine, SearchEngine::Ecosia);
+        let unknown = serde_json::from_str("999").unwrap();
+        assert_eq!(
+            sidebar.set_search_engine(unknown, SearchEngine::Bing),
+            Err(Error::UnknownProfile)
+        );
     }
 
     #[test]

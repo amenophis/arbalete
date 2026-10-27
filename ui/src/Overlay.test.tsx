@@ -118,6 +118,24 @@ test("completes the typed address with the best result's, selected, which typing
   expect(input.value).toBe("github.com/arbalete/issues");
 });
 
+test("searches with the displayed Space's profile's engine", () => {
+  render(<Overlay />);
+  act(() => {
+    dispatchEvent(
+      new CustomEvent("arbalete:show", {
+        detail: { url: null, search: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=" } },
+      }),
+    );
+  });
+  fireEvent.change(field(), { target: { value: "arc browser" } });
+  expect(rows()).toEqual(["arc browser — Search DuckDuckGo"]);
+  fireEvent.submit(field());
+  expect(fetch).toHaveBeenLastCalledWith(
+    `/command/open/${encodeURIComponent("https://duckduckgo.com/?q=arc%20browser")}`,
+    { method: "POST" },
+  );
+});
+
 test("answers to an older search are ignored", () => {
   render(<Overlay />);
   show();

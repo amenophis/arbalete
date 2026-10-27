@@ -5,5 +5,6 @@
 pub mod favicon;
 pub mod history;
 pub mod import;
+pub mod search;
 pub mod sidebar;
 pub mod store;

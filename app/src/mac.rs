@@ -235,6 +235,11 @@ define_class!(
             crate::shell::run(Command::ShowDownloads);
         }
 
+        #[unsafe(method(arbaleteSettings:))]
+        fn settings(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowSettings);
+        }
+
         #[unsafe(method(arbaleteLibrary:))]
         fn library(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowLibraryPage);
@@ -399,12 +404,21 @@ pub fn setup_menu() {
     for (title, items) in [
         (
             ns_string!("Arbalete"),
-            vec![item(
-                mtm,
-                ns_string!("Quit Arbalete"),
-                sel!(terminate:),
-                ns_string!("q"),
-            )],
+            vec![
+                item(
+                    mtm,
+                    ns_string!("Settings…"),
+                    sel!(arbaleteSettings:),
+                    ns_string!(","),
+                ),
+                NSMenuItem::separatorItem(mtm),
+                item(
+                    mtm,
+                    ns_string!("Quit Arbalete"),
+                    sel!(terminate:),
+                    ns_string!("q"),
+                ),
+            ],
         ),
         (
             ns_string!("File"),
