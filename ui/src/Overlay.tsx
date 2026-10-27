@@ -21,8 +21,10 @@ export const SEARCH_ROW = 62;
 export const RESULT_ROW = 44;
 const RESULTS_PADDING = 8;
 
-// The search engine for what is not an address.
-const SEARCH_URL = "https://www.google.com/search?q=";
+// The displayed Space's profile's search engine, for what is not an address: its name and its
+// address before the query (Profiles in the settings).
+type Search = { name: string; url: string };
+const GOOGLE: Search = { name: "Google", url: "https://www.google.com/search?q=" };
 
 // The Command Bar, shown above the page by the app (open_overlay in app/src/shell.rs): empty, it
 // opens a tab; holding the selected tab's address and icon (⌘L), over the sidebar's url bar, it
@@ -37,6 +39,7 @@ export function Overlay() {
   const [editing, setEditing] = useState(false);
   // The edited page's icon, which the field shows instead of the search icon.
   const [favicon, setFavicon] = useState<string | null>(null);
+  const [search, setSearch] = useState(GOOGLE);
   const [results, setResults] = useState<Results | null>(null);
   const [picked, setPicked] = useState(0);
   const [completing, setCompleting] = useState(false);
@@ -45,20 +48,24 @@ export function Overlay() {
   // app/src/shell.rs): the app shows the picked tab once ⌃ is released.
   const [switching, setSwitching] = useState<Switching | null>(null);
   useAppEvent<Switching>("arbalete:switch", setSwitching);
-  useAppEvent<{ url: string | null; favicon?: string | null } | null>("arbalete:show", (detail) => {
-    const url = detail?.url ?? null;
-    setText(url ?? "");
-    setEditing(url !== null);
-    setFavicon(detail?.favicon ?? null);
-    setResults(null);
-    setPicked(0);
-    setCompleting(false);
-    setSwitching(null);
-    requestAnimationFrame(() => {
-      input.current?.focus();
-      input.current?.select();
-    });
-  });
+  useAppEvent<{ url: string | null; favicon?: string | null; search?: Search } | null>(
+    "arbalete:show",
+    (detail) => {
+      const url = detail?.url ?? null;
+      setText(url ?? "");
+      setEditing(url !== null);
+      setFavicon(detail?.favicon ?? null);
+      setSearch(detail?.search ?? GOOGLE);
+      setResults(null);
+      setPicked(0);
+      setCompleting(false);
+      setSwitching(null);
+      requestAnimationFrame(() => {
+        input.current?.focus();
+        input.current?.select();
+      });
+    },
+  );
   // Only the answer to what is typed now counts.
   useAppEvent<Results>("arbalete:results", (detail) => {
     if (detail.text === text) setResults(detail);
@@ -68,7 +75,7 @@ export function Overlay() {
   useLayoutEffect(() => {
     if (value !== text) input.current?.setSelectionRange(text.length, value.length);
   }, [text, value]);
-  const rows = resultRows(text, results, completion);
+  const rows = resultRows(text, results, completion, search);
   const height = switching
     ? switching.tabs.length * RESULT_ROW + 2 * RESULTS_PADDING
     : rows.length
@@ -184,6 +191,7 @@ export function resultRows(
   text: string,
   results: Results | null,
   completion: Completion | null = null,
+  search: Search = GOOGLE,
 ): Row[] {
   const typed = text.trim();
   if (!typed) return [];
@@ -194,8 +202,8 @@ export function resultRows(
       ? { kind: "go", url, title: typed, search: false }
       : {
           kind: "go",
-          url: SEARCH_URL + encodeURIComponent(typed),
-          title: `${typed} — Search Google`,
+          url: search.url + encodeURIComponent(typed),
+          title: `${typed} — Search ${search.name}`,
           search: true,
         };
   return [

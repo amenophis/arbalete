@@ -4,6 +4,7 @@ mod downloads;
 mod mac;
 mod menu;
 mod motion;
+mod settings;
 mod shell;
 #[cfg(target_os = "macos")]
 mod swipe;

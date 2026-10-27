@@ -3,12 +3,14 @@
 //! The `cef` crate's default callbacks return 0, which means "no" or "cancel": every callback the app
 //! relies on is implemented explicitly.
 
-use crate::command::{Command, DownloadAction, HitTarget, Target, Zoom};
+use crate::command::{Command, DownloadAction, HitTarget, Setting, Target, Zoom};
 use crate::downloads::{self, Download};
 use crate::menu::{self, Action};
+use crate::settings::{self, Settings};
 use arbalete_core::history::{self, History};
 use arbalete_core::import::browsers::{self, Family};
 use arbalete_core::import::{self, Choice, safari};
+use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{
     Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab,
 };
@@ -97,6 +99,12 @@ const IMPORT_SIZE: Size = Size {
     height: 480,
 };
 
+/// The settings window's size, at most, like Arc's (ui/src/Settings.tsx).
+const SETTINGS_SIZE: Size = Size {
+    width: 600,
+    height: 520,
+};
+
 /// The Privacy & Security pane of System Settings that lists the apps with Full Disk Access.
 const FULL_DISK_ACCESS: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
@@ -131,6 +139,11 @@ thread_local! {
     /// sessions never import.
     static IMPORT_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// The settings window, shown above the page; created the first time it is shown.
+    static SETTINGS_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static SETTINGS_PANEL: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// The app's settings, loaded when the context is initialized.
+    static SETTINGS: Cell<Settings> = Cell::new(Settings::default());
     /// The find bar, at the card's top right corner; created the first time it is shown.
     static FIND_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
@@ -634,7 +647,17 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         OVER_URL_BAR.set(over_url_bar);
         place_overlay(OVERLAY_ROW);
         let (url, favicon) = tab.unzip();
-        let detail = json!({ "url": url, "favicon": favicon.flatten() });
+        let engine = STATE.with_borrow(|state| {
+            let profile = state.sidebar.displayed().profile;
+            let profiles = state.sidebar.profiles();
+            profiles
+                .iter()
+                .find(|p| p.id == profile)
+                .map(|p| p.search_engine)
+        });
+        let engine = engine.unwrap_or_default();
+        let search = json!({ "name": engine.name(), "url": engine.url() });
+        let detail = json!({ "url": url, "favicon": favicon.flatten(), "search": search });
         dispatch(
             &OVERLAY_VIEW,
             &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
@@ -1092,6 +1115,15 @@ fn restore(path: PathBuf) {
         }
     };
     SESSION_FILE.set(Some(path));
+    // Without restoring the session, every Space starts without "Today" tabs.
+    if !SETTINGS.get().restore_session {
+        STATE.with_borrow_mut(|state| {
+            let spaces: Vec<_> = state.sidebar.spaces().iter().map(|s| s.id).collect();
+            for space in spaces {
+                let _ = state.sidebar.clear_today(space);
+            }
+        });
+    }
     STATE.with_borrow_mut(|state| favicon::sweep(&mut state.sidebar, profile_dir));
     if first_launch && !browsers::detect(&crate::user_home()).is_empty() {
         IMPORT_AT_LAUNCH.set(true);
@@ -1144,6 +1176,77 @@ fn show_import() {
     if let Some(view) = controller.contents_view() {
         view.request_focus();
     }
+}
+
+/// Shows the settings window, centered on the window.
+fn show_settings() {
+    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+        return;
+    };
+    if SETTINGS_PANEL.with_borrow(Option::is_none) {
+        let url = format!("{UI_ORIGIN}index.html#settings");
+        let view = browser_view(UiClient::new(), &url, no_width, None);
+        let controller = window
+            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
+            .expect("settings");
+        SETTINGS_VIEW.set(Some(view));
+        SETTINGS_PANEL.set(Some(controller));
+    }
+    let Some(controller) = SETTINGS_PANEL.with_borrow(Clone::clone) else {
+        return;
+    };
+    let size = window.size();
+    let (width, height) = (
+        SETTINGS_SIZE.width.min(size.width),
+        SETTINGS_SIZE.height.min(size.height),
+    );
+    controller.set_bounds(Some(&Rect {
+        x: (size.width - width) / 2,
+        y: (size.height - height) / 2,
+        width,
+        height,
+    }));
+    controller.set_visible(1);
+    // A page still loading asks for them once it listens (Command::SettingsReady).
+    send_settings();
+    if let Some(view) = controller.contents_view() {
+        view.request_focus();
+    }
+}
+
+/// Sends the settings window the app's settings, the search engines and each profile's.
+fn send_settings() {
+    let settings = SETTINGS.get();
+    let engines: Vec<_> = SearchEngine::ALL
+        .iter()
+        .map(|engine| json!({ "id": engine, "name": engine.name() }))
+        .collect();
+    let profiles: Vec<_> = STATE.with_borrow(|state| {
+        let profiles = state.sidebar.profiles().iter();
+        profiles
+            .map(|p| json!({ "id": p.id, "name": p.name, "color": p.color, "searchEngine": p.search_engine }))
+            .collect()
+    });
+    let detail = json!({ "settings": settings, "engines": engines, "profiles": profiles });
+    dispatch(
+        &SETTINGS_VIEW,
+        &format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#),
+    );
+}
+
+/// Turns an app setting on or off and saves it.
+fn set_setting(setting: Setting, on: bool) {
+    let mut settings = SETTINGS.get();
+    match setting {
+        Setting::WarnBeforeQuit => settings.warn_before_quit = on,
+        Setting::RestoreSession => settings.restore_session = on,
+    }
+    SETTINGS.set(settings);
+    let path = DATA_DIR.get().expect("set").join(settings::FILE_NAME);
+    if let Err(error) = settings::save(&settings, &path) {
+        eprintln!("cannot save the settings: {error}");
+    }
+    send_settings();
 }
 
 /// Shows the find bar, with the text last searched for selected.
@@ -2133,6 +2236,19 @@ pub fn run(command: Command) {
         (Command::ColorProfile(id, color), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_profile_color(id, color));
         }
+        (Command::SetSearchEngine(id, engine), _) => {
+            if update_sidebar(|sidebar| sidebar.set_search_engine(id, engine)).is_ok() {
+                send_settings();
+            }
+        }
+        (Command::ShowSettings, _) => show_settings(),
+        (Command::HideSettings, _) => {
+            if let Some(panel) = SETTINGS_PANEL.with_borrow(Clone::clone) {
+                panel.set_visible(0);
+            }
+        }
+        (Command::SettingsReady, _) => send_settings(),
+        (Command::SetSetting(setting, on), _) => set_setting(setting, on),
         (
             Command::CreateSpace {
                 title,
@@ -2233,6 +2349,10 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
 /// Closes the main window, which quits the app once its browsers are closed. Called by the macOS
 /// app menu; the window's own close button does the same on every OS.
 pub fn close() {
+    #[cfg(target_os = "macos")]
+    if SETTINGS.get().warn_before_quit && !crate::mac::confirm("Quit Arbalete?", "", "Quit") {
+        return;
+    }
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
         window.close();
     }
@@ -2273,6 +2393,7 @@ wrap_browser_process_handler! {
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
             DATA_DIR.set(self.data_dir.clone()).expect("one context");
+            SETTINGS.set(settings::load(&self.data_dir.join(settings::FILE_NAME)));
             restore(self.data_dir.join(store::FILE_NAME));
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
             window_create_top_level(Some(&mut MainWindowDelegate::new()));
@@ -2356,7 +2477,7 @@ wrap_window_delegate! {
         /// Asks every browser to close; the window closes once they all can.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             CLOSING.set(true);
-            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW, &FIND_VIEW]
+            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW, &FIND_VIEW, &SETTINGS_VIEW]
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
                 .collect();
