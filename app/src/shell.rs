@@ -1182,6 +1182,21 @@ fn show_import() {
     }
 }
 
+/// Shows Chromium's developer tools for the shown page, in a window of their own, or closes them;
+/// on an element, at a point of the page, they show it, open or not.
+fn show_dev_tools(host: &BrowserHost, at: Option<(i32, i32)>) {
+    if at.is_none() && host.has_dev_tools() == 1 {
+        return host.close_dev_tools();
+    }
+    let at = at.map(|(x, y)| Point { x, y });
+    host.show_dev_tools(
+        Some(&WindowInfo::default()),
+        None,
+        Some(&BrowserSettings::default()),
+        at.as_ref(),
+    );
+}
+
 /// Shows the settings in a window of their own, like Arc's, brought to the front when it is
 /// already open. Its page asks for the settings once it listens (Command::SettingsReady).
 fn show_settings() {
@@ -2278,6 +2293,16 @@ pub fn run(command: Command) {
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
         (Command::ForceReload, Some(browser)) => browser.reload_ignore_cache(),
+        (Command::ViewSource, Some(browser)) => {
+            if let Some(frame) = browser.main_frame() {
+                open_tab(&format!("view-source:{}", CefString::from(&frame.url())));
+            }
+        }
+        (Command::DevTools(at), Some(browser)) => {
+            if let Some(host) = browser.host() {
+                show_dev_tools(&host, at);
+            }
+        }
         (Command::Stop, Some(browser)) => browser.stop_load(),
         (Command::Zoom(zoom), Some(browser)) => {
             if let Some(host) = browser.host() {
@@ -2848,8 +2873,10 @@ const OPEN_LINK: i32 = 26500;
 const COPY_LINK: i32 = OPEN_LINK + 1;
 const OPEN_IMAGE: i32 = OPEN_LINK + 2;
 const COPY_IMAGE: i32 = OPEN_LINK + 3;
+const INSPECT: i32 = OPEN_LINK + 4;
 
-// Adds what a browser offers on a link or an image above Chromium's own items.
+// Adds what a browser offers on a link or an image above Chromium's own items, and Inspect
+// Element below them.
 wrap_context_menu_handler! {
     struct ContentMenuHandler {}
 
@@ -2863,19 +2890,28 @@ wrap_context_menu_handler! {
             if params.media_type() == ContextMenuMediaType::IMAGE {
                 items.extend([(OPEN_IMAGE, "Open Image in New Tab"), (COPY_IMAGE, "Copy Image Address")]);
             }
-            if items.is_empty() {
-                return;
+            if !items.is_empty() {
+                if model.count() > 0 {
+                    model.insert_separator_at(0);
+                }
+                for (id, label) in items.into_iter().rev() {
+                    model.insert_item_at(0, id, Some(&CefString::from(label)));
+                }
             }
             if model.count() > 0 {
-                model.insert_separator_at(0);
+                model.add_separator();
             }
-            for (id, label) in items.into_iter().rev() {
-                model.insert_item_at(0, id, Some(&CefString::from(label)));
-            }
+            model.add_item(INSPECT, Some(&CefString::from("Inspect Element")));
         }
 
-        fn on_context_menu_command(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, command_id: i32, _event_flags: EventFlags) -> i32 {
+        fn on_context_menu_command(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, command_id: i32, _event_flags: EventFlags) -> i32 {
             let Some(params) = params else { return 0 };
+            if command_id == INSPECT {
+                if let Some(host) = browser.and_then(|browser| browser.host()) {
+                    show_dev_tools(&host, Some((params.xcoord(), params.ycoord())));
+                }
+                return 1;
+            }
             let link = CefString::from(&params.link_url()).to_string();
             let image = CefString::from(&params.source_url()).to_string();
             let action = match command_id {

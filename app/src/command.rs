@@ -27,6 +27,12 @@ pub enum Command {
     Zoom(Zoom),
     /// Prints the page, from the menu.
     Print,
+    /// Opens the page's source in a new tab, from the menu: `page/source`.
+    ViewSource,
+    /// Shows Chromium's developer tools for the page in a window of their own, or closes them,
+    /// from the menu, `page/devtools`; from the page's menu, on the element at a point of the
+    /// page.
+    DevTools(Option<(i32, i32)>),
     /// Shows the find bar above the page, from the menu.
     ShowFind,
     /// Finds text in the page, forward or backward: `find/forward/<percent-encoded text>`,
@@ -322,6 +328,8 @@ impl Command {
             "import/show" => Some(Self::ShowImport),
             "import/ready" => Some(Self::ImportReady),
             "settings/show" => Some(Self::ShowSettings),
+            "page/source" => Some(Self::ViewSource),
+            "page/devtools" => Some(Self::DevTools(None)),
             "settings/ready" => Some(Self::SettingsReady),
             "settings/hide" => Some(Self::HideSettings),
             "import/close" => Some(Self::CloseImport),
@@ -1072,6 +1080,11 @@ mod tests {
     #[test]
     fn parses_settings_commands() {
         assert_eq!(Command::parse("settings/show"), Some(Command::ShowSettings));
+        assert_eq!(Command::parse("page/source"), Some(Command::ViewSource));
+        assert_eq!(
+            Command::parse("page/devtools"),
+            Some(Command::DevTools(None))
+        );
         assert_eq!(
             Command::parse("settings/ready"),
             Some(Command::SettingsReady)

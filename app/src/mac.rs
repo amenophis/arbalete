@@ -15,9 +15,9 @@ use objc2::{
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSColor, NSControlStateValueOn,
     NSDownArrowFunctionKey, NSEvent, NSEventMask, NSEventModifierFlags, NSEventPhase, NSEventType,
-    NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
-    NSRightArrowFunctionKey, NSTextField, NSUpArrowFunctionKey, NSView, NSWindowButton,
-    NSWorkspace,
+    NSF12FunctionKey, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard,
+    NSPasteboardTypeString, NSRightArrowFunctionKey, NSTextField, NSUpArrowFunctionKey, NSView,
+    NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{NSArray, NSNumber, NSSize, NSString, NSURL, ns_string};
 use std::cell::{Cell, RefCell};
@@ -188,6 +188,16 @@ define_class!(
         #[unsafe(method(arbaleteForceReload:))]
         fn force_reload(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ForceReload);
+        }
+
+        #[unsafe(method(arbaleteViewSource:))]
+        fn view_source(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ViewSource);
+        }
+
+        #[unsafe(method(arbaleteDevTools:))]
+        fn dev_tools(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::DevTools(None));
         }
 
         #[unsafe(method(arbaleteStop:))]
@@ -523,6 +533,25 @@ pub fn setup_menu() {
                     sel!(arbaleteZoomOut:),
                     ns_string!("-"),
                 ),
+                NSMenuItem::separatorItem(mtm),
+                option_item(
+                    mtm,
+                    ns_string!("View Source"),
+                    sel!(arbaleteViewSource:),
+                    ns_string!("u"),
+                ),
+                option_item(
+                    mtm,
+                    ns_string!("Developer Tools"),
+                    sel!(arbaleteDevTools:),
+                    ns_string!("i"),
+                ),
+                function_key_item(
+                    mtm,
+                    ns_string!("Developer Tools"),
+                    sel!(arbaleteDevTools:),
+                    NSF12FunctionKey,
+                ),
             ],
         ),
         (
@@ -784,6 +813,34 @@ fn hidden_item(
     key: &NSString,
 ) -> Retained<NSMenuItem> {
     let item = item(mtm, title, action, key);
+    item.setHidden(true);
+    item.setAllowsKeyEquivalentWhenHidden(true);
+    item
+}
+
+/// A menu item sending `action` with ⌘⌥ and `key`.
+fn option_item(
+    mtm: MainThreadMarker,
+    title: &NSString,
+    action: Sel,
+    key: &NSString,
+) -> Retained<NSMenuItem> {
+    let item = item(mtm, title, action, key);
+    item.setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Option);
+    item
+}
+
+/// A menu item the menu does not show, whose shortcut is a function `key` alone, like F12: a
+/// second shortcut for an item shown.
+fn function_key_item(
+    mtm: MainThreadMarker,
+    title: &NSString,
+    action: Sel,
+    key: u32,
+) -> Retained<NSMenuItem> {
+    let key = char::from_u32(key).expect("a function key").to_string();
+    let item = item(mtm, title, action, &NSString::from_str(&key));
+    item.setKeyEquivalentModifierMask(NSEventModifierFlags::empty());
     item.setHidden(true);
     item.setAllowsKeyEquivalentWhenHidden(true);
     item
