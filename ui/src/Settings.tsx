@@ -75,9 +75,9 @@ export const SHORTCUTS: [string, [string, string][]][] = [
   ],
 ];
 
-// Shown above the page by the app from Arbalete › Settings… (show_settings in
+// The settings window's page, which the app opens from Arbalete › Settings… (show_settings in
 // app/src/shell.rs): the app's own settings, each profile's search engine, and every shortcut.
-// Its × or Escape closes it.
+// Escape closes the window, like its close button.
 export function Settings() {
   const [detail, setDetail] = useState<SettingsDetail>();
   const [section, setSection] = useState<Section>("general");
@@ -111,14 +111,6 @@ export function Settings() {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="settings-close"
-          aria-label="Close settings"
-          onClick={() => send("settings/hide")}
-        >
-          ×
-        </button>
       </header>
       <div className="settings-panel" role="tabpanel" aria-label={label}>
         {section === "general" && <General settings={detail.settings} />}
