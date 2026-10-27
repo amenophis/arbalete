@@ -40,6 +40,10 @@ test("asks the app for the settings once it listens, and opens on General", () =
   const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
   expect(tabs).toEqual(["General", "Profiles", "Shortcuts"]);
   expect(screen.getByRole("tabpanel").getAttribute("aria-label")).toBe("General");
+  // The window's title is the picked section's name.
+  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("General");
+  fireEvent.click(screen.getByRole("tab", { name: "Shortcuts" }));
+  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Shortcuts");
 });
 
 test("General turns the app's settings on or off", () => {

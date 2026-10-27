@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { COLORS, type Color, send } from "./bridge";
+import { Icon } from "./Icon";
 
 // Sent by the app when the window opens and after every change (send_settings in
 // app/src/shell.rs).
@@ -11,10 +12,22 @@ export type SettingsDetail = {
 
 type Section = "general" | "profiles" | "shortcuts";
 
-const SECTIONS: { id: Section; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "profiles", label: "Profiles" },
-  { id: "shortcuts", label: "Shortcuts" },
+const SECTIONS: { id: Section; label: string; icon: string }[] = [
+  {
+    id: "general",
+    label: "General",
+    icon: "M8 10.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4zM8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1",
+  },
+  {
+    id: "profiles",
+    label: "Profiles",
+    icon: "M8 7.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4",
+  },
+  {
+    id: "shortcuts",
+    label: "Shortcuts",
+    icon: "M2 4.5h12v7H2zM4.5 7h.01M6.5 7h.01M8.5 7h.01M10.5 7h.01M5 9.5h6",
+  },
 ];
 
 // Every shortcut, as the app's menus and keyboard monitor define them (app/src/mac.rs).
@@ -77,7 +90,9 @@ export const SHORTCUTS: [string, [string, string][]][] = [
 
 // The settings window's page, which the app opens from Arbalete › Settings… (show_settings in
 // app/src/shell.rs): the app's own settings, each profile's search engine, and every shortcut.
-// Escape closes the window, like its close button.
+// Like Arc's, the window has no title bar of its own: the page draws the picked section's name
+// beside the window buttons, then a toolbar of sections, which both move the window. Escape
+// closes the window, like its close button.
 export function Settings() {
   const [detail, setDetail] = useState<SettingsDetail>();
   const [section, setSection] = useState<Section>("general");
@@ -98,8 +113,9 @@ export function Settings() {
   return (
     <div className="settings">
       <header>
+        <h1>{label}</h1>
         <div role="tablist" aria-label="Settings sections">
-          {SECTIONS.map(({ id, label }) => (
+          {SECTIONS.map(({ id, label, icon }) => (
             <button
               key={id}
               type="button"
@@ -107,6 +123,7 @@ export function Settings() {
               aria-selected={id === section}
               onClick={() => setSection(id)}
             >
+              <Icon d={icon} size={24} />
               {label}
             </button>
           ))}

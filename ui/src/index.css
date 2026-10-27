@@ -1430,36 +1430,58 @@ button.folder:hover {
   opacity: 1;
 }
 
-/* The settings window: a row of sections, the picked one's content below. */
+/* The settings window, like Arc's: the picked section's name beside the window buttons, a toolbar
+   of sections, icon above label, the picked one blue on a lighter tile, a line, then its content.
+   The title and the toolbar move the window. */
 .settings {
+  --settings-bar: color-mix(in srgb, var(--text) 6%, var(--menu));
+  --settings-picked: #3b82f6;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding: 14px 20px 20px;
   background: var(--menu);
   color: var(--text);
 }
 
 .settings header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 16px;
+  flex: none;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--menu-border);
+  background: var(--settings-bar);
+  -webkit-app-region: drag;
+}
+
+.settings h1 {
+  height: 32px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 32px;
+  text-align: center;
+  opacity: 0.8;
 }
 
 .settings [role="tablist"] {
   display: flex;
-  flex: 1;
+  justify-content: center;
   gap: 4px;
 }
 
 .settings [role="tab"] {
-  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 64px;
+  padding: 6px 10px 5px;
   border: 0;
   border-radius: 8px;
   background: none;
   color: inherit;
   font: inherit;
+  font-size: 12px;
+  -webkit-app-region: no-drag;
 }
 
 .settings [role="tab"]:hover {
@@ -1468,11 +1490,12 @@ button.folder:hover {
 
 .settings [role="tab"][aria-selected="true"] {
   background: var(--active);
-  font-weight: 600;
+  color: var(--settings-picked);
 }
 
 .settings-panel {
   flex: 1;
+  padding: 16px 24px;
   overflow-y: auto;
 }
 
