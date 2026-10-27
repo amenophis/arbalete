@@ -79,7 +79,7 @@ define_class!(
         // Chromium must leave the run loop to shut down: quitting closes the window first.
         #[unsafe(method(terminate:))]
         unsafe fn terminate(&self, _sender: Option<&AnyObject>) {
-            crate::shell::close();
+            crate::shell::quit();
         }
 
         // Menu actions reach the application at the end of the responder chain.

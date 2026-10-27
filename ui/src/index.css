@@ -1430,7 +1430,7 @@ button.folder:hover {
   opacity: 1;
 }
 
-/* The settings: a row of sections, × at its end, the picked one's content below. */
+/* The settings window: a row of sections, the picked one's content below. */
 .settings {
   box-sizing: border-box;
   display: flex;
@@ -1453,8 +1453,7 @@ button.folder:hover {
   gap: 4px;
 }
 
-.settings [role="tab"],
-.settings-close {
+.settings [role="tab"] {
   padding: 6px 12px;
   border: 0;
   border-radius: 8px;
@@ -1463,19 +1462,13 @@ button.folder:hover {
   font: inherit;
 }
 
-.settings [role="tab"]:hover,
-.settings-close:hover {
+.settings [role="tab"]:hover {
   background: var(--hover);
 }
 
 .settings [role="tab"][aria-selected="true"] {
   background: var(--active);
   font-weight: 600;
-}
-
-.settings-close {
-  font-size: 18px;
-  line-height: 1;
 }
 
 .settings-panel {

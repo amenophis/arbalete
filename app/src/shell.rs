@@ -99,7 +99,7 @@ const IMPORT_SIZE: Size = Size {
     height: 480,
 };
 
-/// The settings window's size, at most, like Arc's (ui/src/Settings.tsx).
+/// The settings window's size, like Arc's (ui/src/Settings.tsx).
 const SETTINGS_SIZE: Size = Size {
     width: 600,
     height: 520,
@@ -139,9 +139,9 @@ thread_local! {
     /// sessions never import.
     static IMPORT_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
-    /// The settings window, shown above the page; created the first time it is shown.
+    /// The settings, in a window of their own while it is open.
     static SETTINGS_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
-    static SETTINGS_PANEL: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// The app's settings, loaded when the context is initialized.
     static SETTINGS: Cell<Settings> = Cell::new(Settings::default());
     /// The find bar, at the card's top right corner; created the first time it is shown.
@@ -1178,40 +1178,27 @@ fn show_import() {
     }
 }
 
-/// Shows the settings window, centered on the window.
+/// Shows the settings in a window of their own, like Arc's, brought to the front when it is
+/// already open. Its page asks for the settings once it listens (Command::SettingsReady).
 fn show_settings() {
-    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
-        return;
-    };
-    if SETTINGS_PANEL.with_borrow(Option::is_none) {
-        let url = format!("{UI_ORIGIN}index.html#settings");
-        let view = browser_view(UiClient::new(), &url, no_width, None);
-        let controller = window
-            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
-            .expect("settings");
-        SETTINGS_VIEW.set(Some(view));
-        SETTINGS_PANEL.set(Some(controller));
+    match SETTINGS_WINDOW.with_borrow(Clone::clone) {
+        Some(window) => window.activate(),
+        None => {
+            window_create_top_level(Some(&mut SettingsWindowDelegate::new()));
+        }
     }
-    let Some(controller) = SETTINGS_PANEL.with_borrow(Clone::clone) else {
-        return;
-    };
-    let size = window.size();
-    let (width, height) = (
-        SETTINGS_SIZE.width.min(size.width),
-        SETTINGS_SIZE.height.min(size.height),
-    );
-    controller.set_bounds(Some(&Rect {
-        x: (size.width - width) / 2,
-        y: (size.height - height) / 2,
-        width,
-        height,
-    }));
-    controller.set_visible(1);
-    // A page still loading asks for them once it listens (Command::SettingsReady).
-    send_settings();
-    if let Some(view) = controller.contents_view() {
-        view.request_focus();
+}
+
+/// Closes the settings window, if it is open.
+fn close_settings() {
+    if let Some(window) = SETTINGS_WINDOW.with_borrow(Clone::clone) {
+        window.close();
     }
+}
+
+/// The settings window has the keyboard: ⌘W closes it rather than a tab.
+fn settings_focused() -> bool {
+    SETTINGS_WINDOW.with_borrow(|window| window.as_ref().is_some_and(|w| w.is_active() == 1))
 }
 
 /// Sends the settings window the app's settings, the search engines and each profile's.
@@ -2164,6 +2151,7 @@ pub fn run(command: Command) {
             show_overlay(false);
             open_tab(&url);
         }
+        (Command::Close(None), _) if settings_focused() => close_settings(),
         (Command::Close(tab), _) => close_tab(tab),
         (Command::Reopen(rank), _) => reopen_tab(rank),
         (Command::Pin(tab), _) => toggle_pin(tab),
@@ -2242,11 +2230,7 @@ pub fn run(command: Command) {
             }
         }
         (Command::ShowSettings, _) => show_settings(),
-        (Command::HideSettings, _) => {
-            if let Some(panel) = SETTINGS_PANEL.with_borrow(Clone::clone) {
-                panel.set_visible(0);
-            }
-        }
+        (Command::HideSettings, _) => close_settings(),
         (Command::SettingsReady, _) => send_settings(),
         (Command::SetSetting(setting, on), _) => set_setting(setting, on),
         (
@@ -2346,16 +2330,23 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
     }
 }
 
-/// Closes the main window, which quits the app once its browsers are closed. Called by the macOS
-/// app menu; the window's own close button does the same on every OS.
+/// Closes the main window, and the settings', which quits the app once its browsers are closed.
+/// The window's own close button does the same on every OS.
 pub fn close() {
-    #[cfg(target_os = "macos")]
-    if SETTINGS.get().warn_before_quit && !crate::mac::confirm("Quit Arbalete?", "", "Quit") {
-        return;
-    }
+    close_settings();
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
         window.close();
     }
+}
+
+/// Quits from the macOS app menu, once the user confirms it if the settings ask to warn before
+/// quitting.
+#[cfg(target_os = "macos")]
+pub fn quit() {
+    if SETTINGS.get().warn_before_quit && !crate::mac::confirm("Quit Arbalete?", "", "Quit") {
+        return;
+    }
+    close();
 }
 
 wrap_app! {
@@ -2477,7 +2468,7 @@ wrap_window_delegate! {
         /// Asks every browser to close; the window closes once they all can.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             CLOSING.set(true);
-            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW, &FIND_VIEW, &SETTINGS_VIEW]
+            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW, &FIND_VIEW]
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
                 .collect();
@@ -2513,6 +2504,52 @@ wrap_window_delegate! {
         fn accepts_first_mouse(&self, _window: Option<&mut Window>) -> State {
             State::ENABLED
         }
+
+        fn window_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
+}
+
+wrap_window_delegate! {
+    struct SettingsWindowDelegate {}
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            SETTINGS_SIZE
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let window = window.expect("window").clone();
+            window.set_title(Some(&CefString::from("Settings")));
+            window.set_to_fill_layout();
+            let url = format!("{UI_ORIGIN}index.html#settings");
+            let view = browser_view(UiClient::new(), &url, no_width, None);
+            window.add_child_view(Some(&mut View::from(&view)));
+            SETTINGS_VIEW.set(Some(view));
+            window.center_window(Some(&SETTINGS_SIZE));
+            window.show();
+            SETTINGS_WINDOW.set(Some(window));
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            SETTINGS_WINDOW.set(None);
+            SETTINGS_VIEW.set(None);
+        }
+
+        /// The window closes once its page can.
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
+            let host = SETTINGS_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host());
+            host.map_or(1, |host| host.try_close_browser())
+        }
+
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
 
         fn window_runtime_style(&self) -> RuntimeStyle {
             RuntimeStyle::ALLOY

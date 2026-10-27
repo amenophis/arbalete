@@ -82,11 +82,8 @@ test("Shortcuts lists every shortcut by group", () => {
   expect(tabs.getByText("Switch Between Recent Tabs").nextSibling?.textContent).toBe("⌃⇥, ⌃⇧⇥");
 });
 
-test("× and Escape close the settings", () => {
+test("Escape closes the settings", () => {
   open();
-  fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
-  expect(fetch).toHaveBeenLastCalledWith("/command/settings/hide", { method: "POST" });
-  fetch.mockClear();
   fireEvent.keyDown(document.body, { key: "Escape" });
   expect(fetch).toHaveBeenLastCalledWith("/command/settings/hide", { method: "POST" });
 });
