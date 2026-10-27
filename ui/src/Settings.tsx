@@ -62,6 +62,13 @@ export const SHORTCUTS: [string, [string, string][]][] = [
     ],
   ],
   [
+    "Developer",
+    [
+      ["View Source", "⌥⌘U"],
+      ["Developer Tools", "⌥⌘I or F12"],
+    ],
+  ],
+  [
     "Window",
     [
       ["Hide or Show Sidebar", "⌘S"],
