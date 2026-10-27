@@ -1,9 +1,11 @@
 import { type CSSProperties, type KeyboardEvent, memo, useEffect, useRef, useState } from "react";
 import {
   type Item,
+  type Page,
   type Space,
   type SpacePage,
   type Split,
+  type State,
   send,
   showMenu,
   type Tab,
@@ -59,12 +61,9 @@ export function App() {
   // Window › Library (⇧⌘L) opens it on the section it showed last.
   useAppEvent("arbalete:open-library", () => pager.go(-1));
   const page = state?.page;
-  const current = state?.pages.find((spacePage) => spacePage.space === state.space);
-  const active =
-    current &&
-    [...current.favorites, ...tabs([...current.pinned, ...current.today])].find(
-      (tab) => tab.id === current.selected,
-    );
+  const active = state && activeTab(state);
+  // In toolbar mode, the bar above the page holds the navigation buttons and the address.
+  const toolbar = state?.toolbar ?? false;
   return (
     <nav
       className="sidebar"
@@ -86,42 +85,26 @@ export function App() {
           <Icon d="M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2zM6.5 2.5v11" />
         </button>
         <span className="spacer" />
-        <button
-          type="button"
-          aria-label="Back"
-          disabled={!page?.canGoBack}
-          onClick={() => send("back")}
-        >
-          <Icon d="M10 3.5 5.5 8l4.5 4.5" />
-        </button>
-        <button
-          type="button"
-          aria-label="Forward"
-          disabled={!page?.canGoForward}
-          onClick={() => send("forward")}
-        >
-          <Icon d="M6 3.5 10.5 8 6 12.5" />
-        </button>
-        <button type="button" aria-label="Reload" onClick={() => send("reload")}>
-          <Icon d="M12.8 8.5a4.8 4.8 0 1 1-1.4-3.9M11.9 2.2v2.7H9.2" />
-        </button>
+        {!toolbar && <NavButtons page={page} />}
       </div>
       {/* Kept empty without a selected tab, so the sections below do not move. */}
-      <div className="url" title={active?.url}>
-        {/* A click edits the address in the Command Bar, as ⌘L does. */}
-        <button
-          type="button"
-          className="title url-edit"
-          aria-label="Edit address"
-          onClick={() => send("overlay/edit")}
-        >
-          {active && domain(active.url)}
-        </button>
-        {active && <CopyLink />}
-        {active && page?.loading && (
-          <progress className="progress" aria-label="Loading" value={page.progress} />
-        )}
-      </div>
+      {!toolbar && (
+        <div className="url" title={active?.url}>
+          {/* A click edits the address in the Command Bar, as ⌘L does. */}
+          <button
+            type="button"
+            className="title url-edit"
+            aria-label="Edit address"
+            onClick={() => send("overlay/edit")}
+          >
+            {active && domain(active.url)}
+          </button>
+          {active && <CopyLink />}
+          {active && page?.loading && (
+            <progress className="progress" aria-label="Loading" value={page.progress} />
+          )}
+        </div>
+      )}
       {/* The app sends the displayed Space's page and its neighbors, the ones a swipe shows. */}
       <div className="pager">
         <div className="pages" ref={pager.track}>
@@ -325,6 +308,45 @@ export function domain(url: string): string {
   } catch {
     return url;
   }
+}
+
+// The page's back, forward and reload buttons, in the sidebar's toolbar or in the bar above the
+// page (ui/src/Toolbar.tsx).
+export function NavButtons({ page }: { page?: Page }) {
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Back"
+        disabled={!page?.canGoBack}
+        onClick={() => send("back")}
+      >
+        <Icon d="M10 3.5 5.5 8l4.5 4.5" />
+      </button>
+      <button
+        type="button"
+        aria-label="Forward"
+        disabled={!page?.canGoForward}
+        onClick={() => send("forward")}
+      >
+        <Icon d="M6 3.5 10.5 8 6 12.5" />
+      </button>
+      <button type="button" aria-label="Reload" onClick={() => send("reload")}>
+        <Icon d="M12.8 8.5a4.8 4.8 0 1 1-1.4-3.9M11.9 2.2v2.7H9.2" />
+      </button>
+    </>
+  );
+}
+
+// The displayed Space's selected tab, a favorite, a pinned tab or one of today's, if any.
+export function activeTab(state: State): Tab | undefined {
+  const current = state.pages.find((spacePage) => spacePage.space === state.space);
+  return (
+    current &&
+    [...current.favorites, ...tabs([...current.pinned, ...current.today])].find(
+      (tab) => tab.id === current.selected,
+    )
+  );
 }
 
 function tabs(items: Item[]): Tab[] {

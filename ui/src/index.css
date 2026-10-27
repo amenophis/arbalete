@@ -196,7 +196,7 @@ body {
   flex: 1;
 }
 
-.toolbar button {
+:is(.toolbar, .page-toolbar-buttons) button {
   display: grid;
   place-items: center;
   width: 32px;
@@ -210,18 +210,18 @@ body {
   -webkit-app-region: no-drag;
 }
 
-.toolbar button:hover {
+:is(.toolbar, .page-toolbar-buttons) button:hover {
   background: var(--hover);
   opacity: 1;
 }
 
-.toolbar button:disabled {
+:is(.toolbar, .page-toolbar-buttons) button:disabled {
   opacity: 0.3;
   background: none;
 }
 
 /* A click leaves no ring nor fill: only the keyboard's focus shows. */
-.toolbar button:focus:not(:focus-visible) {
+:is(.toolbar, .page-toolbar-buttons) button:focus:not(:focus-visible) {
   outline: none;
 }
 
@@ -675,6 +675,56 @@ button.folder:hover {
 }
 
 /* Drawn over the url pill's bottom edge, inside its rounded corners, so that loading moves nothing. */
+/* The bar above the page in toolbar mode: the navigation buttons at its left, the domain in its
+   middle, a pill while hovered, and the page loading along its bottom. */
+.page-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 100vh;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--menu-border);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.page-toolbar-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.page-toolbar-url {
+  position: absolute;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 50%;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  transform: translateX(-50%);
+}
+
+.page-toolbar-url span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.page-toolbar-url svg {
+  flex: none;
+  opacity: 0.6;
+}
+
+.page-toolbar-url:hover {
+  background: var(--hover);
+}
+
 .progress {
   position: absolute;
   left: 0;
@@ -1700,7 +1750,7 @@ button.folder:hover {
 
 /* The hover the view kept from before it hid or moved (forgetHoverOnMove in bridge.ts):
    last, above every other hover. */
-:root[data-stale-hover] .toolbar button:hover {
+:root[data-stale-hover] :is(.toolbar, .page-toolbar-buttons) button:hover {
   background: none;
   opacity: 0.75;
 }

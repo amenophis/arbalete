@@ -16,6 +16,8 @@ export type State = {
   profiles: Profile[];
   // The tabs closed since launch, the last closed first: the app lists the most recent ones.
   closed: ClosedTab[];
+  // The bar above the page holds the navigation buttons and the address (View › Show Toolbar).
+  toolbar: boolean;
 };
 
 export type ClosedTab = {

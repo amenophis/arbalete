@@ -85,6 +85,7 @@ export const SHORTCUTS: [string, [string, string][]][] = [
     "Window",
     [
       ["Hide or Show Sidebar", "⌘S"],
+      ["Show or Hide Toolbar", "⇧⌘D"],
       ["Library", "⇧⌘L"],
       ["History", "⌘Y"],
       ["Downloads", "⇧⌘J"],

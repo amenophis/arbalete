@@ -15,6 +15,9 @@ pub struct Settings {
     /// The "Today" tabs open at launch are those left open at the last quit; without, every
     /// Space starts with none, its pinned tabs and favorites kept.
     pub restore_session: bool,
+    /// A bar above the page holds the navigation buttons and the address, which the sidebar no
+    /// longer shows (View › Show Toolbar).
+    pub show_toolbar: bool,
 }
 
 impl Default for Settings {
@@ -22,6 +25,7 @@ impl Default for Settings {
         Self {
             warn_before_quit: false,
             restore_session: true,
+            show_toolbar: false,
         }
     }
 }
@@ -55,6 +59,7 @@ mod tests {
         let settings = Settings {
             warn_before_quit: true,
             restore_session: false,
+            show_toolbar: true,
         };
         save(&settings, &path).unwrap();
         assert_eq!(load(&path), settings);
