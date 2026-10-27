@@ -99,6 +99,10 @@ const IMPORT_SIZE: Size = Size {
     height: 480,
 };
 
+/// The height of the settings window's title row, which holds the window buttons
+/// (ui/src/index.css).
+const SETTINGS_TITLE_HEIGHT: f32 = 32.0;
+
 /// The settings window's size, like Arc's (ui/src/Settings.tsx).
 const SETTINGS_SIZE: Size = Size {
     width: 600,
@@ -2547,6 +2551,21 @@ wrap_window_delegate! {
             host.map_or(1, |host| host.try_close_browser())
         }
 
+        // Its page draws the title and the toolbar, like Arc's: only macOS keeps standard window
+        // buttons in a frameless window.
+        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
+            cfg!(target_os = "macos").into()
+        }
+
+        // The window buttons are centered vertically in this height, the title's row.
+        fn titlebar_height(&self, _window: Option<&mut Window>, height: Option<&mut f32>) -> i32 {
+            if let Some(height) = height {
+                *height = SETTINGS_TITLE_HEIGHT;
+            }
+            1
+        }
+
+        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
         fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
@@ -2688,8 +2707,18 @@ wrap_drag_handler! {
     impl DragHandler {
         // The sidebar sits at the window's origin: its coordinates are the window's. Only the
         // sidebar beside the page moves the window: the views above the page are separate
-        // windows on macOS, which the window's regions do not reach.
+        // windows on macOS, which the window's regions do not reach. The settings page fills
+        // its own window, which its title and toolbar move.
         fn on_draggable_regions_changed(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, regions: Option<&[DraggableRegion]>) {
+            let settings = SETTINGS_VIEW.with_borrow(|view| view.as_ref()?.browser());
+            if let (Some(browser), Some(mut settings)) = (browser.as_deref(), settings)
+                && browser.is_same(Some(&mut settings)) == 1
+            {
+                if let Some(window) = SETTINGS_WINDOW.with_borrow(Clone::clone) {
+                    window.set_draggable_regions(regions);
+                }
+                return;
+            }
             let Some(mut sidebar) = SIDEBAR.with_borrow(|view| view.as_ref()?.browser()) else { return };
             if browser.is_none_or(|browser| browser.is_same(Some(&mut sidebar)) == 0) {
                 return;
