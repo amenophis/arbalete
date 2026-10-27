@@ -2732,6 +2732,11 @@ wrap_display_handler! {
                 let url = url.map(CefString::to_string).unwrap_or_default();
                 update_sidebar(|sidebar| {
                     if let Some(tab) = active_tab(sidebar) {
+                        // Another site's page has its own icon, or none: the previous page's
+                        // goes until it is known (on_favicon_urlchange).
+                        if site(&tab.url) != site(&url) {
+                            tab.favicon = None;
+                        }
                         tab.url = url;
                     }
                 });
@@ -2770,6 +2775,13 @@ wrap_display_handler! {
             }
         }
     }
+}
+
+/// The site of a url: its host and port, or the url itself when it has no host, like about:blank.
+fn site(url: &str) -> &str {
+    url.split_once("://")
+        .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
+        .unwrap_or(url)
 }
 
 /// Shows the selected tab's new icon once it is cached, downloading it first through its page's
@@ -3025,9 +3037,20 @@ mod tests {
     use super::{
         CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH, RECENT_TABS,
         Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lerp_rect, margin_regions,
-        remember, slide_duration, step, toggled, ui_file, ui_path,
+        remember, site, slide_duration, step, toggled, ui_file, ui_path,
     };
     use arbalete_core::sidebar::NodeId;
+
+    #[test]
+    fn tells_the_site_of_a_url() {
+        assert_eq!(
+            site("https://www.wikipedia.org/wiki/Arrow"),
+            "www.wikipedia.org"
+        );
+        assert_eq!(site("http://localhost:3000?q=1"), "localhost:3000");
+        assert_eq!(site("https://example.com#top"), "example.com");
+        assert_eq!(site("about:blank"), "about:blank");
+    }
 
     #[test]
     fn remembers_the_tabs_selected_last_the_most_recent_first() {
