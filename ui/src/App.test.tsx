@@ -67,6 +67,7 @@ function receive(
   displayed = 13,
   collapsed = false,
   hiddenHint = false,
+  toolbar = false,
 ) {
   const empty = { favorites: [], pinned: [], today: [], selected: null, collapsed: false };
   const favoritesHint = !hiddenHint;
@@ -87,6 +88,7 @@ function receive(
       .filter((_, index) => Math.abs(index - shown) <= 1),
     profiles: [{ id: 1, name: "Default", color: "purple" }],
     closed: [{ url: "https://example.com/gone", title: "Gone", favicon: null, closedAt: 0 }],
+    toolbar,
   };
   act(() => {
     dispatchEvent(new CustomEvent("arbalete:state", { detail }));
@@ -131,6 +133,17 @@ test("shows the active tab and the loading progress", () => {
   expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", true);
   expect(screen.getByRole("button", { name: "Forward" })).toHaveProperty("disabled", false);
   expect(screen.getByRole("button", { name: "Example" }).getAttribute("aria-current")).toBe("page");
+});
+
+test("in toolbar mode, the sidebar leaves the navigation buttons and the address to the bar", () => {
+  render(<App />);
+  receive({}, 3, favorites, 13, false, false, true);
+  expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Edit address" })).toBeNull();
+  // The sidebar toggle stays.
+  expect(screen.getByRole("button", { name: "Toggle sidebar" })).toBeDefined();
+  receive({});
+  expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
 });
 
 test("a click on the url bar edits the address in the Command Bar", () => {

@@ -99,6 +99,9 @@ const IMPORT_SIZE: Size = Size {
     height: 480,
 };
 
+/// The height of the bar above the page, in toolbar mode (ui/src/Toolbar.tsx).
+const PAGE_TOOLBAR_HEIGHT: i32 = 36;
+
 /// The height of the settings window's title row, which holds the window buttons
 /// (ui/src/index.css).
 const SETTINGS_TITLE_HEIGHT: f32 = 32.0;
@@ -143,6 +146,8 @@ thread_local! {
     /// sessions never import.
     static IMPORT_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// The bar above the page, at the card's top while it is shown (View › Show Toolbar).
+    static TOOLBAR_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     /// The settings, in a window of their own while it is open.
     static SETTINGS_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
@@ -316,6 +321,7 @@ impl UiState {
             .expect("a known Space");
         json!({
             "page": self.page,
+            "toolbar": SETTINGS.get().show_toolbar,
             "space": displayed,
             "spaces": spaces.iter().map(|s| json!({
                 "id": s.id,
@@ -473,6 +479,25 @@ fn send_state() {
     let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
+    dispatch(&TOOLBAR_VIEW, &event);
+}
+
+/// Shows the bar above the page, with the navigation buttons and the address, which the sidebar
+/// then leaves out; or hides it. Kept across sessions.
+fn toggle_toolbar() {
+    let mut settings = SETTINGS.get();
+    settings.show_toolbar = !settings.show_toolbar;
+    SETTINGS.set(settings);
+    save_settings();
+    if let Some(toolbar) = TOOLBAR_VIEW.with_borrow(Clone::clone) {
+        toolbar.set_visible(settings.show_toolbar.into());
+    }
+    if let Some(card) = card_panel() {
+        card.layout();
+    }
+    #[cfg(target_os = "macos")]
+    crate::mac::toolbar_shown(settings.show_toolbar);
+    send_state();
 }
 
 /// Saves the downloads list. A list that cannot be written is not worth stopping a download for.
@@ -647,7 +672,10 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         return;
     };
     if visible {
-        let over_url_bar = tab.is_some() && SIDEBAR_MODE.get() == SidebarMode::Shown;
+        // The sidebar shows its url bar while docked, unless the bar above the page holds it.
+        let over_url_bar = tab.is_some()
+            && SIDEBAR_MODE.get() == SidebarMode::Shown
+            && !SETTINGS.get().show_toolbar;
         OVER_URL_BAR.set(over_url_bar);
         place_overlay(OVERLAY_ROW);
         let (url, favicon) = tab.unzip();
@@ -1248,11 +1276,15 @@ fn set_setting(setting: Setting, on: bool) {
         Setting::RestoreSession => settings.restore_session = on,
     }
     SETTINGS.set(settings);
+    save_settings();
+    send_settings();
+}
+
+fn save_settings() {
     let path = DATA_DIR.get().expect("set").join(settings::FILE_NAME);
-    if let Err(error) = settings::save(&settings, &path) {
+    if let Err(error) = settings::save(&SETTINGS.get(), &path) {
         eprintln!("cannot save the settings: {error}");
     }
-    send_settings();
 }
 
 /// Shows the find bar, with the text last searched for selected.
@@ -2112,6 +2144,9 @@ wrap_request_context_handler! {
             let view = browser_view(ContentClient::new(self.profile), "about:blank", no_width, context);
             view.set_visible(0);
             card.add_child_view(Some(&mut View::from(&view)));
+            if let Some(layout) = card.get_layout().and_then(|layout| layout.as_box_layout()) {
+                layout.set_flex_for_view(Some(&mut View::from(&view)), 1);
+            }
         }
     }
 }
@@ -2249,6 +2284,7 @@ pub fn run(command: Command) {
             }
         }
         (Command::ShowSettings, _) => show_settings(),
+        (Command::ToggleToolbar, _) => toggle_toolbar(),
         (Command::HideSettings, _) => close_settings(),
         (Command::SettingsReady, _) => send_settings(),
         (Command::SetSetting(setting, on), _) => set_setting(setting, on),
@@ -2462,8 +2498,22 @@ wrap_window_delegate! {
             window.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
             SIDEBAR.set(Some(sidebar));
+            // The card holds the bar above the page, at the top while it is shown, then the
+            // profiles' content views, which share the rest.
             let card = panel_create(None).expect("card");
-            card.set_to_fill_layout();
+            card.set_to_box_layout(Some(&BoxLayoutSettings {
+                horizontal: 0,
+                cross_axis_alignment: AxisAlignment::STRETCH,
+                ..Default::default()
+            }));
+            // Any width: the layout stretches it across the card. A zero one would make its size
+            // "empty", which CEF ignores, with its height.
+            let toolbar = browser_view_sized(UiClient::new(), &format!("{UI_ORIGIN}index.html#toolbar"), || 1, PAGE_TOOLBAR_HEIGHT, None);
+            toolbar.set_visible(SETTINGS.get().show_toolbar.into());
+            card.add_child_view(Some(&mut View::from(&toolbar)));
+            TOOLBAR_VIEW.set(Some(toolbar));
+            #[cfg(target_os = "macos")]
+            crate::mac::toolbar_shown(SETTINGS.get().show_toolbar);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&card)), DockingMode::CUSTOM, 1)
                 .expect("card");
@@ -2605,9 +2655,21 @@ wrap_window_delegate! {
 /// its overlay's bounds for 0 (no_width). Without a request context, it uses the global one,
 /// which only the app's own UI uses.
 fn browser_view(
+    client: Client,
+    url: &str,
+    width: fn() -> i32,
+    context: Option<&mut RequestContext>,
+) -> BrowserView {
+    // A zero height would make the size "empty" and CEF would ignore it.
+    browser_view_sized(client, url, width, 1, context)
+}
+
+/// A browser view as `browser_view` makes, `height` tall when a layout stacks it.
+fn browser_view_sized(
     mut client: Client,
     url: &str,
     width: fn() -> i32,
+    height: i32,
     context: Option<&mut RequestContext>,
 ) -> BrowserView {
     browser_view_create(
@@ -2616,7 +2678,7 @@ fn browser_view(
         Some(&BrowserSettings::default()),
         None,
         context,
-        Some(&mut AlloyViewDelegate::new(width)),
+        Some(&mut AlloyViewDelegate::new(width, height)),
     )
     .expect("browser view")
 }
@@ -2628,12 +2690,12 @@ fn no_width() -> i32 {
 wrap_browser_view_delegate! {
     struct AlloyViewDelegate {
         width: fn() -> i32,
+        height: i32,
     }
 
     impl ViewDelegate {
-        // A zero height would make the size "empty" and CEF would ignore it.
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: (self.width)(), height: 1 }
+            Size { width: (self.width)(), height: self.height }
         }
     }
 

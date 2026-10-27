@@ -47,6 +47,8 @@ const CARD_EDGE: f64 = 0.5;
 thread_local! {
     /// Its title says what it does: hide or show the sidebar.
     static SIDEBAR_ITEM: RefCell<Option<Retained<NSMenuItem>>> = const { RefCell::new(None) };
+    /// Its title says what it does: show or hide the bar above the page.
+    static TOOLBAR_ITEM: RefCell<Option<Retained<NSMenuItem>>> = const { RefCell::new(None) };
     /// Watches the clicks that open sidebar menus and the tab switcher's keys (watch_events).
     static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     /// The actions of the menu last shown, which its items' tags index.
@@ -167,6 +169,11 @@ define_class!(
         #[unsafe(method(arbaleteToggleSidebar:))]
         fn toggle_sidebar(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ToggleSidebar);
+        }
+
+        #[unsafe(method(arbaleteToggleToolbar:))]
+        fn toggle_toolbar(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ToggleToolbar);
         }
 
         // The item's tag indexes the actions of the menu last shown.
@@ -494,6 +501,7 @@ pub fn setup_menu() {
             ns_string!("View"),
             vec![
                 sidebar_item(mtm),
+                toolbar_item(mtm),
                 NSMenuItem::separatorItem(mtm),
                 item(
                     mtm,
@@ -692,6 +700,28 @@ fn sidebar_item(mtm: MainThreadMarker) -> Retained<NSMenuItem> {
     );
     SIDEBAR_ITEM.set(Some(item.clone()));
     item
+}
+
+fn toolbar_item(mtm: MainThreadMarker) -> Retained<NSMenuItem> {
+    let item = item(
+        mtm,
+        ns_string!("Show Toolbar"),
+        sel!(arbaleteToggleToolbar:),
+        ns_string!("D"),
+    );
+    TOOLBAR_ITEM.set(Some(item.clone()));
+    item
+}
+
+/// Updates the menu once the bar above the page is shown or hidden.
+pub fn toolbar_shown(shown: bool) {
+    if let Some(item) = TOOLBAR_ITEM.with_borrow(Clone::clone) {
+        item.setTitle(if shown {
+            ns_string!("Hide Toolbar")
+        } else {
+            ns_string!("Show Toolbar")
+        });
+    }
 }
 
 /// Updates the menu once the sidebar is shown or hidden, and hides the window buttons with it,

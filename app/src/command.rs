@@ -84,6 +84,8 @@ pub enum Command {
     Navigate(String),
     /// Hides the sidebar, or shows it again: `sidebar/toggle`.
     ToggleSidebar,
+    /// Shows the bar above the page, or hides it: `toolbar/toggle`.
+    ToggleToolbar,
     /// Shows the hidden sidebar above the page, `sidebar/reveal`, or hides it again,
     /// `sidebar/conceal`.
     RevealSidebar,
@@ -309,6 +311,7 @@ impl Command {
             "overlay/hide" => Some(Self::HideOverlay),
             "overlay/edit" => Some(Self::EditUrl),
             "sidebar/toggle" => Some(Self::ToggleSidebar),
+            "toolbar/toggle" => Some(Self::ToggleToolbar),
             "sidebar/reveal" => Some(Self::RevealSidebar),
             "sidebar/conceal" => Some(Self::ConcealSidebar),
             "library/show" => Some(Self::ShowLibrary),
