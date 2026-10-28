@@ -137,6 +137,12 @@ To answer before the compatibility layer is built (phase 4), in this order:
    - once installed, Chromium opens a full Chromium window (tab strip, address bar, New Tab page) to show its
      "has been added" bubble, as it finds no browser window of its own: Arbalete closes it, or keeps Chromium
      from opening it.
+   **Revised (2026-10-29)**: a separate window is not needed. An Alloy page on the store, in an ordinary
+   Arbalete tab, has `chrome.webstorePrivate` too, and "Add to Chrome", then Chromium's confirmation, installs
+   the extension, like in Arc. The download handler must accept the `.crx` (declined, the install fails with "Download canceled"): it goes
+   to a temporary folder, out of Arbalete's downloads. The full Chromium window
+   that may open after an install goes too, once the extension's service worker starts (Chromium writes the
+   extension's preferences only later), and a page the extension opened in it moves to an Arbalete tab.
 4. **Forwarding `tabs.create` and `tabs.update`** to Arbalete. **Answered (2026-10-28)**: in an extension's
    service worker, `Runtime.addBinding` exposes a function whose calls reach the app as `Runtime.bindingCalled`
    events, and Chromium lets the shim replace `chrome.tabs.create` and `chrome.tabs.update` with functions

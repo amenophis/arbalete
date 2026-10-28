@@ -94,6 +94,14 @@ pub enum Command {
     /// `site/extension/<id>`.
     OpenExtensionPopup(String),
     CloseExtensionPopup,
+    /// Opens the Chrome Web Store, to install extensions: `site/store`.
+    ShowStore,
+    /// Where the site controls' panel shows its extensions, where a right-click opens their menu:
+    /// `site/targets/<percent-encoded JSON array>`, like
+    /// `[{"id":"abc","x":12,"y":80,"width":64,"height":40}]`.
+    SiteTargets(Vec<ExtensionTarget>),
+    /// Removes an extension from the displayed Space's profile, from its menu.
+    RemoveExtension(String),
     /// Acts on a download from the sidebar: `download/<cancel, open, show or remove>/<id>`.
     Download(DownloadAction, u32),
     /// Opens the library on the downloads, from the menu.
@@ -333,6 +341,16 @@ pub enum Target {
     Site,
 }
 
+/// Where an extension shows in the site controls' panel, in CSS pixels from its top left corner.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ExtensionTarget {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// Where a menu's target shows in a sidebar, in CSS pixels from the view's top left corner.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct HitTarget {
@@ -406,6 +424,7 @@ impl Command {
             "find/hide" => Some(Self::HideFind),
             "extension/close" => Some(Self::CloseExtensionPopup),
             "site/hide" => Some(Self::HideSiteControls),
+            "site/store" => Some(Self::ShowStore),
             _ => {
                 if let Some(args) = path.strip_prefix("site/show/") {
                     let args: Vec<_> = args.split('/').collect();
@@ -428,6 +447,10 @@ impl Command {
                 }
                 if let Some(height) = path.strip_prefix("site/height/") {
                     return height.parse().ok().map(Self::SiteControlsHeight);
+                }
+                if let Some(targets) = path.strip_prefix("site/targets/") {
+                    let targets = serde_json::from_str(&percent_decode(targets)?).ok()?;
+                    return Some(Self::SiteTargets(targets));
                 }
                 if let Some(id) = path.strip_prefix("site/extension/") {
                     return Some(Self::OpenExtensionPopup(id.to_string()));
@@ -739,7 +762,7 @@ fn percent_decode(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Button, ButtonView, Command, LittleAction, Setting, Target};
+    use super::{Button, ButtonView, Command, ExtensionTarget, LittleAction, Setting, Target};
     use arbalete_core::search::SearchEngine;
     use arbalete_core::sidebar::Color;
 
@@ -762,6 +785,19 @@ mod tests {
         );
         assert_eq!(Command::parse("site/show/menu/10/4/28/28"), None);
         assert_eq!(Command::parse("site/hide"), Some(Command::HideSiteControls));
+        assert_eq!(Command::parse("site/store"), Some(Command::ShowStore));
+        assert_eq!(
+            Command::parse(
+                "site/targets/%5B%7B%22id%22%3A%22abc%22%2C%22x%22%3A1%2C%22y%22%3A2%2C%22width%22%3A3%2C%22height%22%3A4%7D%5D"
+            ),
+            Some(Command::SiteTargets(vec![ExtensionTarget {
+                id: "abc".into(),
+                x: 1.0,
+                y: 2.0,
+                width: 3.0,
+                height: 4.0
+            }]))
+        );
         assert_eq!(
             Command::parse("site/height/240"),
             Some(Command::SiteControlsHeight(240))

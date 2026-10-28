@@ -4,8 +4,8 @@
 //! relies on is implemented explicitly.
 
 use crate::command::{
-    Button, ButtonView, Command, DownloadAction, HitTarget, LittleAction, Setting, SiteData,
-    Target, Zoom,
+    Button, ButtonView, Command, DownloadAction, ExtensionTarget, HitTarget, LittleAction, Setting,
+    SiteData, Target, Zoom,
 };
 use crate::downloads::{self, Download};
 use crate::extensions;
@@ -169,6 +169,8 @@ thread_local! {
     /// The settings, in a window of their own while it is open.
     static SETTINGS_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    /// The browsers Chromium opened by itself (StrayClient), until an install closes them.
+    static STRAYS: RefCell<Vec<Browser>> = const { RefCell::new(Vec::new()) };
     /// The app's settings, loaded when the context is initialized.
     static SETTINGS: Cell<Settings> = Cell::new(Settings::default());
     /// The find bar, at the card's top right corner; created the first time it is shown.
@@ -183,6 +185,8 @@ thread_local! {
     /// panel, and the extension popups opened from it, show under it.
     static SITE_BUTTON: RefCell<Option<Rect>> = const { RefCell::new(None) };
     static SITE_HEIGHT: Cell<i32> = const { Cell::new(1) };
+    /// Where the site controls' panel shows its extensions (Command::SiteTargets).
+    static SITE_TARGETS: RefCell<Vec<ExtensionTarget>> = const { RefCell::new(Vec::new()) };
     /// When the panel last closed: a click on its button closes it, as the panel loses the focus,
     /// and must not show it again.
     static SITE_CLOSED: Cell<Option<Instant>> = const { Cell::new(None) };
@@ -1485,6 +1489,37 @@ fn show_settings() {
         Some(window) => window.activate(),
         None => {
             window_create_top_level(Some(&mut SettingsWindowDelegate::new()));
+        }
+    }
+}
+
+/// Opens the Chrome Web Store in a tab, to install extensions, like Arc.
+fn show_store() {
+    hide_site_controls();
+    open_tab("https://chromewebstore.google.com/category/extensions");
+}
+
+/// Closes the windows Chromium opened by itself, once an extension is installed: to say it was
+/// added. Later, out of the callback that learns it.
+pub fn extension_installed() {
+    post_task(ThreadId::UI, Some(&mut CloseStrays::new()));
+}
+
+wrap_task! {
+    struct CloseStrays {}
+
+    impl Task {
+        fn execute(&self) {
+            // An extension may have opened its welcome page there: it opens in a tab instead.
+            for stray in STRAYS.take() {
+                let url = stray.main_frame().map(|frame| CefString::from(&frame.url()).to_string());
+                if let Some(url) = url.filter(|url| url.starts_with("https://")) {
+                    open_tab(&url);
+                }
+                if let Some(host) = stray.host() {
+                    host.close_browser(1);
+                }
+            }
         }
     }
 }
@@ -2827,6 +2862,12 @@ pub fn run(command: Command) {
             place_site_controls();
         }
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
+        (Command::ShowStore, _) => show_store(),
+        (Command::SiteTargets(targets), _) => SITE_TARGETS.set(targets),
+        (Command::RemoveExtension(id), _) => {
+            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            extensions::uninstall(profile, &id);
+        }
         (Command::CloseExtensionPopup, _) => close_extension_popup(),
         (Command::Print, Some(browser)) => {
             if let Some(host) = browser.host() {
@@ -2945,6 +2986,10 @@ wrap_browser_process_handler! {
             restore(self.data_dir.join(store::FILE_NAME));
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
             window_create_top_level(Some(&mut MainWindowDelegate::new()));
+        }
+
+        fn default_client(&self) -> Option<Client> {
+            Some(StrayClient::new())
         }
     }
 }
@@ -3156,6 +3201,40 @@ wrap_window_delegate! {
 
         fn window_runtime_style(&self) -> RuntimeStyle {
             RuntimeStyle::ALLOY
+        }
+    }
+}
+
+// The browsers Chromium opens by itself, outside the app's windows: after an install, a full
+// Chromium window to say the extension was added. Extensions would take its tab for the active
+// one: it closes once the extension is installed. Closed sooner, while Chromium
+// shows its bubble in it, it takes the app down.
+wrap_client! {
+    struct StrayClient {}
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(StrayLifeSpan::new())
+        }
+    }
+}
+
+wrap_life_span_handler! {
+    struct StrayLifeSpan {}
+
+    impl LifeSpanHandler {
+        fn on_after_created(&self, browser: Option<&mut Browser>) {
+            OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
+            if let Some(browser) = browser {
+                STRAYS.with_borrow_mut(|strays| strays.push(browser.clone()));
+            }
+        }
+
+        fn on_before_close(&self, browser: Option<&mut Browser>) {
+            if let Some(browser) = browser {
+                STRAYS.with_borrow_mut(|strays| strays.retain(|stray| stray.is_same(Some(browser)) == 0));
+            }
+            browser_closed();
         }
     }
 }
@@ -3376,6 +3455,30 @@ pub fn menu_at(x: f64, y: f64) -> bool {
     let Some(size) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
         return false;
     };
+    // The site controls' panel, above the sidebar, shows its extensions' menu.
+    let panel = SITE.with_borrow(|site| {
+        let site = site.as_ref().filter(|site| site.is_visible() == 1)?;
+        Some(site.bounds())
+    });
+    if let Some(panel) = panel {
+        let (x, y) = (x - f64::from(panel.x), y - f64::from(panel.y));
+        if (0.0..f64::from(panel.width)).contains(&x) && (0.0..f64::from(panel.height)).contains(&y)
+        {
+            let id = SITE_TARGETS.with_borrow(|targets| {
+                let target = targets.iter().find(|t| {
+                    (t.x..t.x + t.width).contains(&x) && (t.y..t.y + t.height).contains(&y)
+                })?;
+                Some(target.id.clone())
+            });
+            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            let extension =
+                id.and_then(|id| extensions::list(profile).into_iter().find(|e| e.id == id));
+            if let Some(extension) = extension {
+                crate::mac::pop_up(menu::extension_menu(&extension.id, &extension.name));
+            }
+            return true;
+        }
+    }
     let Some((view, x, y)) = sidebar_point(SIDEBAR_MODE.get(), &size, x, y) else {
         return false;
     };
@@ -3478,12 +3581,20 @@ wrap_download_handler! {
 
         fn on_before_download(&self, _browser: Option<&mut Browser>, item: Option<&mut DownloadItem>, suggested_name: Option<&CefString>, callback: Option<&mut BeforeDownloadCallback>) -> i32 {
             let (Some(item), Some(callback)) = (item, callback) else { return 0 };
+            let name = suggested_name.map(CefString::to_string).unwrap_or_default();
+            // The Web Store's extensions, which Chromium installs once downloaded: kept out of the
+            // downloads, in a temporary folder.
+            let mime = CefString::from(&item.mime_type()).to_string();
+            if mime == "application/x-chrome-extension" || name.ends_with(".crx") {
+                let path = std::env::temp_dir().join(&name);
+                callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+                return 1;
+            }
             let dir = crate::user_home().join("Downloads");
             if let Err(error) = std::fs::create_dir_all(&dir) {
                 eprintln!("cannot create the Downloads folder: {error}");
                 return 0;
             }
-            let name = suggested_name.map(CefString::to_string).unwrap_or_default();
             let path = DOWNLOADS.with_borrow(|downloads| {
                 downloads::unique_path(&dir, &name, |path| {
                     path.exists() || downloads.iter().any(|download| download.path == path)

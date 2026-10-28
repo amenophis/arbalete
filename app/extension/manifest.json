@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Arbalete",
-  "description": "Lets Arbalete tell extensions which tab is which.",
-  "version": "1.0",
+  "description": "Lets Arbalete tell extensions which tab is which, and remove them.",
+  "version": "1.1",
   "background": { "service_worker": "arbalete-helper.js" },
-  "permissions": ["debugger"]
+  "permissions": ["debugger", "management"]
 }

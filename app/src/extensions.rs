@@ -222,11 +222,82 @@ pub fn icon_file(path: &str) -> Option<(PathBuf, &'static str)> {
     Some((file.clone(), mime))
 }
 
+/// Learns an extension just installed from its service worker starting, at `url`, in a browser
+/// context: Chromium writes its preferences, which list the extensions, only later. The
+/// extension shows in its profile's list, and the windows Chromium opened for it close.
+fn worker_started(context: &str, url: &str) {
+    let Some(id) = url
+        .strip_prefix("chrome-extension://")
+        .and_then(|rest| rest.split('/').next())
+    else {
+        return;
+    };
+    let profile = BRIDGE.with_borrow(|bridge| {
+        let (profile, _) = bridge
+            .contents
+            .iter()
+            .find(|(_, content)| content.context == context)?;
+        Some(*profile)
+    });
+    let Some(profile) = profile else { return };
+    let new = INSTALLED.with_borrow(|installed| {
+        let (dir, list) = installed.get(&profile)?;
+        (!list.iter().any(|extension| extension.id == id)).then(|| dir.clone())
+    });
+    let Some(dir) = new else { return };
+    // Its files are in a directory named after its version.
+    let versions = std::fs::read_dir(dir.join("Extensions").join(id))
+        .into_iter()
+        .flatten()
+        .flatten();
+    let Some(extension) = versions
+        .filter_map(|version| read_manifest(id, &version.path()))
+        .next()
+    else {
+        return;
+    };
+    INSTALLED.with_borrow_mut(|installed| {
+        if let Some((_, list)) = installed.get_mut(&profile) {
+            list.push(extension);
+            list.sort_by_key(|extension| extension.name.to_lowercase());
+        }
+    });
+    update_icons(profile);
+    crate::shell::extension_installed();
+}
+
+/// Removes an extension from a profile, through the profile's helper, which holds the
+/// `management` permission.
+pub fn uninstall(profile: ProfileId, id: &str) {
+    let session = BRIDGE.with_borrow(|bridge| {
+        let context = &bridge.contents.get(&profile)?.context;
+        bridge.helpers.get(context).cloned()
+    });
+    let Some(session) = session else { return };
+    let id_json = serde_json::to_string(id).expect("a string");
+    // Without Chromium's own confirmation: the app asks first.
+    let expression =
+        format!("chrome.management.uninstall({id_json}, {{ showConfirmDialog: false }})");
+    let params = json!({ "expression": expression });
+    send_in(&session, "Runtime.evaluate", params, None);
+    INSTALLED.with_borrow_mut(|installed| {
+        if let Some((_, list)) = installed.get_mut(&profile) {
+            list.retain(|extension| extension.id != id);
+        }
+    });
+    update_icons(profile);
+}
+
 /// Reads a profile's extensions again.
 fn refresh(profile: ProfileId, dir: &Path) {
     let list = installed(dir);
-    INSTALLED
-        .with_borrow_mut(|installed| installed.insert(profile, (dir.to_path_buf(), list.clone())));
+    INSTALLED.with_borrow_mut(|all| all.insert(profile, (dir.to_path_buf(), list)));
+    update_icons(profile);
+}
+
+/// Lets the UI load a profile's extensions' icons (icon_file).
+fn update_icons(profile: ProfileId) {
+    let list = list(profile);
     let id = serde_json::to_string(&profile).expect("an id");
     let mut icons = ICONS.lock().expect("not poisoned");
     icons.retain(|(key, _)| !key.starts_with(&format!("{id}/")));
@@ -434,6 +505,9 @@ fn target_seen(target: &Value) {
     if !BRIDGE.with_borrow_mut(|bridge| bridge.attached.insert(id.to_string())) {
         return;
     }
+    if !helper {
+        worker_started(&context, target["url"].as_str().unwrap_or_default());
+    }
     let params = json!({ "targetId": id, "flatten": true });
     let message = json!({ "method": "Target.attachToTarget", "params": params });
     send(message, Some(Pending::Attach { context, helper }));
@@ -448,20 +522,6 @@ fn attached(session: &str, context: String, helper: bool) {
         return;
     }
     BRIDGE.with_borrow_mut(|bridge| bridge.workers.insert(session.to_string(), context.clone()));
-    // A worker starting may be an extension just installed.
-    let profile = BRIDGE.with_borrow(|bridge| {
-        let (profile, _) = bridge
-            .contents
-            .iter()
-            .find(|(_, content)| content.context == context)?;
-        Some(*profile)
-    });
-    let dir = profile.and_then(|profile| {
-        INSTALLED.with_borrow(|installed| Some(installed.get(&profile)?.0.clone()))
-    });
-    if let (Some(profile), Some(dir)) = (profile, dir) {
-        refresh(profile, &dir);
-    }
     send_in(
         session,
         "Runtime.addBinding",
