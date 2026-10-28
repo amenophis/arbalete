@@ -135,7 +135,14 @@ To answer before the compatibility layer is built (phase 4), in this order:
    - once installed, Chromium opens a full Chromium window (tab strip, address bar, New Tab page) to show its
      "has been added" bubble, as it finds no browser window of its own: Arbalete closes it, or keeps Chromium
      from opening it.
-4. **Forwarding `tabs.create` and `tabs.update`** to Arbalete.
+4. **Forwarding `tabs.create` and `tabs.update`** to Arbalete. **Answered (2026-10-28)**: in an extension's
+   service worker, `Runtime.addBinding` exposes a function whose calls reach the app as `Runtime.bindingCalled`
+   events, and Chromium lets the shim replace `chrome.tabs.create` and `chrome.tabs.update` with functions
+   calling it. Called as an extension would, the original `create` fails ("No current window"); the shimmed
+   `create` makes Arbalete open the tab, and `update` load another address in it. Left to build: a binding only
+   goes one way, so the shim awaits the app's answer, which the app gives by evaluating in the same session, to
+   return the new tab's real id (question 2); `update` on another tab finds it by its id the same way; the
+   binding and the shim are installed again whenever the worker starts again (question 1).
 5. **1Password**: find why its popup stays blank.
 6. **Several Alloy views and an overlay in one CEF Views window**: allowed by CEF. **Answered**: the app is
    built this way (the sidebar, the page's card and its overlays in one window).
