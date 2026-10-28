@@ -527,10 +527,37 @@ fn save_downloads() {
 /// Sends the downloads to both sidebars, which show the recent ones at their bottom and all of
 /// them in the library.
 fn send_downloads() {
+    update_media_files();
     let json = DOWNLOADS.with_borrow(|downloads| serde_json::to_string(downloads).expect("JSON"));
     let event = format!(r#"new CustomEvent("arbalete:downloads", {{ detail: {json} }})"#);
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
+}
+
+/// The images and videos downloaded and still there, which the library's Media section shows:
+/// the UI loads them by their download's id (media_file).
+static MEDIA_FILES: Mutex<Vec<(u32, PathBuf, &'static str)>> = Mutex::new(Vec::new());
+
+fn update_media_files() {
+    let files = DOWNLOADS.with_borrow(|downloads| {
+        downloads
+            .iter()
+            .filter(|download| download.state == downloads::State::Complete && !download.missing)
+            .filter_map(|download| {
+                let mime = downloads::media_type(&download.name)?;
+                Some((download.id, download.path.clone(), mime))
+            })
+            .collect()
+    });
+    *MEDIA_FILES.lock().expect("not poisoned") = files;
+}
+
+/// The downloaded image or video a UI path names, `media/<download id>`, with its media type.
+fn media_file(path: &str) -> Option<(PathBuf, &'static str)> {
+    let id: u32 = path.strip_prefix("media/")?.parse().ok()?;
+    let files = MEDIA_FILES.lock().expect("not poisoned");
+    let (_, file, mime) = files.iter().find(|(media, _, _)| *media == id)?;
+    Some((file.clone(), mime))
 }
 
 /// Opens the library on its downloads, showing the sidebar first if it is hidden.
@@ -3612,6 +3639,11 @@ wrap_resource_request_handler! {
                 let file = CefString::from(file.to_str()?);
                 let stream = stream_reader_create_for_file(Some(&file))?;
                 return Some(StreamResourceHandler::new(200, "OK".to_string(), "image/png".to_string(), None, Some(stream)));
+            }
+            if let Some((file, mime)) = media_file(path) {
+                let file = CefString::from(file.to_str()?);
+                let stream = stream_reader_create_for_file(Some(&file))?;
+                return Some(StreamResourceHandler::new(200, "OK".to_string(), mime.to_string(), None, Some(stream)));
             }
             let (mime, body) = match path.strip_prefix("command/").and_then(Command::parse) {
                 Some(command) => {

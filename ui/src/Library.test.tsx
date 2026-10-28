@@ -52,6 +52,7 @@ test("a rail of sections opens on the Spaces, and the one picked shows under its
     "Spaces",
     "Recently Closed",
     "History",
+    "Media",
     "Downloads",
   ]);
   expect(section("Spaces").getAttribute("aria-selected")).toBe("true");

@@ -4,9 +4,10 @@ import { type Download, DownloadsList } from "./Downloads";
 import { HistoryList } from "./History";
 import { Icon } from "./Icon";
 import { ManageSpaces } from "./ManageSpaces";
+import { MediaList } from "./Media";
 import { matches } from "./search";
 
-export type Section = "spaces" | "closed" | "history" | "downloads";
+export type Section = "spaces" | "closed" | "history" | "media" | "downloads";
 
 // The sections the library holds so far, in its rail.
 export const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -24,6 +25,11 @@ export const SECTIONS: { id: Section; label: string; icon: string }[] = [
     id: "history",
     label: "History",
     icon: "M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.6h2.6M8 5v3.2l2.2 1.3",
+  },
+  {
+    id: "media",
+    label: "Media",
+    icon: "M2.5 3.5h11v9h-11zM2.5 10.5l3-3 3 3 2-2 3 3M10.5 6.5h.01",
   },
   {
     id: "downloads",
@@ -123,6 +129,7 @@ export function Library({
         )}
         {section === "closed" && <ClosedTabs closed={closed} query={query} onReopen={onBack} />}
         {section === "history" && <HistoryList query={query} now={Date.now()} onOpen={onBack} />}
+        {section === "media" && <MediaList downloads={downloads} query={query} />}
         {section === "downloads" && (
           <DownloadsList downloads={downloads} query={query} now={Date.now()} />
         )}
