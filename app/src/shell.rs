@@ -31,8 +31,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, LocalKey};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// The UI is served by the app itself under this origin.
-const UI_ORIGIN: &str = "https://arbalete.ui/";
+/// The UI is served by the app itself under this origin, of its own scheme (app/src/scheme.rs).
+const UI_ORIGIN: &str = "arbalete://ui/";
 
 /// CEF's root cache path, which holds every profile's web data. Read from the IO thread too,
 /// which serves the favicons.
@@ -2923,6 +2923,10 @@ wrap_app! {
             }
         }
 
+        fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
+            crate::scheme::register(registrar);
+        }
+
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
             Some(ArbaleteBrowserProcessHandler::new(self.data_dir.clone()))
         }
@@ -4373,7 +4377,7 @@ mod tests {
         assert_eq!(closed["url"], "https://example.com/");
         assert_eq!(closed["closedAt"], 60_000);
         let favicon = format!(
-            "https://arbalete.ui/favicon/{}/d41d8cd98f00b204e9800998ecf8427e.png",
+            "arbalete://ui/favicon/{}/d41d8cd98f00b204e9800998ecf8427e.png",
             serde_json::json!(profile)
         );
         assert_eq!(closed["favicon"], favicon);
@@ -4535,12 +4539,9 @@ mod tests {
 
     #[test]
     fn ignores_the_fragment() {
+        assert_eq!(ui_path("arbalete://ui/index.html#overlay"), "index.html");
         assert_eq!(
-            ui_path("https://arbalete.ui/index.html#overlay"),
-            "index.html"
-        );
-        assert_eq!(
-            ui_path("https://arbalete.ui/command/open/a%23b"),
+            ui_path("arbalete://ui/command/open/a%23b"),
             "command/open/a%23b"
         );
     }
