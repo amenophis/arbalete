@@ -143,6 +143,14 @@ To answer before the compatibility layer is built (phase 4), in this order:
    goes one way, so the shim awaits the app's answer, which the app gives by evaluating in the same session, to
    return the new tab's real id (question 2); `update` on another tab finds it by its id the same way; the
    binding and the shim are installed again whenever the worker starts again (question 1).
-5. **1Password**: find why its popup stays blank.
+5. **1Password**: find why its popup stays blank. **Partly answered (2026-10-28)**: installed from the Web Store,
+   its popup (`popup/index.html`, opened in an Alloy page) is not broken: its React interface mounts, without
+   exceptions or failed requests, and shows the 1Password logo. With the shim in the popup and in its service
+   worker, `tabs.query` and `windows.*` answer; the popup then calls no other tab or window API and waits for
+   the account's state, which it has none of without a signed-in account: the blank popup of the first spike
+   was most likely this screen. The full check (vault, autofill) needs a 1Password account, for the acceptance
+   tests. Found on the way: the Chromium windows Chrome-style views live in (the Web Store's, the one opened
+   after an install) are real Chromium windows, so extensions take their tab for the active one (1Password
+   thought it was on the Web Store): Arbalete never leaves one open.
 6. **Several Alloy views and an overlay in one CEF Views window**: allowed by CEF. **Answered**: the app is
    built this way (the sidebar, the page's card and its overlays in one window).
