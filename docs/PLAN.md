@@ -428,6 +428,18 @@ from Arc rely on them. Items that belong to a phase above stay there.
 - Onboarding: the audit was done with a signed-in account, which skipped the setup screens. Arbalete's first
   launch will be designed later, from an account-free path, taking inspiration from Dia (Arc's successor).
 
+### Phase 14 — Pixel-perfect design comparison
+- Last, once every feature is in: Arbalete matches Arc's look exactly, everywhere, in light and dark themes.
+- Every screen, state and motion side by side with Arc, at the same window size and scale:
+  - the sidebar in each mode (docked, hidden, revealed), the library, the Command Bar, the site controls'
+    panel, menus, the settings window, Little Arbalete, toolbar mode, the empty states;
+  - hover, pressed, focus, selected, dragging, loading and error states;
+  - motion: timings, easing and springs, from screen recordings frame by frame.
+- Each difference is measured, not judged by eye: sizes, spacing, radii, colors, shadows, type (font, size,
+  weight, line height) and icons' strokes, from screenshots overlaid on Arc's, then fixed.
+- Done when an overlay of each screen shows no difference left. Arbalete still draws its own icons and copies
+  no asset.
+
 ### Later
 - **Sync through a folder the user already syncs.** No Arbalete account and no server: the user picks a folder
   synced by a service they already use (iCloud Drive, Google Drive for desktop, Dropbox, OneDrive, Nextcloud or
