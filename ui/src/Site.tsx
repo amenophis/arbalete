@@ -43,7 +43,8 @@ const ACTIONS = [
 
 // The selected tab's site controls, in a panel under their button, like Arc's (show_site_controls
 // in app/src/shell.rs): actions on its link and what the site keeps, the profile's extensions,
-// whose popup a click opens in place of the panel, and whether the connection is secure. The
+// whose popup a click opens in place of the panel, the Chrome Web Store to add more, and whether
+// the connection is secure. The
 // panel closes on losing the focus and on Escape, and sizes itself to what it shows.
 export function Site() {
   const panel = useRef<HTMLDivElement>(null);
@@ -66,6 +67,14 @@ export function Site() {
   useLayoutEffect(() => {
     if (!site || !panel.current) return;
     send(`site/height/${panel.current.offsetHeight}`);
+    // The app shows an extension's menu on a right-click, which the page never sees.
+    const targets = [...panel.current.querySelectorAll<HTMLElement>("[data-extension]")].map(
+      (tile) => {
+        const { x, y, width, height } = tile.getBoundingClientRect();
+        return { id: tile.dataset.extension, x, y, width, height };
+      },
+    );
+    send(`site/targets/${encodeURIComponent(JSON.stringify(targets))}`);
   }, [site]);
   if (!site) return null;
   const secure = site.url.startsWith("https://");
@@ -97,26 +106,32 @@ export function Site() {
           </button>
         ))}
       </div>
-      {site.extensions.length > 0 && (
-        <>
-          <h2>Extensions</h2>
-          <div className="site-extensions">
-            {site.extensions.map((extension) => (
-              <button
-                key={extension.id}
-                type="button"
-                className="site-button"
-                aria-label={extension.name}
-                title={extension.name}
-                disabled={!extension.popup}
-                onClick={() => send(`site/extension/${extension.id}`)}
-              >
-                {extension.icon ? <img src={extension.icon} alt="" /> : extension.name.slice(0, 1)}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      <h2>Extensions</h2>
+      <div className="site-extensions">
+        {site.extensions.map((extension) => (
+          <button
+            key={extension.id}
+            data-extension={extension.id}
+            type="button"
+            className="site-button"
+            aria-label={extension.name}
+            title={extension.name}
+            disabled={!extension.popup}
+            onClick={() => send(`site/extension/${extension.id}`)}
+          >
+            {extension.icon ? <img src={extension.icon} alt="" /> : extension.name.slice(0, 1)}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="site-button"
+          aria-label="Add Extensions"
+          title="Add Extensions"
+          onClick={() => send("site/store")}
+        >
+          <Icon d="M8 3.5v9M3.5 8h9" size={18} />
+        </button>
+      </div>
       <div className="site-footer">
         <Icon
           d={

@@ -89,6 +89,20 @@ fn site_menu(url: &str) -> Vec<Entry> {
     ]
 }
 
+/// An extension's menu, from the site controls' panel.
+pub fn extension_menu(id: &str, name: &str) -> Vec<Entry> {
+    vec![item(
+        "remove",
+        "Remove from Arbalete…",
+        Action::Confirm {
+            question: format!("Remove “{name}”?"),
+            detail: "Its data in this profile is deleted too.",
+            button: "Remove",
+            command: Command::RemoveExtension(id.to_string()),
+        },
+    )]
+}
+
 /// Only web pages have a site to control.
 fn is_web(url: &str) -> bool {
     url.starts_with("https://") || url.starts_with("http://")
