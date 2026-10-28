@@ -39,6 +39,8 @@ test("navigates the page and shows its domain, which a click edits", () => {
   expect(url.getAttribute("title")).toBe("https://www.example.com/page");
   fireEvent.click(url);
   expect(fetch).toHaveBeenLastCalledWith("/command/overlay/edit", { method: "POST" });
+  fireEvent.click(screen.getByRole("button", { name: "Site controls" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/menu/site", { method: "POST" });
   expect(screen.queryByRole("progressbar")).toBeNull();
   receive(true);
   expect(screen.getByRole("progressbar", { name: "Loading" })).toBeDefined();

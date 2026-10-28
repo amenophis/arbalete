@@ -100,6 +100,7 @@ export function App() {
             {active && domain(active.url)}
           </button>
           {active && <CopyLink />}
+          {active && <SiteControls />}
           {active && page?.loading && (
             <progress className="progress" aria-label="Loading" value={page.progress} />
           )}
@@ -677,6 +678,22 @@ function FavoritesHint({ space }: { space: number }) {
         ×
       </button>
     </li>
+  );
+}
+
+// Opens the selected tab's site controls, a native menu at the pointer (site_menu in
+// app/src/menu.rs): copy or share its link, clear its cache or its cookies.
+export function SiteControls() {
+  return (
+    <button
+      type="button"
+      className="copy-link"
+      aria-label="Site controls"
+      title="Site controls"
+      onClick={() => send("menu/site")}
+    >
+      <Icon d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7M11 3.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM5 9.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z" />
+    </button>
   );
 }
 

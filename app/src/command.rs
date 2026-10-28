@@ -5,6 +5,14 @@ use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
 use serde::Deserialize;
 
+/// What a site keeps that its site controls clear (Command::ClearSiteData).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SiteData {
+    /// Its cache storage and service workers, the page then reloading from the network.
+    Cache,
+    Cookies,
+}
+
 /// What a Little Arbalete window's bar asks for (Command::Little).
 #[derive(Clone, Debug, PartialEq)]
 pub enum LittleAction {
@@ -38,6 +46,8 @@ pub enum Command {
     Zoom(Zoom),
     /// Prints the page, from the menu.
     Print,
+    /// Clears what the selected tab's site keeps, then reloads it, from its site controls.
+    ClearSiteData(SiteData),
     /// Opens the page's source in a new tab, from the menu: `page/source`.
     ViewSource,
     /// Shows Chromium's developer tools for the page in a window of their own, or closes them,
@@ -163,7 +173,8 @@ pub enum Command {
         targets: Vec<HitTarget>,
     },
     /// Runs an item of a menu without showing it, by the item's id (app/src/menu.rs), as the
-    /// end-to-end checks cannot pick in native menus: `menu/choose/<node or space>/<id>/<item id>`.
+    /// end-to-end checks cannot pick in native menus: `menu/choose/<node or space>/<id>/<item id>`,
+    /// or `menu/choose/site/<any>/<item id>`.
     ChooseMenu(Target, String),
     /// Collapses or expands a folder: `toggle/<folder id>`.
     ToggleFolder(NodeId),
@@ -289,6 +300,8 @@ pub enum Target {
     /// The profiles a Space may be attached to, from its card in the library.
     #[serde(rename = "space-profile")]
     SpaceProfile(SpaceId),
+    /// The site of the selected tab, from the url bar's site controls: `menu/site`.
+    Site,
 }
 
 /// Where a menu's target shows in a sidebar, in CSS pixels from the view's top left corner.
@@ -309,6 +322,9 @@ impl HitTarget {
 
 impl Target {
     fn parse(path: &str) -> Option<Self> {
+        if path == "site" {
+            return Some(Self::Site);
+        }
         if let Some(id) = path.strip_prefix("space/") {
             return serde_json::from_str(id).ok().map(Self::Space);
         }
@@ -479,7 +495,11 @@ impl Command {
                     // The target's kind and id, then the item's id, which may hold slashes.
                     let mut args = args.splitn(3, '/');
                     let (kind, id, item) = (args.next()?, args.next()?, args.next()?);
-                    let target = Target::parse(&format!("{kind}/{id}"))?;
+                    // The site has no id: any stands for it.
+                    let target = match kind {
+                        "site" => Target::Site,
+                        _ => Target::parse(&format!("{kind}/{id}"))?,
+                    };
                     return Some(Self::ChooseMenu(target, item.to_string()));
                 }
                 if let Some(target) = path.strip_prefix("menu/") {
@@ -1104,6 +1124,14 @@ mod tests {
         assert_eq!(Command::parse("menu/targets/floating/%5B%5D"), None);
         assert_eq!(Command::parse("menu/targets/docked/%5B"), None);
         assert_eq!(Command::parse("menu/space/x"), None);
+        assert_eq!(
+            Command::parse("menu/site"),
+            Some(Command::Menu(Target::Site))
+        );
+        assert_eq!(
+            Command::parse("menu/choose/site/0/clear-cache"),
+            Some(Command::ChooseMenu(Target::Site, "clear-cache".into()))
+        );
         assert_eq!(Command::parse("menu/node/x"), None);
         assert_eq!(Command::parse("menu/tab/12"), None);
         assert_eq!(Command::parse("menu/choose/node/12"), None);

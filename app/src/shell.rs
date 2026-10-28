@@ -3,7 +3,9 @@
 //! The `cef` crate's default callbacks return 0, which means "no" or "cancel": every callback the app
 //! relies on is implemented explicitly.
 
-use crate::command::{Command, DownloadAction, HitTarget, LittleAction, Setting, Target, Zoom};
+use crate::command::{
+    Command, DownloadAction, HitTarget, LittleAction, Setting, SiteData, Target, Zoom,
+};
 use crate::downloads::{self, Download};
 use crate::menu::{self, Action};
 use crate::settings::{self, Settings};
@@ -1231,6 +1233,44 @@ fn show_import() {
     }
 }
 
+/// Clears what the shown page's site keeps, through Chromium's DevTools protocol, then reloads the
+/// page: its cache storage and service workers, loading it again from the network, or its
+/// cookies.
+fn clear_site_data(browser: &Browser, data: SiteData) {
+    let (Some(host), Some(frame)) = (browser.host(), browser.main_frame()) else {
+        return;
+    };
+    let url = CefString::from(&frame.url()).to_string();
+    let Some(origin) = origin(&url) else { return };
+    let types = match data {
+        SiteData::Cache => "cache_storage,service_workers",
+        SiteData::Cookies => "cookies",
+    };
+    let Some(mut params) = dictionary_value_create() else {
+        return;
+    };
+    params.set_string(
+        Some(&CefString::from("origin")),
+        Some(&CefString::from(origin)),
+    );
+    params.set_string(
+        Some(&CefString::from("storageTypes")),
+        Some(&CefString::from(types)),
+    );
+    let method = CefString::from("Storage.clearDataForOrigin");
+    host.execute_dev_tools_method(0, Some(&method), Some(&mut params));
+    match data {
+        SiteData::Cache => browser.reload_ignore_cache(),
+        SiteData::Cookies => browser.reload(),
+    }
+}
+
+/// A web page's origin: its scheme, host and port.
+fn origin(url: &str) -> Option<&str> {
+    let (scheme, _) = url.split_once("://")?;
+    Some(&url[..scheme.len() + 3 + site(url).len()])
+}
+
 /// Shows Chromium's developer tools for the shown page, in a window of their own, or closes them;
 /// on an element, at a point of the page, they show it, open or not.
 fn show_dev_tools(host: &BrowserHost, at: Option<(i32, i32)>) {
@@ -1932,6 +1972,8 @@ pub fn perform(action: Action) {
         #[cfg(target_os = "macos")]
         Action::CopyLink(url) => crate::mac::copy(&url),
         #[cfg(target_os = "macos")]
+        Action::Share(url) => crate::mac::share(&url),
+        #[cfg(target_os = "macos")]
         Action::EditPinnedUrl { tab, url } => {
             let detail = "This is what opens first when you click this tab.";
             if let Some(url) = crate::mac::prompt("Edit Pinned URL", detail, &url, "Save") {
@@ -1950,7 +1992,10 @@ pub fn perform(action: Action) {
             }
         }
         #[cfg(not(target_os = "macos"))]
-        Action::CopyLink(_) | Action::Confirm { .. } | Action::EditPinnedUrl { .. } => {}
+        Action::CopyLink(_)
+        | Action::Share(_)
+        | Action::Confirm { .. }
+        | Action::EditPinnedUrl { .. } => {}
     }
 }
 
@@ -2507,6 +2552,7 @@ pub fn run(command: Command) {
             }
         }
         (Command::Stop, Some(browser)) => browser.stop_load(),
+        (Command::ClearSiteData(data), Some(browser)) => clear_site_data(&browser, data),
         (Command::Zoom(zoom), Some(browser)) => {
             if let Some(host) = browser.host() {
                 host.zoom(match zoom {
@@ -3623,9 +3669,23 @@ mod tests {
     use super::{
         CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH, RECENT_TABS,
         Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lerp_rect, margin_regions,
-        remember, site, slide_duration, step, toggled, ui_file, ui_path,
+        origin, remember, site, slide_duration, step, toggled, ui_file, ui_path,
     };
     use arbalete_core::sidebar::NodeId;
+
+    #[test]
+    fn tells_the_origin_of_a_web_page() {
+        assert_eq!(
+            origin("https://www.example.com/a?b#c"),
+            Some("https://www.example.com")
+        );
+        assert_eq!(
+            origin("http://localhost:3000/"),
+            Some("http://localhost:3000")
+        );
+        assert_eq!(origin("https://example.com"), Some("https://example.com"));
+        assert_eq!(origin("about:blank"), None);
+    }
 
     #[test]
     fn tells_the_site_of_a_url() {

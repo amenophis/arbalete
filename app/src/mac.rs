@@ -6,8 +6,8 @@ use crate::swipe::{Phase, Scroll};
 use block2::RcBlock;
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::{
-    ClassType, DefinedClass, Encoding, MainThreadMarker, MainThreadOnly, RefEncode, define_class,
-    extern_methods, msg_send,
+    AnyThread, ClassType, DefinedClass, Encoding, MainThreadMarker, MainThreadOnly, RefEncode,
+    define_class, extern_methods, msg_send,
     rc::Retained,
     runtime::{AnyClass, AnyObject, Bool, NSObjectProtocol, Sel},
     sel,
@@ -16,12 +16,12 @@ use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSColor, NSControlStateValueOn,
     NSDownArrowFunctionKey, NSEvent, NSEventMask, NSEventModifierFlags, NSEventPhase, NSEventType,
     NSF12FunctionKey, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard,
-    NSPasteboardTypeString, NSRightArrowFunctionKey, NSTextField, NSUpArrowFunctionKey, NSView,
-    NSWindowButton, NSWorkspace,
+    NSPasteboardTypeString, NSRightArrowFunctionKey, NSSharingServicePicker, NSTextField,
+    NSUpArrowFunctionKey, NSView, NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{
-    NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSNumber, NSSize, NSString, NSURL,
-    ns_string,
+    NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSNumber, NSRect, NSRectEdge, NSSize,
+    NSString, NSURL, ns_string,
 };
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
@@ -1051,6 +1051,27 @@ pub fn show_file(path: &std::path::Path) {
 
 fn file_url(path: &std::path::Path) -> Retained<NSURL> {
     NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()))
+}
+
+/// Shows the system's share menu for a link at the pointer, over the window that has it.
+pub fn share(url: &str) {
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let Some(window) = NSApplication::sharedApplication(mtm).keyWindow() else {
+        return;
+    };
+    let Some(view) = window.contentView() else {
+        return;
+    };
+    let Some(link) = NSURL::URLWithString(&NSString::from_str(url)) else {
+        return;
+    };
+    let items = NSArray::from_retained_slice(&[Retained::into_super(Retained::into_super(link))]);
+    // SAFETY: the picker takes the items a share menu offers, like links.
+    let picker =
+        unsafe { NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items) };
+    let point = view.convertPoint_fromView(window.mouseLocationOutsideOfEventStream(), None);
+    let rect = NSRect::new(point, NSSize::new(1.0, 1.0));
+    picker.showRelativeToRect_ofView_preferredEdge(rect, &view, NSRectEdge::MinY);
 }
 
 /// Puts a link on the clipboard.
