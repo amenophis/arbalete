@@ -50,6 +50,9 @@ run = [
   # The bundle and its name in the menu bar and the Finder take a capital, unlike the executable.
   "mv target/bundle/arbalete.app target/bundle/Arbalete.app",
   "plutil -replace CFBundleName -string Arbalete target/bundle/Arbalete.app/Contents/Info.plist",
+  # A browser opens web links: macOS offers it as the default browser, which other apps' links
+  # then open in (mac::watch_links).
+  "plutil -insert CFBundleURLTypes -json '[{\"CFBundleURLName\":\"Web site URL\",\"CFBundleURLSchemes\":[\"http\",\"https\"]}]' target/bundle/Arbalete.app/Contents/Info.plist",
   # Ad hoc signatures change on every build, so macOS asks again for each permission. A stable
   # identity, set in .config/mise.local.toml (not committed), keeps permissions across builds.
   # The framework and the helpers, which read and write the data, are signed one by one: --deep

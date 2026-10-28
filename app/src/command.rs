@@ -5,6 +5,17 @@ use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
 use serde::Deserialize;
 
+/// What a Little Arbalete window's bar asks for (Command::Little).
+#[derive(Clone, Debug, PartialEq)]
+pub enum LittleAction {
+    /// The bar is listening: send it its page's address.
+    Ready,
+    /// Loads an address in the window's page.
+    Navigate(String),
+    /// Moves the page into the displayed Space, as a tab, and closes the window.
+    OpenInSpace,
+}
+
 /// The app's settings the settings window turns on or off (app/src/settings.rs).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Setting {
@@ -86,6 +97,15 @@ pub enum Command {
     ToggleSidebar,
     /// Shows the bar above the page, or hides it: `toolbar/toggle`.
     ToggleToolbar,
+    /// Opens a Little Arbalete window, empty, from the menu, or on a link another app asks to
+    /// open: `little/new` or `little/new/<percent-encoded url>`.
+    NewLittle(Option<String>),
+    /// Acts in a Little Arbalete window, from its bar: `little/<window id>/ready`,
+    /// `little/<window id>/navigate/<percent-encoded url>` or `little/<window id>/open`.
+    Little(u32, LittleAction),
+    /// Moves the page of the Little Arbalete window that has the keyboard into the displayed
+    /// Space, from the menu.
+    OpenLittleInSpace,
     /// Shows the hidden sidebar above the page, `sidebar/reveal`, or hides it again,
     /// `sidebar/conceal`.
     RevealSidebar,
@@ -312,6 +332,7 @@ impl Command {
             "overlay/edit" => Some(Self::EditUrl),
             "sidebar/toggle" => Some(Self::ToggleSidebar),
             "toolbar/toggle" => Some(Self::ToggleToolbar),
+            "little/new" => Some(Self::NewLittle(None)),
             "sidebar/reveal" => Some(Self::RevealSidebar),
             "sidebar/conceal" => Some(Self::ConcealSidebar),
             "library/show" => Some(Self::ShowLibrary),
@@ -563,6 +584,22 @@ impl Command {
                     let (tab, parent, index) = parse_place(args)?;
                     return Some(Self::Duplicate(tab, parent, index));
                 }
+                if let Some(url) = path.strip_prefix("little/new/") {
+                    return percent_decode(url).map(|url| Self::NewLittle(Some(url)));
+                }
+                if let Some((id, action)) =
+                    path.strip_prefix("little/").and_then(|r| r.split_once('/'))
+                {
+                    let id = id.parse().ok()?;
+                    let action = match action {
+                        "ready" => LittleAction::Ready,
+                        "open" => LittleAction::OpenInSpace,
+                        _ => LittleAction::Navigate(percent_decode(
+                            action.strip_prefix("navigate/")?,
+                        )?),
+                    };
+                    return Some(Self::Little(id, action));
+                }
                 if let Some(text) = path.strip_prefix("overlay/search/") {
                     return percent_decode(text).map(Self::SearchOverlay);
                 }
@@ -626,7 +663,7 @@ fn percent_decode(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, Setting, Target};
+    use super::{Command, LittleAction, Setting, Target};
     use arbalete_core::search::SearchEngine;
     use arbalete_core::sidebar::Color;
 
@@ -1078,6 +1115,32 @@ mod tests {
     fn parses_import_commands() {
         assert_eq!(Command::parse("import/show"), Some(Command::ShowImport));
         assert_eq!(Command::parse("import/ready"), Some(Command::ImportReady));
+    }
+
+    #[test]
+    fn parses_little_window_commands() {
+        assert_eq!(Command::parse("little/new"), Some(Command::NewLittle(None)));
+        assert_eq!(
+            Command::parse("little/new/https%3A%2F%2Fexample.com%2F"),
+            Some(Command::NewLittle(Some("https://example.com/".into())))
+        );
+        assert_eq!(
+            Command::parse("little/3/ready"),
+            Some(Command::Little(3, LittleAction::Ready))
+        );
+        assert_eq!(
+            Command::parse("little/3/open"),
+            Some(Command::Little(3, LittleAction::OpenInSpace))
+        );
+        assert_eq!(
+            Command::parse("little/3/navigate/example.com%2Fa"),
+            Some(Command::Little(
+                3,
+                LittleAction::Navigate("example.com/a".into())
+            ))
+        );
+        assert_eq!(Command::parse("little/x/ready"), None);
+        assert_eq!(Command::parse("little/3/close"), None);
     }
 
     #[test]

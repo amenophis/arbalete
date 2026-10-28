@@ -19,10 +19,17 @@ use objc2_app_kit::{
     NSPasteboardTypeString, NSRightArrowFunctionKey, NSTextField, NSUpArrowFunctionKey, NSView,
     NSWindowButton, NSWorkspace,
 };
-use objc2_foundation::{NSArray, NSNumber, NSSize, NSString, NSURL, ns_string};
+use objc2_foundation::{
+    NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSNumber, NSSize, NSString, NSURL,
+    ns_string,
+};
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
+
+/// The "get URL" Apple event's class and identifier ('GURL'), and the key of its url ('----').
+const GET_URL: u32 = u32::from_be_bytes(*b"GURL");
+const DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
 
 /// The page's corner radius, in points.
 const CARD_RADIUS: f64 = 8.0;
@@ -252,6 +259,26 @@ define_class!(
             crate::shell::run(Command::ShowDownloads);
         }
 
+        #[unsafe(method(arbaleteNewLittle:))]
+        fn new_little(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::NewLittle(None));
+        }
+
+        #[unsafe(method(arbaleteOpenLittleInSpace:))]
+        fn open_little_in_space(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::OpenLittleInSpace);
+        }
+
+        // A link another app asks to open, once Arbalete is the default browser (watch_links).
+        #[unsafe(method(arbaleteGetUrl:withReplyEvent:))]
+        fn get_url(&self, event: &NSAppleEventDescriptor, _reply: &NSAppleEventDescriptor) {
+            let url: Option<Retained<NSAppleEventDescriptor>> =
+                unsafe { msg_send![event, paramDescriptorForKeyword: DIRECT_OBJECT] };
+            if let Some(url) = url.and_then(|url| url.stringValue()) {
+                crate::shell::open_link(Some(url.to_string()));
+            }
+        }
+
         #[unsafe(method(arbaleteSettings:))]
         fn settings(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::ShowSettings);
@@ -304,6 +331,24 @@ impl ArbaleteApplication {
 
 /// Watches clicks and keys as the application takes them from the system: mouse events never
 /// reach sendEvent: above, which Chromium's windows bypass.
+/// Opens the links other apps ask the default browser to open, which macOS sends as "get URL"
+/// Apple events, in Little Arbalete windows. The bundle declares the http and https schemes
+/// (the `app` task in .config/mise.toml).
+pub fn watch_links() {
+    let manager = NSAppleEventManager::sharedAppleEventManager();
+    let app = ArbaleteApplication::shared_application();
+    // SAFETY: the app implements the selector, with the arguments Apple events handlers take.
+    unsafe {
+        let _: () = msg_send![
+            &*manager,
+            setEventHandler: &*app,
+            andSelector: sel!(arbaleteGetUrl:withReplyEvent:),
+            forEventClass: GET_URL,
+            andEventID: GET_URL
+        ];
+    }
+}
+
 pub fn watch_events() {
     let mask = NSEventMask::RightMouseDown
         | NSEventMask::LeftMouseDown
@@ -445,6 +490,18 @@ pub fn setup_menu() {
                     ns_string!("New Tab"),
                     sel!(arbaleteNewTab:),
                     ns_string!("t"),
+                ),
+                option_item(
+                    mtm,
+                    ns_string!("New Little Arbalete Window"),
+                    sel!(arbaleteNewLittle:),
+                    ns_string!("n"),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Open in Space"),
+                    sel!(arbaleteOpenLittleInSpace:),
+                    ns_string!("o"),
                 ),
                 item(
                     mtm,
