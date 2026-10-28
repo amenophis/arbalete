@@ -102,11 +102,20 @@ Chrome-style views per window.
 To answer before the compatibility layer is built (phase 4), in this order:
 
 1. **Browser-level DevTools access from the app**, needed to attach to extension service workers as they start.
-   The spike did it from an external DevTools client.
+   The spike did it from an external DevTools client. **Answered (2026-10-28)**: a DevTools session the app
+   opens on any of its browsers (`add_dev_tools_message_observer`, `send_dev_tools_message`) sees every target
+   of the browser. `Target.getTargets` lists the extensions' service workers, one per profile with its
+   `browserContextId`; `Target.setDiscoverTargets` reports them as they start (`targetCreated`);
+   `Target.attachToTarget` with `flatten` gives a session in which `Runtime.evaluate` runs in the worker. Only
+   `Target.attachToBrowserTarget` is refused ("Not allowed"), so a worker cannot be paused before its first
+   line (`waitForDebuggerOnStart`): the shim is installed just after it starts, which covers `tabs.query` and
+   `windows.*` called from event handlers. CEF also honors Chromium's `--load-extension` switch, which loads an
+   unpacked extension for tests.
 2. **The active tab's extension id**: Chromium's internal tab id is not exposed by CEF. Lead: a small built-in
    extension whose content script reports `sender.tab.id`.
 3. **Installing from the Chrome Web Store** when every browser is Alloy style. Lead: a dedicated Chrome-style
    window for the Web Store.
 4. **Forwarding `tabs.create` and `tabs.update`** to Arbalete.
 5. **1Password**: find why its popup stays blank.
-6. **Several Alloy views and an overlay in one CEF Views window**: allowed by CEF, not yet built.
+6. **Several Alloy views and an overlay in one CEF Views window**: allowed by CEF. **Answered**: the app is
+   built this way (the sidebar, the page's card and its overlays in one window).
