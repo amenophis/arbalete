@@ -2144,9 +2144,6 @@ wrap_request_context_handler! {
             let view = browser_view(ContentClient::new(self.profile), "about:blank", no_width, context);
             view.set_visible(0);
             card.add_child_view(Some(&mut View::from(&view)));
-            if let Some(layout) = card.get_layout().and_then(|layout| layout.as_box_layout()) {
-                layout.set_flex_for_view(Some(&mut View::from(&view)), 1);
-            }
         }
     }
 }
@@ -2501,16 +2498,22 @@ wrap_window_delegate! {
             // The card holds the bar above the page, at the top while it is shown, then the
             // profiles' content views, which share the rest.
             let card = panel_create(None).expect("card");
-            card.set_to_box_layout(Some(&BoxLayoutSettings {
-                horizontal: 0,
-                cross_axis_alignment: AxisAlignment::STRETCH,
-                ..Default::default()
-            }));
+            // Every view shares the card's height, but the bar, which keeps its own.
+            let layout = card
+                .set_to_box_layout(Some(&BoxLayoutSettings {
+                    horizontal: 0,
+                    cross_axis_alignment: AxisAlignment::STRETCH,
+                    default_flex: 1,
+                    ..Default::default()
+                }))
+                .expect("box layout");
             // Any width: the layout stretches it across the card. A zero one would make its size
             // "empty", which CEF ignores, with its height.
             let toolbar = browser_view_sized(UiClient::new(), &format!("{UI_ORIGIN}index.html#toolbar"), || 1, PAGE_TOOLBAR_HEIGHT, None);
             toolbar.set_visible(SETTINGS.get().show_toolbar.into());
-            card.add_child_view(Some(&mut View::from(&toolbar)));
+            let mut view = View::from(&toolbar);
+            card.add_child_view(Some(&mut view));
+            layout.set_flex_for_view(Some(&mut view), 0);
             TOOLBAR_VIEW.set(Some(toolbar));
             #[cfg(target_os = "macos")]
             crate::mac::toolbar_shown(SETTINGS.get().show_toolbar);
