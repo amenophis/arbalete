@@ -24,6 +24,14 @@ pub enum LittleAction {
     OpenInSpace,
 }
 
+/// The UI view an extension's button shows in (Command::OpenExtensionPopup).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ButtonView {
+    Docked,
+    Revealed,
+    Toolbar,
+}
+
 /// The app's settings the settings window turns on or off (app/src/settings.rs).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Setting {
@@ -65,6 +73,17 @@ pub enum Command {
     },
     /// Hides the find bar and stops finding: `find/hide`.
     HideFind,
+    /// Opens an extension's popup under its button, given in CSS pixels from its view's top left
+    /// corner: `extension/popup/<id>/<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
+    OpenExtensionPopup {
+        id: String,
+        view: ButtonView,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    },
+    CloseExtensionPopup,
     /// Acts on a download from the sidebar: `download/<cancel, open, show or remove>/<id>`.
     Download(DownloadAction, u32),
     /// Opens the library on the downloads, from the menu.
@@ -375,7 +394,28 @@ impl Command {
             "import/close" => Some(Self::CloseImport),
             "import/full-disk-access" => Some(Self::OpenFullDiskAccess),
             "find/hide" => Some(Self::HideFind),
+            "extension/close" => Some(Self::CloseExtensionPopup),
             _ => {
+                if let Some(args) = path.strip_prefix("extension/popup/") {
+                    let args: Vec<_> = args.split('/').collect();
+                    let [id, view, x, y, width, height] = args[..] else {
+                        return None;
+                    };
+                    let view = match view {
+                        "docked" => ButtonView::Docked,
+                        "revealed" => ButtonView::Revealed,
+                        "toolbar" => ButtonView::Toolbar,
+                        _ => return None,
+                    };
+                    return Some(Self::OpenExtensionPopup {
+                        id: id.to_string(),
+                        view,
+                        x: x.parse().ok()?,
+                        y: y.parse().ok()?,
+                        width: width.parse().ok()?,
+                        height: height.parse().ok()?,
+                    });
+                }
                 if let Some((limit, text)) = path
                     .strip_prefix("history/search/")
                     .and_then(|r| r.split_once('/'))
@@ -683,7 +723,7 @@ fn percent_decode(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, LittleAction, Setting, Target};
+    use super::{ButtonView, Command, LittleAction, Setting, Target};
     use arbalete_core::search::SearchEngine;
     use arbalete_core::sidebar::Color;
 
@@ -694,6 +734,18 @@ mod tests {
         assert_eq!(Command::parse("forward"), Some(Command::Forward));
         assert_eq!(Command::parse("reload"), Some(Command::Reload));
         assert_eq!(Command::parse("find/hide"), Some(Command::HideFind));
+        assert_eq!(
+            Command::parse("extension/popup/abc/toolbar/10/4/28/28"),
+            Some(Command::OpenExtensionPopup {
+                id: "abc".into(),
+                view: ButtonView::Toolbar,
+                x: 10,
+                y: 4,
+                width: 28,
+                height: 28,
+            })
+        );
+        assert_eq!(Command::parse("extension/popup/abc/menu/10/4/28/28"), None);
         assert_eq!(Command::parse("overlay/show"), Some(Command::ShowOverlay));
         assert_eq!(Command::parse("overlay/hide"), Some(Command::HideOverlay));
         assert_eq!(Command::parse("overlay/edit"), Some(Command::EditUrl));

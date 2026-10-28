@@ -12,7 +12,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// The helper extension's directory in the bundle, if it is there: `cef` builds outside the
 /// bundle run without it.
@@ -20,6 +21,116 @@ pub fn helper_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?.parent()?.join("Resources/arbalete-helper");
     dir.join("manifest.json").exists().then_some(dir)
+}
+
+/// An extension the user installed in a profile, as its button shows it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Installed {
+    pub id: String,
+    pub name: String,
+    /// Its button's popup, a path in the extension, if it has one.
+    #[serde(skip)]
+    pub popup: Option<String>,
+    /// Its button's icon file.
+    #[serde(skip)]
+    pub icon: Option<PathBuf>,
+}
+
+/// Where Chromium installs extensions, as its preferences record it: from the Web Store or
+/// elsewhere into the profile (1), unpacked by the user (4), or by other programs (6, 7). Its own
+/// components (5) and extensions loaded from the command line (8), like the helper, are not the
+/// user's.
+const USER_LOCATIONS: [i64; 4] = [1, 4, 6, 7];
+
+/// The extensions installed and enabled in a profile's directory, by name.
+pub fn installed(profile_dir: &Path) -> Vec<Installed> {
+    let preferences = std::fs::read(profile_dir.join("Secure Preferences")).ok();
+    let preferences: Value = preferences
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let Some(settings) = preferences["extensions"]["settings"].as_object() else {
+        return Vec::new();
+    };
+    let mut list: Vec<_> = settings
+        .iter()
+        .filter(|(_, setting)| {
+            let location = setting["location"].as_i64().unwrap_or_default();
+            let disabled = setting["disable_reasons"]
+                .as_array()
+                .is_some_and(|reasons| !reasons.is_empty());
+            USER_LOCATIONS.contains(&location) && !disabled
+        })
+        .filter_map(|(id, setting)| {
+            let path = Path::new(setting["path"].as_str()?);
+            let dir = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                profile_dir.join("Extensions").join(path)
+            };
+            read_manifest(id, &dir)
+        })
+        .collect();
+    list.sort_by_key(|extension| extension.name.to_lowercase());
+    list
+}
+
+/// An extension's name, popup and icon, from its manifest in `dir`.
+fn read_manifest(id: &str, dir: &Path) -> Option<Installed> {
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).ok()?).ok()?;
+    // Manifest V2 extensions have a browser action instead.
+    let action = if manifest["action"].is_object() {
+        &manifest["action"]
+    } else {
+        &manifest["browser_action"]
+    };
+    let icon = largest_icon(&action["default_icon"]).or_else(|| largest_icon(&manifest["icons"]));
+    Some(Installed {
+        id: id.to_string(),
+        name: localized(dir, &manifest, manifest["name"].as_str()?),
+        popup: action["default_popup"]
+            .as_str()
+            .filter(|popup| !popup.is_empty())
+            .map(str::to_string),
+        icon: icon.map(|icon| dir.join(icon.trim_start_matches('/'))),
+    })
+}
+
+/// The path of an icon, or of the largest of several by size.
+fn largest_icon(icons: &Value) -> Option<String> {
+    if let Some(icon) = icons.as_str() {
+        return Some(icon.to_string());
+    }
+    let icons = icons.as_object()?;
+    let largest = icons
+        .iter()
+        .max_by_key(|(size, _)| size.parse::<u32>().unwrap_or_default());
+    largest
+        .and_then(|(_, icon)| icon.as_str())
+        .map(str::to_string)
+}
+
+/// A manifest's text, its `__MSG_<key>__` placeholders read from the extension's default
+/// locale's messages, whose keys ignore case.
+fn localized(dir: &Path, manifest: &Value, text: &str) -> String {
+    let Some(key) = text
+        .strip_prefix("__MSG_")
+        .and_then(|key| key.strip_suffix("__"))
+    else {
+        return text.to_string();
+    };
+    let locale = manifest["default_locale"].as_str().unwrap_or("en");
+    let messages = std::fs::read(dir.join("_locales").join(locale).join("messages.json")).ok();
+    let messages: Value = messages
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let message = messages.as_object().and_then(|messages| {
+        let (_, message) = messages
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(key))?;
+        message["message"].as_str()
+    });
+    message.unwrap_or(text).to_string()
 }
 
 /// The helper extension's service worker, which every extension url is told apart from.
@@ -69,11 +180,128 @@ struct Bridge {
 
 thread_local! {
     static BRIDGE: RefCell<Bridge> = RefCell::default();
+    /// Each profile's extensions, as their buttons show them, and its directory.
+    static INSTALLED: RefCell<HashMap<ProfileId, (PathBuf, Vec<Installed>)>> = RefCell::default();
+    /// The open popup's DevTools observer.
+    static POPUP: RefCell<Option<Registration>> = const { RefCell::new(None) };
 }
 
-/// Starts watching the extensions from a profile's content view once its browser exists, and
-/// learns which target the view is.
-pub fn content_created(profile: ProfileId, browser: &Browser) {
+/// The extensions' icon files, which the UI loads by their profile and extension id
+/// (icon_file), from the IO thread.
+static ICONS: Mutex<Vec<(String, PathBuf)>> = Mutex::new(Vec::new());
+
+/// A profile's extensions, as their buttons show them.
+pub fn list(profile: ProfileId) -> Vec<Installed> {
+    INSTALLED.with_borrow(|installed| {
+        installed
+            .get(&profile)
+            .map(|(_, list)| list.clone())
+            .unwrap_or_default()
+    })
+}
+
+/// The UI path of an extension's icon, if it has one.
+pub fn icon_path(profile: ProfileId, extension: &Installed) -> Option<String> {
+    let profile = serde_json::to_string(&profile).expect("an id");
+    extension
+        .icon
+        .as_ref()
+        .map(|_| format!("extension-icon/{profile}/{}", extension.id))
+}
+
+/// The icon file a UI path names (icon_path), with its media type.
+pub fn icon_file(path: &str) -> Option<(PathBuf, &'static str)> {
+    let key = path.strip_prefix("extension-icon/")?;
+    let icons = ICONS.lock().expect("not poisoned");
+    let (_, file) = icons.iter().find(|(icon, _)| icon == key)?;
+    let mime = match file.extension()?.to_str()? {
+        "svg" => "image/svg+xml",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => "image/png",
+    };
+    Some((file.clone(), mime))
+}
+
+/// Reads a profile's extensions again, and tells the UI if they changed.
+fn refresh(profile: ProfileId, dir: &Path) {
+    let list = installed(dir);
+    let changed = INSTALLED.with_borrow_mut(|installed| {
+        let entry = installed.insert(profile, (dir.to_path_buf(), list.clone()));
+        entry.is_none_or(|(_, before)| before != list)
+    });
+    let id = serde_json::to_string(&profile).expect("an id");
+    let mut icons = ICONS.lock().expect("not poisoned");
+    icons.retain(|(key, _)| !key.starts_with(&format!("{id}/")));
+    icons.extend(
+        list.iter().filter_map(|extension| {
+            Some((format!("{id}/{}", extension.id), extension.icon.clone()?))
+        }),
+    );
+    drop(icons);
+    if changed {
+        crate::shell::extensions_changed();
+    }
+}
+
+/// The address of an extension's popup, if it has one.
+pub fn popup_url(profile: ProfileId, id: &str) -> Option<String> {
+    let extension = list(profile)
+        .into_iter()
+        .find(|extension| extension.id == id)?;
+    Some(format!(
+        "chrome-extension://{id}/{}",
+        extension.popup?.trim_start_matches('/')
+    ))
+}
+
+/// Prepares an extension's popup once its blank page has loaded, then loads it: the shim and its
+/// binding are installed in the page before any of its scripts runs, with the profile's active
+/// tab, and the page sizes the popup, like Chrome's, from 25 to 800 by 600 points.
+pub fn popup_created(profile: ProfileId, browser: &Browser, url: &str) {
+    let Some(host) = browser.host() else { return };
+    host.set_auto_resize_enabled(
+        1,
+        Some(&Size {
+            width: 25,
+            height: 25,
+        }),
+        Some(&Size {
+            width: 800,
+            height: 600,
+        }),
+    );
+    let mut observer = PopupObserver::new(url.to_string());
+    let registration = host.add_dev_tools_message_observer(Some(&mut observer));
+    POPUP.set(registration);
+    let state = BRIDGE.with_borrow(|bridge| {
+        let tab_id = bridge
+            .contents
+            .get(&profile)
+            .and_then(|content| content.tab_id);
+        state_json(bridge.tabs.get(&profile), tab_id)
+    });
+    let source = format!("self.__arbaleteInitial = {state};\n{SHIM}");
+    // New documents get the binding only while the Runtime domain is enabled, and the scripts
+    // added for them only while the Page domain is.
+    for message in [
+        json!({ "id": 3, "method": "Runtime.enable" }),
+        json!({ "id": 1, "method": "Runtime.addBinding", "params": { "name": "__arbalete" } }),
+        json!({ "id": 3, "method": "Page.enable" }),
+        json!({ "id": 2, "method": "Page.addScriptToEvaluateOnNewDocument", "params": { "source": source } }),
+    ] {
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+    }
+}
+
+/// Forgets the closed popup's observer.
+pub fn popup_closed() {
+    POPUP.set(None);
+}
+
+/// Starts watching the extensions from a profile's content view once its browser exists, learns
+/// which target the view is, and reads the profile's extensions from its directory.
+pub fn content_created(profile: ProfileId, browser: &Browser, dir: &Path) {
+    refresh(profile, dir);
     let Some(host) = browser.host() else { return };
     let started = BRIDGE.with_borrow(|bridge| bridge.host.is_some());
     if !started {
@@ -226,6 +454,20 @@ fn attached(session: &str, context: String, helper: bool) {
         return;
     }
     BRIDGE.with_borrow_mut(|bridge| bridge.workers.insert(session.to_string(), context.clone()));
+    // A worker starting may be an extension just installed.
+    let profile = BRIDGE.with_borrow(|bridge| {
+        let (profile, _) = bridge
+            .contents
+            .iter()
+            .find(|(_, content)| content.context == context)?;
+        Some(*profile)
+    });
+    let dir = profile.and_then(|profile| {
+        INSTALLED.with_borrow(|installed| Some(installed.get(&profile)?.0.clone()))
+    });
+    if let (Some(profile), Some(dir)) = (profile, dir) {
+        refresh(profile, &dir);
+    }
     send_in(
         session,
         "Runtime.addBinding",
@@ -266,11 +508,15 @@ fn tab_ids(context: &str, targets: &[Value]) {
     push_state(context);
 }
 
-/// Runs what an extension's shim asks for, through its binding.
+/// Runs what an extension's shim asks for, through its binding: in a popup, closing it too.
 fn binding_called(payload: &str) {
     let Ok(call) = serde_json::from_str::<Value>(payload) else {
         return;
     };
+    if call["method"] == "close" {
+        crate::shell::post(crate::command::Command::CloseExtensionPopup);
+        return;
+    }
     let Some(url) = call["props"]["url"].as_str() else {
         return;
     };
@@ -357,6 +603,28 @@ wrap_dev_tools_message_observer! {
 }
 
 wrap_dev_tools_message_observer! {
+    struct PopupObserver {
+        url: String,
+    }
+
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_message(&self, browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
+            let Some(message) = parse(message) else { return 0 };
+            if message["method"] == "Runtime.bindingCalled" {
+                binding_called(message["params"]["payload"].as_str().unwrap_or_default());
+            }
+            // The shim is added for new documents: the popup's may load.
+            if message["id"] == 2
+                && let Some(frame) = browser.and_then(|browser| browser.main_frame())
+            {
+                frame.load_url(Some(&CefString::from(self.url.as_str())));
+            }
+            0
+        }
+    }
+}
+
+wrap_dev_tools_message_observer! {
     struct ContentObserver {
         profile: ProfileId,
     }
@@ -374,6 +642,72 @@ wrap_dev_tools_message_observer! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A directory of its own under the system's temporary directory, removed on drop.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("arbalete-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn write(&self, path: &str, content: &str) {
+            let path = self.0.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn lists_the_extensions_the_user_installed_and_enabled() {
+        let profile = TestDir::new("extensions");
+        let preferences = json!({ "extensions": { "settings": {
+            "dark": { "location": 1, "path": "dark/1.0_0", "disable_reasons": [] },
+            "block": { "location": 1, "path": "block/2.0_0", "disable_reasons": [] },
+            "off": { "location": 1, "path": "off/1.0_0", "disable_reasons": [1] },
+            "pdf": { "location": 5, "path": "/framework/pdf" },
+            "helper": { "location": 8, "path": "/bundle/arbalete-helper" },
+        } } });
+        profile.write("Secure Preferences", &preferences.to_string());
+        profile.write(
+            "Extensions/dark/1.0_0/manifest.json",
+            r#"{ "name": "Dark Reader", "action": { "default_popup": "ui/popup.html", "default_icon": { "19": "i19.png", "38": "i38.png" } } }"#,
+        );
+        profile.write(
+            "Extensions/block/2.0_0/manifest.json",
+            r#"{ "name": "__MSG_extName__", "default_locale": "en", "icons": { "16": "/i16.png", "128": "i128.png" } }"#,
+        );
+        profile.write(
+            "Extensions/block/2.0_0/_locales/en/messages.json",
+            r#"{ "extname": { "message": "uBlock Origin Lite" } }"#,
+        );
+        profile.write("Extensions/off/1.0_0/manifest.json", r#"{ "name": "Off" }"#);
+        let list = installed(&profile.0);
+        let names: Vec<_> = list
+            .iter()
+            .map(|extension| extension.name.as_str())
+            .collect();
+        assert_eq!(names, ["Dark Reader", "uBlock Origin Lite"]);
+        assert_eq!(list[0].popup.as_deref(), Some("ui/popup.html"));
+        assert_eq!(
+            list[0].icon,
+            Some(profile.0.join("Extensions/dark/1.0_0/i38.png"))
+        );
+        assert_eq!(list[1].popup, None);
+        assert_eq!(
+            list[1].icon,
+            Some(profile.0.join("Extensions/block/2.0_0/i128.png"))
+        );
+        assert!(installed(&profile.0.join("missing")).is_empty());
+    }
 
     #[test]
     fn tells_extension_workers_and_the_helper_from_other_targets() {
