@@ -1991,6 +1991,50 @@ button.folder:hover {
   outline: 2px solid var(--accent);
 }
 
+/* The images and videos downloaded, in the library: a grid of previews, their names below. */
+.media-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0 2px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.media-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 6px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+}
+
+.media-tile:hover {
+  background: var(--hover);
+}
+
+.media-tile :is(img, video) {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  background: var(--hover);
+  object-fit: cover;
+}
+
+.media-tile .title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* Every download, and the history, in the library, by day. */
 .downloads-list,
 .history-list {

@@ -105,6 +105,23 @@ pub fn load(path: &Path) -> Vec<Download> {
     downloads
 }
 
+/// The media type of an image or a video, which the library's Media section shows, by the file's
+/// extension; none for other files.
+pub fn media_type(name: &str) -> Option<&'static str> {
+    let extension = name.rsplit_once('.')?.1.to_lowercase();
+    Some(match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        _ => return None,
+    })
+}
+
 /// The id for a new download in the list.
 pub fn next_id(downloads: &[Download]) -> u32 {
     downloads
@@ -145,6 +162,14 @@ mod tests {
             .map(|name| Path::new("/d").join(name))
             .collect();
         move |path| paths.iter().any(|taken| taken == path)
+    }
+
+    #[test]
+    fn tells_images_and_videos_by_their_extension() {
+        assert_eq!(media_type("photo.JPG"), Some("image/jpeg"));
+        assert_eq!(media_type("clip.final.webm"), Some("video/webm"));
+        assert_eq!(media_type("report.pdf"), None);
+        assert_eq!(media_type("png"), None);
     }
 
     #[test]
