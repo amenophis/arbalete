@@ -219,7 +219,7 @@ try {
     `(() => {
       const icons = [...e2e.page().querySelectorAll(".pinned .tab-row")].map((row) => {
         const img = row.querySelector("img.favicon");
-        return img?.src.startsWith("https://arbalete.ui/favicon/") && img.complete && img.naturalWidth > 0;
+        return img?.src.startsWith("arbalete://ui/favicon/") && img.complete && img.naturalWidth > 0;
       });
       return icons.filter(Boolean).length === 2 && icons.length === 3;
     })()`,

@@ -39,7 +39,7 @@ const helpers = `window.e2e = {
   row: (title) => [...e2e.page().querySelectorAll(".tab-row")].find((row) => row.textContent.includes(title)),
   tile: (title) => e2e.page().querySelector('.favorite[aria-label="' + title + '"]'),
   // An icon served by the app from its cache, loaded.
-  cached: (img) => !!img && img.src.startsWith("https://arbalete.ui/favicon/") && img.complete && img.naturalWidth > 0,
+  cached: (img) => !!img && img.src.startsWith("arbalete://ui/favicon/") && img.complete && img.naturalWidth > 0,
 }`;
 
 async function check(page, description, action, condition) {

@@ -1,4 +1,4 @@
-//! Commands the UI sends to the app, as `https://arbalete.ui/command/<name>` requests.
+//! Commands the UI sends to the app, as `arbalete://ui/command/<name>` requests.
 
 use arbalete_core::import::Choice;
 use arbalete_core::search::SearchEngine;

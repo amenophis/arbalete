@@ -120,7 +120,9 @@ To answer before the compatibility layer is built (phase 4), in this order:
    in no Chromium window: the shim fills in both. Third-party extensions lack the `debugger` permission, so
    Arbalete ships a small helper extension without content scripts, loaded with `--load-extension` from the
    bundle. That switch loads it in every request context, the app's own UI included, which the helper then
-   sees but does not touch.
+   sees but does not touch. Installed extensions reached the UI too: their content scripts ran in it while it
+   was served under `https://arbalete.ui/` (Dark Reader restyled the toolbar). The UI is now served from a
+   scheme of its own, `arbalete://ui/`, which content scripts never match.
 3. **Installing from the Chrome Web Store** when every browser is Alloy style. Lead: a dedicated Chrome-style
    window for the Web Store. **Answered (2026-10-28)**: a Chrome-style window of its own, in the profile's
    request context, on the extension's Web Store page (`chromewebstore.google.com/detail/<id>`), has the

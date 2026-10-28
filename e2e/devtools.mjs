@@ -12,7 +12,7 @@ const APP = resolve("target/bundle/Arbalete.app/Contents/MacOS/arbalete");
 const PORT = 9333;
 const TIMEOUT = 10_000;
 
-export const SIDEBAR = "https://arbalete.ui/index.html";
+export const SIDEBAR = "arbalete://ui/index.html";
 export const OVERLAY = `${SIDEBAR}#overlay`;
 export const REVEAL = `${SIDEBAR}#reveal`;
 export const IMPORT = `${SIDEBAR}#import`;
