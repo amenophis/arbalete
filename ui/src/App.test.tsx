@@ -150,7 +150,7 @@ test("the url bar's site controls ask the app for the site's menu", () => {
   render(<App />);
   receive({});
   fireEvent.click(screen.getByRole("button", { name: "Site controls" }));
-  expect(fetch).toHaveBeenLastCalledWith("/command/menu/site", { method: "POST" });
+  expect(fetch).toHaveBeenLastCalledWith("/command/site/show/docked/0/0/0/0", { method: "POST" });
 });
 
 test("a click on the url bar edits the address in the Command Bar", () => {

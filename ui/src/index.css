@@ -16,6 +16,9 @@
   --panel: #f8f6fb;
   --menu: #fdfcff;
   --menu-border: #0000001a;
+  /* The site controls' buttons, at rest and hovered. */
+  --tile: #0000000d;
+  --tile-hover: #0000001a;
   --ghost: #ffffffcc;
   --drop-line: #1f1d2b;
   /* The pills of a split's tabs: at rest, hovered, beside the shown tab, and the shown tab. */
@@ -37,6 +40,8 @@
     --panel: #1e1a28;
     --menu: #1a1723;
     --menu-border: #ffffff1a;
+    --tile: #ffffff1a;
+    --tile-hover: #ffffff2e;
     --ghost: #ffffff33;
     --drop-line: #ffffff;
     --half: #ffffff12;
@@ -302,31 +307,6 @@ body {
 .copy-link:hover {
   background: var(--hover);
   opacity: 1;
-}
-
-/* The extensions' buttons stay shown, before the url bar's other buttons. */
-.extension-button {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-}
-
-.extension-button:hover {
-  background: var(--hover);
-}
-
-.extension-button img {
-  width: 16px;
-  height: 16px;
 }
 
 /* One tile takes the whole row, more share balanced rows of up to 4, a short last row keeping the
@@ -2338,4 +2318,68 @@ button.folder:hover {
   height: 7px;
   border: 1.5px solid var(--drop-line);
   border-radius: 50%;
+}
+
+/* The site controls' panel (ui/src/Site.tsx), like Arc's: a row of actions, the extensions, and
+   the connection's security. */
+.site {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  outline: none;
+  background: var(--menu);
+  color: var(--text);
+}
+
+.site h2 {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.site-actions,
+.site-extensions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.site-button {
+  display: grid;
+  place-items: center;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: var(--tile);
+  color: inherit;
+  font: inherit;
+}
+
+.site-button:hover:not(:disabled) {
+  background: var(--tile-hover);
+}
+
+.site-button:disabled {
+  opacity: 0.4;
+}
+
+.site-button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.site-extensions img {
+  width: 20px;
+  height: 20px;
+}
+
+.site-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--menu-border);
+  opacity: 0.75;
 }

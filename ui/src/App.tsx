@@ -15,7 +15,6 @@ import {
 } from "./bridge";
 import { Downloads, useDownloads } from "./Downloads";
 import { favoriteColumns, previewTiles, type TilePreview, useDrag } from "./drag";
-import { ExtensionButtons } from "./Extensions";
 import { useFaviconColor } from "./faviconColor";
 import { Icon } from "./Icon";
 import { Library, LibraryButton } from "./Library";
@@ -101,13 +100,7 @@ export function App() {
             {active && domain(active.url)}
           </button>
           {active && <CopyLink />}
-          {active && (
-            <ExtensionButtons
-              extensions={state?.extensions}
-              view={location.hash === "#reveal" ? "revealed" : "docked"}
-            />
-          )}
-          {active && <SiteControls />}
+          {active && <SiteControls view={location.hash === "#reveal" ? "revealed" : "docked"} />}
           {active && page?.loading && (
             <progress className="progress" aria-label="Loading" value={page.progress} />
           )}
@@ -688,16 +681,19 @@ function FavoritesHint({ space }: { space: number }) {
   );
 }
 
-// Opens the selected tab's site controls, a native menu at the pointer (site_menu in
-// app/src/menu.rs): copy or share its link, clear its cache or its cookies.
-export function SiteControls() {
+// Opens the selected tab's site controls in a panel under the button (ui/src/Site.tsx), which the
+// app finds by the button's view and place in it.
+export function SiteControls({ view }: { view: "docked" | "revealed" | "toolbar" }) {
   return (
     <button
       type="button"
       className="copy-link"
       aria-label="Site controls"
       title="Site controls"
-      onClick={() => send("menu/site")}
+      onClick={(event) => {
+        const { x, y, width, height } = event.currentTarget.getBoundingClientRect();
+        send(`site/show/${view}/${[x, y, width, height].map(Math.round).join("/")}`);
+      }}
     >
       <Icon d="M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7M11 3.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM5 9.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z" />
     </button>

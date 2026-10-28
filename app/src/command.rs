@@ -24,12 +24,22 @@ pub enum LittleAction {
     OpenInSpace,
 }
 
-/// The UI view an extension's button shows in (Command::OpenExtensionPopup).
+/// The UI view a button shows in (Command::ShowSiteControls).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ButtonView {
     Docked,
     Revealed,
     Toolbar,
+}
+
+/// Where a button is, in CSS pixels from its view's top left corner.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Button {
+    pub view: ButtonView,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 /// The app's settings the settings window turns on or off (app/src/settings.rs).
@@ -73,16 +83,16 @@ pub enum Command {
     },
     /// Hides the find bar and stops finding: `find/hide`.
     HideFind,
-    /// Opens an extension's popup under its button, given in CSS pixels from its view's top left
-    /// corner: `extension/popup/<id>/<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
-    OpenExtensionPopup {
-        id: String,
-        view: ButtonView,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-    },
+    /// Shows the selected tab's site controls in a panel under their button, like Arc's:
+    /// `site/show/<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
+    ShowSiteControls(Button),
+    /// `site/hide`.
+    HideSiteControls,
+    /// The site controls' panel takes this height: `site/height/<height>`.
+    SiteControlsHeight(i32),
+    /// Opens an extension's popup from the site controls, under their button:
+    /// `site/extension/<id>`.
+    OpenExtensionPopup(String),
     CloseExtensionPopup,
     /// Acts on a download from the sidebar: `download/<cancel, open, show or remove>/<id>`.
     Download(DownloadAction, u32),
@@ -395,10 +405,11 @@ impl Command {
             "import/full-disk-access" => Some(Self::OpenFullDiskAccess),
             "find/hide" => Some(Self::HideFind),
             "extension/close" => Some(Self::CloseExtensionPopup),
+            "site/hide" => Some(Self::HideSiteControls),
             _ => {
-                if let Some(args) = path.strip_prefix("extension/popup/") {
+                if let Some(args) = path.strip_prefix("site/show/") {
                     let args: Vec<_> = args.split('/').collect();
-                    let [id, view, x, y, width, height] = args[..] else {
+                    let [view, x, y, width, height] = args[..] else {
                         return None;
                     };
                     let view = match view {
@@ -407,14 +418,19 @@ impl Command {
                         "toolbar" => ButtonView::Toolbar,
                         _ => return None,
                     };
-                    return Some(Self::OpenExtensionPopup {
-                        id: id.to_string(),
+                    return Some(Self::ShowSiteControls(Button {
                         view,
                         x: x.parse().ok()?,
                         y: y.parse().ok()?,
                         width: width.parse().ok()?,
                         height: height.parse().ok()?,
-                    });
+                    }));
+                }
+                if let Some(height) = path.strip_prefix("site/height/") {
+                    return height.parse().ok().map(Self::SiteControlsHeight);
+                }
+                if let Some(id) = path.strip_prefix("site/extension/") {
+                    return Some(Self::OpenExtensionPopup(id.to_string()));
                 }
                 if let Some((limit, text)) = path
                     .strip_prefix("history/search/")
@@ -723,7 +739,7 @@ fn percent_decode(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ButtonView, Command, LittleAction, Setting, Target};
+    use super::{Button, ButtonView, Command, LittleAction, Setting, Target};
     use arbalete_core::search::SearchEngine;
     use arbalete_core::sidebar::Color;
 
@@ -735,17 +751,25 @@ mod tests {
         assert_eq!(Command::parse("reload"), Some(Command::Reload));
         assert_eq!(Command::parse("find/hide"), Some(Command::HideFind));
         assert_eq!(
-            Command::parse("extension/popup/abc/toolbar/10/4/28/28"),
-            Some(Command::OpenExtensionPopup {
-                id: "abc".into(),
+            Command::parse("site/show/toolbar/10/4/28/28"),
+            Some(Command::ShowSiteControls(Button {
                 view: ButtonView::Toolbar,
                 x: 10,
                 y: 4,
                 width: 28,
                 height: 28,
-            })
+            }))
         );
-        assert_eq!(Command::parse("extension/popup/abc/menu/10/4/28/28"), None);
+        assert_eq!(Command::parse("site/show/menu/10/4/28/28"), None);
+        assert_eq!(Command::parse("site/hide"), Some(Command::HideSiteControls));
+        assert_eq!(
+            Command::parse("site/height/240"),
+            Some(Command::SiteControlsHeight(240))
+        );
+        assert_eq!(
+            Command::parse("site/extension/abc"),
+            Some(Command::OpenExtensionPopup("abc".into()))
+        );
         assert_eq!(Command::parse("overlay/show"), Some(Command::ShowOverlay));
         assert_eq!(Command::parse("overlay/hide"), Some(Command::HideOverlay));
         assert_eq!(Command::parse("overlay/edit"), Some(Command::EditUrl));

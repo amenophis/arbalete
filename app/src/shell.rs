@@ -4,7 +4,8 @@
 //! relies on is implemented explicitly.
 
 use crate::command::{
-    ButtonView, Command, DownloadAction, HitTarget, LittleAction, Setting, SiteData, Target, Zoom,
+    Button, ButtonView, Command, DownloadAction, HitTarget, LittleAction, Setting, SiteData,
+    Target, Zoom,
 };
 use crate::downloads::{self, Download};
 use crate::extensions;
@@ -175,12 +176,17 @@ thread_local! {
     static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The text last searched for, which ⌘G searches again.
     static FIND_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
-    /// The open extension popup: its extension's id, its view, and where its button is, in the
-    /// window, which it opens under.
+    /// The site controls' panel, under their button.
+    static SITE_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static SITE: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// Where the site controls' button was, in the window, when they were last shown: their
+    /// panel, and the extension popups opened from it, show under it.
+    static SITE_BUTTON: RefCell<Option<Rect>> = const { RefCell::new(None) };
+    static SITE_HEIGHT: Cell<i32> = const { Cell::new(1) };
+    /// When the panel last closed: a click on its button closes it, as the panel loses the focus,
+    /// and must not show it again.
+    static SITE_CLOSED: Cell<Option<Instant>> = const { Cell::new(None) };
     static EXTENSION_POPUP: RefCell<Option<ExtensionPopup>> = const { RefCell::new(None) };
-    /// The popup last closed, and when: a click on its button closes it, as the popup loses the
-    /// focus, and must not open it again.
-    static POPUP_CLOSED: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
     /// The downloads, kept across sessions, most recent last.
     static DOWNLOADS: RefCell<Vec<Download>> = const { RefCell::new(Vec::new()) };
     /// What cancels each download in progress, by its id in the list.
@@ -364,12 +370,6 @@ impl UiState {
                 "id": p.id,
                 "name": p.name,
                 "color": p.color,
-            })).collect::<Vec<_>>(),
-            "extensions": extensions::list(self.sidebar.displayed().profile).iter().map(|extension| json!({
-                "id": extension.id,
-                "name": extension.name,
-                "icon": extensions::icon_path(self.sidebar.displayed().profile, extension).map(|path| format!("{UI_ORIGIN}{path}")),
-                "popup": extension.popup.is_some(),
             })).collect::<Vec<_>>(),
             "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, profile, at)| json!({
                 "url": tab.url,
@@ -1633,42 +1633,47 @@ fn hide_find(browser: Option<&Browser>) {
 
 /// An extension's popup, above the page.
 struct ExtensionPopup {
-    id: String,
     view: BrowserView,
     controller: OverlayController,
-    button: Rect,
 }
 
-/// The gap between an extension's button and its popup.
-const POPUP_GAP: i32 = 4;
+/// The gap between the site controls' button and the panel under it.
+const PANEL_GAP: i32 = 6;
+/// The site controls' panel's width (ui/src/Site.tsx).
+const SITE_WIDTH: i32 = 300;
 
-/// Opens an extension's popup in a panel under its button, in the displayed Space's profile, or
-/// closes it when it is the one open. The panel takes the size its page asks for.
-fn open_extension_popup(id: String, view: ButtonView, button: Rect) {
-    let reopened = POPUP_CLOSED.with_borrow(|closed| {
-        closed
-            .as_ref()
-            .is_some_and(|(closed, at)| *closed == id && at.elapsed() < Duration::from_millis(300))
-    });
-    let was_open =
-        EXTENSION_POPUP.with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
-    close_extension_popup();
-    if reopened || was_open.as_ref() == Some(&id) {
+/// Where a panel `size` large stands under `button`, centered on it, within a window of `window`.
+fn under(button: &Rect, size: &Size, window: &Size) -> Rect {
+    let right = window.width - size.width - CARD_MARGIN;
+    Rect {
+        x: (button.x + button.width / 2 - size.width / 2)
+            .min(right)
+            .max(CARD_MARGIN),
+        y: button.y + button.height + PANEL_GAP,
+        width: size.width,
+        height: size.height,
+    }
+}
+
+/// Shows the selected tab's site controls in a panel under their button, like Arc's: actions on
+/// its link and what the site keeps, and the profile's extensions. A click on the button while
+/// the panel shows closes it, as the panel losing the focus does.
+fn show_site_controls(button: Button) {
+    let shown = SITE.with_borrow(|site| site.as_ref().is_some_and(|site| site.is_visible() == 1));
+    if shown
+        || SITE_CLOSED
+            .get()
+            .is_some_and(|at| at.elapsed() < Duration::from_millis(300))
+    {
+        hide_site_controls();
         return;
     }
-    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-    let (Some(url), Some(window)) = (
-        extensions::popup_url(profile, &id),
-        WINDOW.with_borrow(Clone::clone),
-    ) else {
-        return;
-    };
-    let source = match view {
+    let source = match button.view {
         ButtonView::Docked => &SIDEBAR,
         ButtonView::Revealed => &REVEAL_VIEW,
         ButtonView::Toolbar => &TOOLBAR_VIEW,
     };
-    let Some(source) = source.with_borrow(Clone::clone) else {
+    let (Some(source), Some(url)) = (source.with_borrow(Clone::clone), selected_url()) else {
         return;
     };
     let mut origin = Point {
@@ -1676,10 +1681,85 @@ fn open_extension_popup(id: String, view: ButtonView, button: Rect) {
         y: button.y,
     };
     source.convert_point_to_window(Some(&mut origin));
-    let button = Rect {
+    SITE_BUTTON.set(Some(Rect {
         x: origin.x,
         y: origin.y,
-        ..button
+        width: button.width,
+        height: button.height,
+    }));
+    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+    let extensions: Vec<_> = extensions::list(profile)
+        .iter()
+        .map(|extension| {
+            json!({
+                "id": extension.id,
+                "name": extension.name,
+                "icon": extensions::icon_path(profile, extension).map(|path| format!("{UI_ORIGIN}{path}")),
+                "popup": extension.popup.is_some(),
+            })
+        })
+        .collect();
+    let detail = json!({ "url": url, "extensions": extensions });
+    dispatch(
+        &SITE_VIEW,
+        &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
+    );
+    place_site_controls();
+    let Some(controller) = SITE.with_borrow(Clone::clone) else {
+        return;
+    };
+    controller.set_visible(1);
+    #[cfg(target_os = "macos")]
+    if let Some(host) = SITE_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host()) {
+        crate::mac::round_command_bar(host.window_handle());
+    }
+    if let Some(view) = controller.contents_view() {
+        view.request_focus();
+    }
+}
+
+/// The selected tab's address.
+fn selected_url() -> Option<String> {
+    STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).map(|tab| tab.url.clone()))
+}
+
+/// Puts the site controls' panel under their button, as tall as its page asks.
+fn place_site_controls() {
+    let (Some(controller), Some(button), Some(window)) = (
+        SITE.with_borrow(Clone::clone),
+        SITE_BUTTON.with_borrow(Clone::clone),
+        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+    ) else {
+        return;
+    };
+    let size = Size {
+        width: SITE_WIDTH,
+        height: SITE_HEIGHT.get(),
+    };
+    controller.set_bounds(Some(&under(&button, &size, &window)));
+}
+
+/// Hides the site controls' panel, if it shows.
+fn hide_site_controls() {
+    if let Some(controller) = SITE.with_borrow(Clone::clone)
+        && controller.is_visible() == 1
+    {
+        controller.set_visible(0);
+        SITE_CLOSED.set(Some(Instant::now()));
+    }
+}
+
+/// Opens an extension's popup in a panel under the site controls' button, in the displayed
+/// Space's profile, instead of the site controls. The panel takes the size its page asks for.
+fn open_extension_popup(id: &str) {
+    hide_site_controls();
+    close_extension_popup();
+    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+    let (Some(url), Some(window)) = (
+        extensions::popup_url(profile, id),
+        WINDOW.with_borrow(Clone::clone),
+    ) else {
+        return;
     };
     let client = PopupClient::new(profile, url);
     let popup = browser_view(
@@ -1692,10 +1772,8 @@ fn open_extension_popup(id: String, view: ButtonView, button: Rect) {
         .add_overlay_view(Some(&mut View::from(&popup)), DockingMode::CUSTOM, 1)
         .expect("extension popup");
     EXTENSION_POPUP.set(Some(ExtensionPopup {
-        id,
         view: popup,
         controller,
-        button,
     }));
     place_extension_popup(&Size {
         width: 1,
@@ -1703,20 +1781,19 @@ fn open_extension_popup(id: String, view: ButtonView, button: Rect) {
     });
 }
 
-/// Puts the extension popup under its button, `size` large, within the window.
+/// Puts the extension popup under the site controls' button, `size` large, within the window.
 fn place_extension_popup(size: &Size) {
-    let Some(window) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
+    let (Some(button), Some(window)) = (
+        SITE_BUTTON.with_borrow(Clone::clone),
+        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+    ) else {
         return;
     };
     EXTENSION_POPUP.with_borrow(|popup| {
         let Some(popup) = popup else { return };
-        let right = window.width - size.width - CARD_MARGIN;
-        popup.controller.set_bounds(Some(&Rect {
-            x: popup.button.x.min(right).max(CARD_MARGIN),
-            y: popup.button.y + popup.button.height + POPUP_GAP,
-            width: size.width,
-            height: size.height,
-        }));
+        popup
+            .controller
+            .set_bounds(Some(&under(&button, size, &window)));
         popup.controller.set_visible(1);
     });
 }
@@ -1740,15 +1817,9 @@ pub fn close_extension_popup() {
     let Some(popup) = EXTENSION_POPUP.take() else {
         return;
     };
-    POPUP_CLOSED.set(Some((popup.id, Instant::now())));
     extensions::popup_closed();
     // Its browser closes with its view, once out of the window.
     popup.controller.destroy();
-}
-
-/// Sends the UI the extensions again, after an install or a removal.
-pub fn extensions_changed() {
-    send_state();
 }
 
 /// Sends the import assistant the browsers to list, and the profiles to merge them into: none
@@ -2749,28 +2820,13 @@ pub fn run(command: Command) {
         (Command::ShowFind, _) => show_find(),
         (Command::Find { text, forward }, Some(browser)) => find(&browser, text, forward),
         (Command::HideFind, browser) => hide_find(browser.as_ref()),
-        (
-            Command::OpenExtensionPopup {
-                id,
-                view,
-                x,
-                y,
-                width,
-                height,
-            },
-            _,
-        ) => {
-            open_extension_popup(
-                id,
-                view,
-                Rect {
-                    x,
-                    y,
-                    width,
-                    height,
-                },
-            );
+        (Command::ShowSiteControls(button), _) => show_site_controls(button),
+        (Command::HideSiteControls, _) => hide_site_controls(),
+        (Command::SiteControlsHeight(height), _) => {
+            SITE_HEIGHT.set(height);
+            place_site_controls();
         }
+        (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
         (Command::CloseExtensionPopup, _) => close_extension_popup(),
         (Command::Print, Some(browser)) => {
             if let Some(host) = browser.host() {
@@ -2972,6 +3028,14 @@ wrap_window_delegate! {
             controller.set_visible(0);
             OVERLAY_VIEW.set(Some(overlay));
             OVERLAY.set(Some(controller));
+            // Made with the window, so that its page listens by the first time it shows.
+            let site = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#site"), no_width, None);
+            let controller = window
+                .add_overlay_view(Some(&mut View::from(&site)), DockingMode::CUSTOM, 1)
+                .expect("site controls");
+            controller.set_visible(0);
+            SITE_VIEW.set(Some(site));
+            SITE.set(Some(controller));
             window.show();
             WINDOW.set(Some(window));
             place_card();
