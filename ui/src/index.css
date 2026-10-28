@@ -675,6 +675,94 @@ button.folder:hover {
 }
 
 /* Drawn over the url pill's bottom edge, inside its rounded corners, so that loading moves nothing. */
+/* A Little Arbalete window's bar: the window buttons at its left, the page's domain or a field in
+   its middle, "Open in <Space>" at its right. It moves the window. */
+.little {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  height: 100vh;
+  padding: 0 8px 0 80px;
+  border-bottom: 1px solid var(--menu-border);
+  background: var(--background);
+  color: var(--text);
+  -webkit-app-region: drag;
+}
+
+.little-address {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+}
+
+.little-address input {
+  box-sizing: border-box;
+  width: min(100%, 420px);
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  outline: 2px solid var(--accent);
+  background: var(--hover);
+  color: inherit;
+  font: inherit;
+  -webkit-app-region: no-drag;
+}
+
+.little-domain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  -webkit-app-region: no-drag;
+}
+
+.little-domain span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.little-domain:hover {
+  background: var(--hover);
+}
+
+.little-open {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--hover);
+  color: inherit;
+  font: inherit;
+  -webkit-app-region: no-drag;
+}
+
+.little-open:hover:not(:disabled) {
+  background: var(--active);
+}
+
+.little-open:disabled {
+  opacity: 0.4;
+}
+
+.little-open kbd {
+  font: inherit;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
 /* The bar above the page in toolbar mode: the navigation buttons at its left, the domain in its
    middle, a pill while hovered, and the page loading along its bottom. */
 .page-toolbar {

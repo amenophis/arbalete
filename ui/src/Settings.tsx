@@ -86,6 +86,8 @@ export const SHORTCUTS: [string, [string, string][]][] = [
     [
       ["Hide or Show Sidebar", "⌘S"],
       ["Show or Hide Toolbar", "⇧⌘D"],
+      ["New Little Arbalete Window", "⌥⌘N"],
+      ["Open Little Arbalete in Space", "⌘O"],
       ["Library", "⇧⌘L"],
       ["History", "⌘Y"],
       ["Downloads", "⇧⌘J"],

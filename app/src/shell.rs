@@ -3,7 +3,7 @@
 //! The `cef` crate's default callbacks return 0, which means "no" or "cancel": every callback the app
 //! relies on is implemented explicitly.
 
-use crate::command::{Command, DownloadAction, HitTarget, Setting, Target, Zoom};
+use crate::command::{Command, DownloadAction, HitTarget, LittleAction, Setting, Target, Zoom};
 use crate::downloads::{self, Download};
 use crate::menu::{self, Action};
 use crate::settings::{self, Settings};
@@ -99,6 +99,14 @@ const IMPORT_SIZE: Size = Size {
     height: 480,
 };
 
+/// A Little Arbalete window's size, and its bar's height, which holds the window buttons
+/// (ui/src/Little.tsx).
+const LITTLE_SIZE: Size = Size {
+    width: 960,
+    height: 680,
+};
+const LITTLE_BAR_HEIGHT: i32 = 40;
+
 /// The height of the bar above the page, in toolbar mode (ui/src/Toolbar.tsx).
 const PAGE_TOOLBAR_HEIGHT: i32 = 36;
 
@@ -146,6 +154,12 @@ thread_local! {
     /// sessions never import.
     static IMPORT_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static IMPORT: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
+    /// The Little Arbalete windows open: a page without the sidebar, which links from other apps
+    /// open in.
+    static LITTLE: RefCell<Vec<Little>> = const { RefCell::new(Vec::new()) };
+    static NEXT_LITTLE: Cell<u32> = const { Cell::new(0) };
+    /// Links other apps asked to open before the main window existed.
+    static PENDING_LINKS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The bar above the page, at the card's top while it is shown (View › Show Toolbar).
     static TOOLBAR_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     /// The settings, in a window of their own while it is open.
@@ -641,7 +655,14 @@ fn download_command(action: DownloadAction, id: u32) {
 
 /// Dispatches a DOM event, given as JavaScript, in one of the UI's views.
 fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) {
-    if let Some(frame) = view.with_borrow(|view| view.as_ref()?.browser()?.main_frame()) {
+    if let Some(view) = view.with_borrow(Clone::clone) {
+        dispatch_in(&view, event);
+    }
+}
+
+/// Dispatches an event in a view's page, like `dispatch`.
+fn dispatch_in(view: &BrowserView, event: &str) {
+    if let Some(frame) = view.browser().and_then(|browser| browser.main_frame()) {
         let code = format!("dispatchEvent({event})");
         frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
     }
@@ -1223,6 +1244,143 @@ fn show_dev_tools(host: &BrowserHost, at: Option<(i32, i32)>) {
         Some(&BrowserSettings::default()),
         at.as_ref(),
     );
+}
+
+/// A Little Arbalete window: its bar and its page, in the profile it was opened in, and what the
+/// bar shows of the page.
+struct Little {
+    id: u32,
+    profile: ProfileId,
+    window: Window,
+    bar: BrowserView,
+    page: BrowserView,
+    url: String,
+    title: String,
+}
+
+/// Opens a link another app asked to open, or an empty page from the menu, in a Little Arbalete
+/// window; links arriving before the main window exists wait for it.
+pub fn open_link(url: Option<String>) {
+    if WINDOW.with_borrow(Option::is_none) {
+        PENDING_LINKS.with_borrow_mut(|links| links.extend(url));
+        return;
+    }
+    open_little(url);
+}
+
+/// Opens a Little Arbalete window on `url`, in the displayed Space's profile, like Arc's Little
+/// Arc: a page without the sidebar, which its bar moves into the Space.
+fn open_little(url: Option<String>) {
+    let id = NEXT_LITTLE.get();
+    NEXT_LITTLE.set(id + 1);
+    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+    window_create_top_level(Some(&mut LittleWindowDelegate::new(
+        id,
+        profile,
+        url.unwrap_or_default(),
+    )));
+}
+
+/// Runs what a Little Arbalete window's bar asks for.
+fn little_action(id: u32, action: LittleAction) {
+    match action {
+        LittleAction::Ready => send_little(id),
+        LittleAction::Navigate(url) => {
+            let frame = LITTLE.with_borrow(|littles| {
+                littles
+                    .iter()
+                    .find(|l| l.id == id)?
+                    .page
+                    .browser()?
+                    .main_frame()
+            });
+            if let Some(frame) = frame {
+                frame.load_url(Some(&CefString::from(url.as_str())));
+            }
+        }
+        LittleAction::OpenInSpace => {
+            let url = LITTLE
+                .with_borrow(|littles| Some(littles.iter().find(|l| l.id == id)?.url.clone()));
+            let Some(url) = url.filter(|url| !url.is_empty()) else {
+                return;
+            };
+            open_tab(&url);
+            if let Some(window) = little_window(id) {
+                window.close();
+            }
+            if let Some(window) = WINDOW.with_borrow(Clone::clone) {
+                window.activate();
+            }
+        }
+    }
+}
+
+/// Changes what a Little Arbalete window's bar shows of its page, if `browser` is one's page.
+fn little_changed(browser: &mut Browser, change: impl FnOnce(&mut Little)) {
+    let id = LITTLE.with_borrow_mut(|littles| {
+        let little = littles.iter_mut().find(|little| {
+            little
+                .page
+                .browser()
+                .is_some_and(|mut page| browser.is_same(Some(&mut page)) == 1)
+        })?;
+        change(little);
+        Some(little.id)
+    });
+    if let Some(id) = id {
+        send_little(id);
+    }
+}
+
+/// Sends a Little Arbalete window's bar its page's address and title, its profile's search
+/// engine, and the Space its page would move into.
+fn send_little(id: u32) {
+    let found = LITTLE.with_borrow(|littles| {
+        let little = littles.iter().find(|l| l.id == id)?;
+        let (space, engine) = STATE.with_borrow(|state| {
+            let sidebar = &state.sidebar;
+            let space = sidebar.displayed();
+            let profile = sidebar.profiles().iter().find(|p| p.id == little.profile);
+            let engine = profile.map(|p| p.search_engine).unwrap_or_default();
+            (
+                json!({ "title": space.title, "emoji": space.emoji }),
+                engine,
+            )
+        });
+        let search = json!({ "name": engine.name(), "url": engine.url() });
+        let detail =
+            json!({ "url": little.url, "title": little.title, "space": space, "search": search });
+        Some((little.bar.clone(), detail))
+    });
+    if let Some((bar, detail)) = found {
+        let event = format!(r#"new CustomEvent("arbalete:little", {{ detail: {detail} }})"#);
+        dispatch_in(&bar, &event);
+    }
+}
+
+fn little_window(id: u32) -> Option<Window> {
+    LITTLE.with_borrow(|littles| Some(littles.iter().find(|l| l.id == id)?.window.clone()))
+}
+
+/// The Little Arbalete window that has the keyboard, if any: ⌘W closes it, ⌘O moves its page.
+fn focused_little() -> Option<u32> {
+    LITTLE.with_borrow(|littles| {
+        littles
+            .iter()
+            .find(|l| l.window.is_active() == 1)
+            .map(|l| l.id)
+    })
+}
+
+/// A request context for a profile's web data, sharing its storage with the profile's content
+/// view: contexts with the same cache path share it.
+fn profile_context(profile: ProfileId) -> Option<RequestContext> {
+    let dir = profile_dir(profile);
+    let settings = RequestContextSettings {
+        cache_path: CefString::from(dir.to_str().expect("a UTF-8 path")),
+        ..Default::default()
+    };
+    request_context_create_context(Some(&settings), None)
 }
 
 /// Shows the settings in a window of their own, like Arc's, brought to the front when it is
@@ -2141,7 +2299,7 @@ wrap_request_context_handler! {
         /// (content_created).
         fn on_request_context_initialized(&self, context: Option<&mut RequestContext>) {
             let Some(card) = card_panel() else { return };
-            let view = browser_view(ContentClient::new(self.profile), "about:blank", no_width, context);
+            let view = browser_view(ContentClient::new(self.profile, false), "about:blank", no_width, context);
             view.set_visible(0);
             card.add_child_view(Some(&mut View::from(&view)));
             if let Some(layout) = card.get_layout().and_then(|layout| layout.as_box_layout()) {
@@ -2206,6 +2364,11 @@ pub fn run(command: Command) {
             open_tab(&url);
         }
         (Command::Close(None), _) if settings_focused() => close_settings(),
+        (Command::Close(None), _) if focused_little().is_some() => {
+            if let Some(window) = focused_little().and_then(little_window) {
+                window.close();
+            }
+        }
         (Command::Close(tab), _) => close_tab(tab),
         (Command::Reopen(rank), _) => reopen_tab(rank),
         (Command::Pin(tab), _) => toggle_pin(tab),
@@ -2285,6 +2448,13 @@ pub fn run(command: Command) {
         }
         (Command::ShowSettings, _) => show_settings(),
         (Command::ToggleToolbar, _) => toggle_toolbar(),
+        (Command::NewLittle(url), _) => open_link(url),
+        (Command::Little(id, action), _) => little_action(id, action),
+        (Command::OpenLittleInSpace, _) => {
+            if let Some(id) = focused_little() {
+                little_action(id, LittleAction::OpenInSpace);
+            }
+        }
         (Command::HideSettings, _) => close_settings(),
         (Command::SettingsReady, _) => send_settings(),
         (Command::SetSetting(setting, on), _) => set_setting(setting, on),
@@ -2399,6 +2569,11 @@ pub fn scroll(scroll: crate::swipe::Scroll) {
 /// The window's own close button does the same on every OS.
 pub fn close() {
     close_settings();
+    let littles: Vec<_> =
+        LITTLE.with_borrow(|littles| littles.iter().map(|l| l.window.clone()).collect());
+    for window in littles {
+        window.close();
+    }
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
         window.close();
     }
@@ -2542,6 +2717,9 @@ wrap_window_delegate! {
             if IMPORT_AT_LAUNCH.take() {
                 show_import();
             }
+            for link in PENDING_LINKS.take() {
+                open_little(Some(link));
+            }
         }
 
         /// Asks every browser to close; the window closes once they all can.
@@ -2643,6 +2821,98 @@ wrap_window_delegate! {
         fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+
+        fn window_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
+}
+
+wrap_window_delegate! {
+    struct LittleWindowDelegate {
+        id: u32,
+        profile: ProfileId,
+        url: String,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            LITTLE_SIZE
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        // Its bar on top, holding the window buttons, then its page.
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let window = window.expect("window").clone();
+            window.set_title(Some(&CefString::from("Little Arbalete")));
+            let layout = window
+                .set_to_box_layout(Some(&BoxLayoutSettings {
+                    horizontal: 0,
+                    cross_axis_alignment: AxisAlignment::STRETCH,
+                    ..Default::default()
+                }))
+                .expect("box layout");
+            let url = format!("{UI_ORIGIN}index.html#little/{}", self.id);
+            let bar = browser_view_sized(UiClient::new(), &url, || 1, LITTLE_BAR_HEIGHT, None);
+            window.add_child_view(Some(&mut View::from(&bar)));
+            let mut context = profile_context(self.profile);
+            let start = if self.url.is_empty() { "about:blank" } else { &self.url };
+            let page = browser_view(ContentClient::new(self.profile, true), start, no_width, context.as_mut());
+            let mut view = View::from(&page);
+            window.add_child_view(Some(&mut view));
+            layout.set_flex_for_view(Some(&mut view), 1);
+            LITTLE.with_borrow_mut(|littles| littles.push(Little {
+                id: self.id,
+                profile: self.profile,
+                window: window.clone(),
+                bar,
+                page,
+                url: self.url.clone(),
+                title: String::new(),
+            }));
+            window.center_window(Some(&LITTLE_SIZE));
+            window.show();
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            LITTLE.with_borrow_mut(|littles| littles.retain(|little| little.id != self.id));
+        }
+
+        /// The window closes once its bar and its page can.
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
+            let views = LITTLE.with_borrow(|littles| {
+                let little = littles.iter().find(|l| l.id == self.id)?;
+                Some([little.bar.clone(), little.page.clone()])
+            });
+            let mut closed = 1;
+            for view in views.into_iter().flatten() {
+                if let Some(host) = view.browser().and_then(|browser| browser.host()) {
+                    closed &= host.try_close_browser();
+                }
+            }
+            closed
+        }
+
+        // Its bar draws its title, like the main window's sidebar: only macOS keeps standard
+        // window buttons in a frameless window.
+        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
+            cfg!(target_os = "macos").into()
+        }
+
+        fn titlebar_height(&self, _window: Option<&mut Window>, height: Option<&mut f32>) -> i32 {
+            if let Some(height) = height {
+                *height = LITTLE_BAR_HEIGHT as f32;
+            }
+            1
+        }
+
+        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
 
         fn window_runtime_style(&self) -> RuntimeStyle {
@@ -2795,7 +3065,8 @@ wrap_drag_handler! {
         // The sidebar sits at the window's origin: its coordinates are the window's. Only the
         // sidebar beside the page moves the window: the views above the page are separate
         // windows on macOS, which the window's regions do not reach. The settings page fills
-        // its own window, which its title and toolbar move.
+        // its own window, which its title and toolbar move, and a Little Arbalete window's bar
+        // its own.
         fn on_draggable_regions_changed(&self, browser: Option<&mut Browser>, _frame: Option<&mut Frame>, regions: Option<&[DraggableRegion]>) {
             let settings = SETTINGS_VIEW.with_borrow(|view| view.as_ref()?.browser());
             if let (Some(browser), Some(mut settings)) = (browser.as_deref(), settings)
@@ -2804,6 +3075,19 @@ wrap_drag_handler! {
                 if let Some(window) = SETTINGS_WINDOW.with_borrow(Clone::clone) {
                     window.set_draggable_regions(regions);
                 }
+                return;
+            }
+            // A Little Arbalete window's bar, at its window's top.
+            let little = browser.as_deref().and_then(|browser| {
+                LITTLE.with_borrow(|littles| {
+                    let little = littles.iter().find(|little| {
+                        little.bar.browser().is_some_and(|mut bar| browser.is_same(Some(&mut bar)) == 1)
+                    })?;
+                    Some(little.window.clone())
+                })
+            });
+            if let Some(window) = little {
+                window.set_draggable_regions(regions);
                 return;
             }
             let Some(mut sidebar) = SIDEBAR.with_borrow(|view| view.as_ref()?.browser()) else { return };
@@ -2820,11 +3104,13 @@ wrap_drag_handler! {
 wrap_client! {
     struct ContentClient {
         profile: ProfileId,
+        // A Little Arbalete window's page, rather than the profile's content view.
+        little: bool,
     }
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new(Some(self.profile)))
+            Some(BrowserLifeSpan::new((!self.little).then_some(self.profile)))
         }
 
         fn display_handler(&self) -> Option<DisplayHandler> {
@@ -3013,28 +3299,40 @@ wrap_display_handler! {
 
     impl DisplayHandler {
         fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
-            if is_shown(browser) && frame.is_some_and(|frame| frame.is_main() == 1) {
-                let url = url.map(CefString::to_string).unwrap_or_default();
-                update_sidebar(|sidebar| {
-                    if let Some(tab) = active_tab(sidebar) {
-                        // Another site's page has its own icon, or none: the previous page's
-                        // goes until it is known (on_favicon_urlchange).
-                        if site(&tab.url) != site(&url) {
-                            tab.favicon = None;
-                        }
-                        tab.url = url;
-                    }
-                });
+            let mut browser = browser;
+            if frame.is_none_or(|frame| frame.is_main() == 0) {
+                return;
             }
+            let url = url.map(CefString::to_string).unwrap_or_default();
+            if !is_shown(browser.as_deref_mut()) {
+                if let Some(browser) = browser {
+                    little_changed(browser, |little| little.url = url);
+                }
+                return;
+            }
+            update_sidebar(|sidebar| {
+                if let Some(tab) = active_tab(sidebar) {
+                    // Another site's page has its own icon, or none: the previous page's goes
+                    // until it is known (on_favicon_urlchange).
+                    if site(&tab.url) != site(&url) {
+                        tab.favicon = None;
+                    }
+                    tab.url = url;
+                }
+            });
         }
 
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
+            let mut browser = browser;
             let title = title.map(CefString::to_string).unwrap_or_default();
             if let Some(frame) = browser.as_ref().and_then(|browser| browser.main_frame()) {
                 let url = CefString::from(&frame.url()).to_string();
                 update_history(self.profile, |history| history.set_title(&url, &title));
             }
-            if !is_shown(browser) {
+            if !is_shown(browser.as_deref_mut()) {
+                if let Some(browser) = browser {
+                    little_changed(browser, |little| little.title = title);
+                }
                 return;
             }
             update_sidebar(|sidebar| {
