@@ -304,6 +304,31 @@ body {
   opacity: 1;
 }
 
+/* The extensions' buttons stay shown, before the url bar's other buttons. */
+.extension-button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.extension-button:hover {
+  background: var(--hover);
+}
+
+.extension-button img {
+  width: 16px;
+  height: 16px;
+}
+
 /* One tile takes the whole row, more share balanced rows of up to 4, a short last row keeping the
    tiles' width (--columns, favoriteColumns in ui/src/App.tsx). */
 .favorites {

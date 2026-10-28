@@ -1,7 +1,9 @@
 // Injected by Arbalete into every extension's service worker (app/src/extensions.rs). Arbalete's
 // pages sit in no Chromium window, so Chrome's tab and window APIs find none: they answer instead
 // with the profile's active tab, which the app keeps up to date (__arbaleteSync), and creating or
-// updating a tab asks Arbalete (__arbalete, a DevTools binding) to do it in its own tabs.
+// updating a tab asks Arbalete (__arbalete, a DevTools binding) to do it in its own tabs. Injected
+// into an extension's popup too, with the active tab as it opens (__arbaleteInitial): the popup
+// closes when it loses the focus, on Escape, or when it closes itself.
 (() => {
   if (self.__arbaleteSync) return;
   const window_ = {
@@ -16,7 +18,7 @@
     state: "normal",
     alwaysOnTop: false,
   };
-  let tabs = [];
+  let tabs = self.__arbaleteInitial?.tabs ?? [];
   self.__arbaleteSync = (state) => {
     tabs = state.tabs;
   };
@@ -27,6 +29,15 @@
     callback(value);
   };
   const ask = (message) => self.__arbalete(JSON.stringify(message));
+  // A popup's page, rather than a service worker.
+  if (typeof window !== "undefined") {
+    const close = () => ask({ method: "close" });
+    window.close = close;
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") close();
+    });
+  }
   // chrome.windows.WINDOW_ID_CURRENT.
   const CURRENT = -2;
   const fits = (tab, info) =>

@@ -15,6 +15,7 @@ import {
 } from "./bridge";
 import { Downloads, useDownloads } from "./Downloads";
 import { favoriteColumns, previewTiles, type TilePreview, useDrag } from "./drag";
+import { ExtensionButtons } from "./Extensions";
 import { useFaviconColor } from "./faviconColor";
 import { Icon } from "./Icon";
 import { Library, LibraryButton } from "./Library";
@@ -100,6 +101,12 @@ export function App() {
             {active && domain(active.url)}
           </button>
           {active && <CopyLink />}
+          {active && (
+            <ExtensionButtons
+              extensions={state?.extensions}
+              view={location.hash === "#reveal" ? "revealed" : "docked"}
+            />
+          )}
           {active && <SiteControls />}
           {active && page?.loading && (
             <progress className="progress" aria-label="Loading" value={page.progress} />

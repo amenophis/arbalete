@@ -4,7 +4,7 @@
 //! relies on is implemented explicitly.
 
 use crate::command::{
-    Command, DownloadAction, HitTarget, LittleAction, Setting, SiteData, Target, Zoom,
+    ButtonView, Command, DownloadAction, HitTarget, LittleAction, Setting, SiteData, Target, Zoom,
 };
 use crate::downloads::{self, Download};
 use crate::extensions;
@@ -175,6 +175,12 @@ thread_local! {
     static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The text last searched for, which ⌘G searches again.
     static FIND_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+    /// The open extension popup: its extension's id, its view, and where its button is, in the
+    /// window, which it opens under.
+    static EXTENSION_POPUP: RefCell<Option<ExtensionPopup>> = const { RefCell::new(None) };
+    /// The popup last closed, and when: a click on its button closes it, as the popup loses the
+    /// focus, and must not open it again.
+    static POPUP_CLOSED: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
     /// The downloads, kept across sessions, most recent last.
     static DOWNLOADS: RefCell<Vec<Download>> = const { RefCell::new(Vec::new()) };
     /// What cancels each download in progress, by its id in the list.
@@ -358,6 +364,12 @@ impl UiState {
                 "id": p.id,
                 "name": p.name,
                 "color": p.color,
+            })).collect::<Vec<_>>(),
+            "extensions": extensions::list(self.sidebar.displayed().profile).iter().map(|extension| json!({
+                "id": extension.id,
+                "name": extension.name,
+                "icon": extensions::icon_path(self.sidebar.displayed().profile, extension).map(|path| format!("{UI_ORIGIN}{path}")),
+                "popup": extension.popup.is_some(),
             })).collect::<Vec<_>>(),
             "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, profile, at)| json!({
                 "url": tab.url,
@@ -1619,6 +1631,126 @@ fn hide_find(browser: Option<&Browser>) {
     }
 }
 
+/// An extension's popup, above the page.
+struct ExtensionPopup {
+    id: String,
+    view: BrowserView,
+    controller: OverlayController,
+    button: Rect,
+}
+
+/// The gap between an extension's button and its popup.
+const POPUP_GAP: i32 = 4;
+
+/// Opens an extension's popup in a panel under its button, in the displayed Space's profile, or
+/// closes it when it is the one open. The panel takes the size its page asks for.
+fn open_extension_popup(id: String, view: ButtonView, button: Rect) {
+    let reopened = POPUP_CLOSED.with_borrow(|closed| {
+        closed
+            .as_ref()
+            .is_some_and(|(closed, at)| *closed == id && at.elapsed() < Duration::from_millis(300))
+    });
+    let was_open =
+        EXTENSION_POPUP.with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
+    close_extension_popup();
+    if reopened || was_open.as_ref() == Some(&id) {
+        return;
+    }
+    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+    let (Some(url), Some(window)) = (
+        extensions::popup_url(profile, &id),
+        WINDOW.with_borrow(Clone::clone),
+    ) else {
+        return;
+    };
+    let source = match view {
+        ButtonView::Docked => &SIDEBAR,
+        ButtonView::Revealed => &REVEAL_VIEW,
+        ButtonView::Toolbar => &TOOLBAR_VIEW,
+    };
+    let Some(source) = source.with_borrow(Clone::clone) else {
+        return;
+    };
+    let mut origin = Point {
+        x: button.x,
+        y: button.y,
+    };
+    source.convert_point_to_window(Some(&mut origin));
+    let button = Rect {
+        x: origin.x,
+        y: origin.y,
+        ..button
+    };
+    let client = PopupClient::new(profile, url);
+    let popup = browser_view(
+        client,
+        "about:blank",
+        no_width,
+        profile_context(profile).as_mut(),
+    );
+    let controller = window
+        .add_overlay_view(Some(&mut View::from(&popup)), DockingMode::CUSTOM, 1)
+        .expect("extension popup");
+    EXTENSION_POPUP.set(Some(ExtensionPopup {
+        id,
+        view: popup,
+        controller,
+        button,
+    }));
+    place_extension_popup(&Size {
+        width: 1,
+        height: 1,
+    });
+}
+
+/// Puts the extension popup under its button, `size` large, within the window.
+fn place_extension_popup(size: &Size) {
+    let Some(window) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
+        return;
+    };
+    EXTENSION_POPUP.with_borrow(|popup| {
+        let Some(popup) = popup else { return };
+        let right = window.width - size.width - CARD_MARGIN;
+        popup.controller.set_bounds(Some(&Rect {
+            x: popup.button.x.min(right).max(CARD_MARGIN),
+            y: popup.button.y + popup.button.height + POPUP_GAP,
+            width: size.width,
+            height: size.height,
+        }));
+        popup.controller.set_visible(1);
+    });
+}
+
+/// Shows the extension popup once its page has a size, rounded, with the focus, which it closes
+/// on losing.
+fn show_extension_popup(size: &Size) {
+    place_extension_popup(size);
+    let Some(view) = EXTENSION_POPUP.with_borrow(|popup| Some(popup.as_ref()?.view.clone())) else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    if let Some(host) = view.browser().and_then(|browser| browser.host()) {
+        crate::mac::round_command_bar(host.window_handle());
+    }
+    view.request_focus();
+}
+
+/// Closes the extension popup, if one is open.
+pub fn close_extension_popup() {
+    let Some(popup) = EXTENSION_POPUP.take() else {
+        return;
+    };
+    POPUP_CLOSED.set(Some((popup.id, Instant::now())));
+    extensions::popup_closed();
+    // Its browser closes with its view, once out of the window.
+    popup.controller.destroy();
+}
+
+/// Sends the UI the extensions again, after an install or a removal.
+pub fn extensions_changed() {
+    send_state();
+}
+
 /// Sends the import assistant the browsers to list, and the profiles to merge them into: none
 /// on the first launch, whose sidebar the import replaces.
 fn send_sources() {
@@ -2234,7 +2366,7 @@ fn mute_selected() {
 /// if the tab belongs to the profile.
 fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
     if let Some(browser) = browser.as_deref() {
-        extensions::content_created(profile, browser);
+        extensions::content_created(profile, browser, &profile_dir(profile));
     }
     let view = browser_view_get_for_browser(browser);
     CONTENTS.with_borrow_mut(|contents| contents.insert(profile, view));
@@ -2397,6 +2529,11 @@ wrap_request_context_handler! {
     }
 }
 
+/// Runs a command later on the UI thread, out of the callback that asks for it.
+pub fn post(command: Command) {
+    post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
+}
+
 /// Runs a command from the UI or a menu, on the UI thread.
 pub fn run(command: Command) {
     let browser = content().and_then(|view| view.browser());
@@ -2449,6 +2586,7 @@ pub fn run(command: Command) {
         (Command::WideLibrary(wide), _) => widen_library(wide),
         (Command::Open(url), _) => {
             show_overlay(false);
+            close_extension_popup();
             open_tab(&url);
         }
         (Command::Close(None), _) if settings_focused() => close_settings(),
@@ -2611,6 +2749,29 @@ pub fn run(command: Command) {
         (Command::ShowFind, _) => show_find(),
         (Command::Find { text, forward }, Some(browser)) => find(&browser, text, forward),
         (Command::HideFind, browser) => hide_find(browser.as_ref()),
+        (
+            Command::OpenExtensionPopup {
+                id,
+                view,
+                x,
+                y,
+                width,
+                height,
+            },
+            _,
+        ) => {
+            open_extension_popup(
+                id,
+                view,
+                Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+            );
+        }
+        (Command::CloseExtensionPopup, _) => close_extension_popup(),
         (Command::Print, Some(browser)) => {
             if let Some(host) = browser.host() {
                 host.print();
@@ -3571,6 +3732,95 @@ wrap_load_handler! {
 
 // Quits the app when its last browser closes, and opens popups as tabs. `profile` is the profile
 // of a content view's browser, `None` for the app's own UI.
+wrap_client! {
+    struct PopupClient {
+        profile: ProfileId,
+        url: String,
+    }
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(PopupLifeSpan::new())
+        }
+
+        fn display_handler(&self) -> Option<DisplayHandler> {
+            Some(PopupDisplayHandler::new())
+        }
+
+        fn load_handler(&self) -> Option<LoadHandler> {
+            Some(PopupLoadHandler::new(self.profile, self.url.clone()))
+        }
+    }
+}
+
+// The popup's blank page has loaded: its own may be prepared, then loaded. Before, DevTools may
+// not keep the shim for the next document.
+wrap_load_handler! {
+    struct PopupLoadHandler {
+        profile: ProfileId,
+        url: String,
+    }
+
+    impl LoadHandler {
+        fn on_load_end(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, _http_status_code: i32) {
+            let blank = frame.is_some_and(|frame| frame.is_main() == 1 && CefString::from(&frame.url()).to_string() == "about:blank");
+            if let Some(browser) = browser.filter(|_| blank) {
+                extensions::popup_created(self.profile, browser, &self.url);
+            }
+        }
+    }
+}
+
+wrap_display_handler! {
+    struct PopupDisplayHandler {}
+
+    impl DisplayHandler {
+        fn on_auto_resize(&self, _browser: Option<&mut Browser>, new_size: Option<&Size>) -> i32 {
+            if let Some(size) = new_size {
+                show_extension_popup(size);
+            }
+            1
+        }
+    }
+}
+
+// An extension's popup, whose links open tabs.
+wrap_life_span_handler! {
+    struct PopupLifeSpan {}
+
+    impl LifeSpanHandler {
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _popup_id: i32,
+            target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            _user_gesture: i32,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut i32>,
+        ) -> i32 {
+            if let Some(url) = target_url {
+                open_tab(&url.to_string());
+            }
+            1
+        }
+
+        fn on_after_created(&self, _browser: Option<&mut Browser>) {
+            OPEN_BROWSERS.set(OPEN_BROWSERS.get() + 1);
+        }
+
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            browser_closed();
+        }
+    }
+}
+
 wrap_life_span_handler! {
     struct BrowserLifeSpan {
         profile: Option<ProfileId>,
@@ -3607,15 +3857,20 @@ wrap_life_span_handler! {
         }
 
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            OPEN_BROWSERS.set(OPEN_BROWSERS.get() - 1);
-            if OPEN_BROWSERS.get() == 0 {
-                quit_message_loop();
-            } else if CLOSING.get() {
-                // A browser ready to close while another is not yet cancels the window's close,
-                // and with it the ready one's: ask again, or the last ones never close.
-                close();
-            }
+            browser_closed();
         }
+    }
+}
+
+/// Counts a browser closed, and quits once the last one is.
+fn browser_closed() {
+    OPEN_BROWSERS.set(OPEN_BROWSERS.get() - 1);
+    if OPEN_BROWSERS.get() == 0 {
+        quit_message_loop();
+    } else if CLOSING.get() {
+        // A browser ready to close while another is not yet cancels the window's close, and with
+        // it the ready one's: ask again, or the last ones never close.
+        close();
     }
 }
 
@@ -3666,7 +3921,7 @@ wrap_resource_request_handler! {
                 let stream = stream_reader_create_for_file(Some(&file))?;
                 return Some(StreamResourceHandler::new(200, "OK".to_string(), "image/png".to_string(), None, Some(stream)));
             }
-            if let Some((file, mime)) = media_file(path) {
+            if let Some((file, mime)) = media_file(path).or_else(|| extensions::icon_file(path)) {
                 let file = CefString::from(file.to_str()?);
                 let stream = stream_reader_create_for_file(Some(&file))?;
                 return Some(StreamResourceHandler::new(200, "OK".to_string(), mime.to_string(), None, Some(stream)));
