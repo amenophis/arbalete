@@ -346,6 +346,10 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - Import Arc's archive.
 
 ### Phase 7 — Resource saving
+- A live page per open tab, kept in the background while another shows: switching tabs no longer reloads the
+  page. Today one view per profile loads the selected tab's address.
+- New Window (⌘N): several full windows, each with its sidebar. Both change how the window's state and its
+  pages are held, so they go together.
 - Freeze, then unload hidden tabs on timers; reload on selection from the saved URL, with the snapshot shown
   while loading.
 - Memory pressure and low-power detection on each OS.
@@ -415,8 +419,8 @@ from Arc rely on them. Items that belong to a phase above stay there.
 7. **Developer tools**: View Source, Developer Tools (⌥⌘I, F12), Inspect Elements, JavaScript Console.
 8. **Toolbar mode** (⇧⌘D): the address field and navigation buttons move from the sidebar to a thin bar above
    the page; each split pane gets its own.
-9. **Windows**: New Window (⌘N), a small window without sidebar for links from other apps, with "Open in
-   <Space>" (Arc's Little Arc, ⌥⌘N).
+9. **Windows**: a small window without sidebar for links from other apps, with "Open in <Space>" (Arc's Little
+   Arc, ⌥⌘N). New Window (⌘N) moves to phase 7.
 10. **Site controls** from the address field: copy URL, share, clear cache and cookies, site settings.
 11. **Library sections**: Downloads, Archived Tabs (phase 6), Media.
 - Not planned: AI features, Boosts, Easels, Live Folders, alternative app icons, account and gifting.
