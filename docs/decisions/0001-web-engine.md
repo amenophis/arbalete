@@ -151,6 +151,12 @@ To answer before the compatibility layer is built (phase 4), in this order:
    was most likely this screen. The full check (vault, autofill) needs a 1Password account, for the acceptance
    tests. Found on the way: the Chromium windows Chrome-style views live in (the Web Store's, the one opened
    after an install) are real Chromium windows, so extensions take their tab for the active one (1Password
-   thought it was on the Web Store): Arbalete never leaves one open.
+   thought it was on the Web Store): Arbalete never leaves one open. Checked on the way with Dark Reader,
+   installed the same way: it themes Arbalete's Alloy pages (iana.org goes dark, `data-darkreader-mode`
+   "dynamic"), and its popup shows the site and its settings once the shim answers `tabs.query`, `tabs.get`
+   and `windows.*` in the popup and in its service worker: its worker calls `tabs.get` on the id `tabs.query`
+   gave it, so the shim answers with real tab ids (question 2) rather than made-up ones. On install, Dark
+   Reader and 1Password open a welcome page with `tabs.create`, in Chromium windows of their own until the
+   shim forwards it to Arbalete (question 4).
 6. **Several Alloy views and an overlay in one CEF Views window**: allowed by CEF. **Answered**: the app is
    built this way (the sidebar, the page's card and its overlays in one window).
