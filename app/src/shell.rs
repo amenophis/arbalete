@@ -7,6 +7,7 @@ use crate::command::{
     Command, DownloadAction, HitTarget, LittleAction, Setting, SiteData, Target, Zoom,
 };
 use crate::downloads::{self, Download};
+use crate::extensions;
 use crate::menu::{self, Action};
 use crate::settings::{self, Settings};
 use arbalete_core::history::{self, History};
@@ -496,6 +497,21 @@ fn send_state() {
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
     dispatch(&TOOLBAR_VIEW, &event);
+    // Extensions see the displayed Space's selected tab as their profile's active tab.
+    let active = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let space = sidebar.displayed();
+        let NodeKind::Tab(tab) = &sidebar.node(space.selected?)?.kind else {
+            return None;
+        };
+        let tab = extensions::ActiveTab {
+            url: tab.url.clone(),
+            title: tab.label().to_string(),
+            favicon: tab.favicon.clone(),
+        };
+        Some((space.profile, tab))
+    });
+    extensions::sync(active.into_iter().collect());
 }
 
 /// Shows the bar above the page, with the navigation buttons and the address, which the sidebar
@@ -2217,6 +2233,9 @@ fn mute_selected() {
 /// Makes a profile's content view usable once its browser exists, and shows the selected tab in it
 /// if the tab belongs to the profile.
 fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
+    if let Some(browser) = browser.as_deref() {
+        extensions::content_created(profile, browser);
+    }
     let view = browser_view_get_for_browser(browser);
     CONTENTS.with_borrow_mut(|contents| contents.insert(profile, view));
     if selected().is_some_and(|(selected, _)| selected == profile) {
@@ -2670,6 +2689,13 @@ wrap_app! {
             // Development builds are signed ad hoc, so each build would ask for keychain access.
             if cfg!(debug_assertions) {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
+            }
+            // The helper extension, in every profile, tells extensions which tab is which.
+            if let Some(dir) = extensions::helper_dir() {
+                command_line.append_switch_with_value(
+                    Some(&CefString::from("load-extension")),
+                    Some(&CefString::from(dir.to_string_lossy().as_ref())),
+                );
             }
             // Lets the end-to-end check and the benchmark (e2e/devtools.mjs) drive the UI through DevTools.
             if let Ok(port) = std::env::var("ARBALETE_DEBUG_PORT") {

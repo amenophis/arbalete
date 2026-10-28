@@ -1,5 +1,6 @@
 mod command;
 mod downloads;
+mod extensions;
 #[cfg(target_os = "macos")]
 mod mac;
 mod menu;
