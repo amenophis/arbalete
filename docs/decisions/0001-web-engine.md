@@ -104,7 +104,15 @@ To answer before the compatibility layer is built (phase 4), in this order:
 1. **Browser-level DevTools access from the app**, needed to attach to extension service workers as they start.
    The spike did it from an external DevTools client.
 2. **The active tab's extension id**: Chromium's internal tab id is not exposed by CEF. Lead: a small built-in
-   extension whose content script reports `sender.tab.id`.
+   extension whose content script reports `sender.tab.id`. **Answered (2026-10-28)**, more directly: in the
+   service worker of an extension holding the `debugger` permission, `chrome.debugger.getTargets()` lists each
+   page of its profile with both its extension tab id (`tabId`) and its DevTools target id (`id`); the app gets
+   the target id of its own pages from `Target.getTargetInfo` on their session, which ties each of its pages to
+   its tab id. `chrome.tabs.get(tabId)` then works, with `active: false` and `windowId: -1`, as the pages sit
+   in no Chromium window: the shim fills in both. Third-party extensions lack the `debugger` permission, so
+   Arbalete ships a small helper extension without content scripts, loaded with `--load-extension` from the
+   bundle. That switch loads it in every request context, the app's own UI included, which the helper then
+   sees but does not touch.
 3. **Installing from the Chrome Web Store** when every browser is Alloy style. Lead: a dedicated Chrome-style
    window for the Web Store.
 4. **Forwarding `tabs.create` and `tabs.update`** to Arbalete.
