@@ -122,7 +122,19 @@ To answer before the compatibility layer is built (phase 4), in this order:
    bundle. That switch loads it in every request context, the app's own UI included, which the helper then
    sees but does not touch.
 3. **Installing from the Chrome Web Store** when every browser is Alloy style. Lead: a dedicated Chrome-style
-   window for the Web Store.
+   window for the Web Store. **Answered (2026-10-28)**: a Chrome-style window of its own, in the profile's
+   request context, on the extension's Web Store page (`chromewebstore.google.com/detail/<id>`), has the
+   store's install API (`chrome.webstorePrivate`): "Add to Chrome", then Chromium's confirmation, installs the
+   extension in the profile's `Extensions` directory. It then runs in that profile's Alloy pages (uBlock Origin
+   Lite blocks an ad script on example.com), and again after a relaunch. The window must be a separate one: CEF
+   refuses a Chrome-style view beside Alloy views. Three things to handle when it is built:
+   - the store shows "Switch to Chrome?" and a banner to every Chromium-based browser not branded Google Chrome;
+     "No thanks" dismisses them, and the "Add to Chrome" button works;
+   - a `.crx` loaded straight from Google's update service is refused ("Extensions and apps cannot be added from
+     this website"): installs go through the store page;
+   - once installed, Chromium opens a full Chromium window (tab strip, address bar, New Tab page) to show its
+     "has been added" bubble, as it finds no browser window of its own: Arbalete closes it, or keeps Chromium
+     from opening it.
 4. **Forwarding `tabs.create` and `tabs.update`** to Arbalete.
 5. **1Password**: find why its popup stays blank.
 6. **Several Alloy views and an overlay in one CEF Views window**: allowed by CEF. **Answered**: the app is
