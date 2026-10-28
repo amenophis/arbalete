@@ -1,7 +1,7 @@
 //! The native menus of the sidebar's rows and Spaces, built from the sidebar: the app shows them
 //! (app/src/mac.rs) and runs the item picked (shell::perform).
 
-use crate::command::{Command, Target};
+use crate::command::{Command, SiteData, Target};
 use arbalete_core::sidebar::{MAX_FAVORITES, NodeId, NodeKind, Sidebar, Space, Tab};
 use serde_json::json;
 
@@ -26,6 +26,8 @@ pub enum Action {
     /// Asks the sidebar to do what only it does, like editing a name: a DOM event and its detail.
     Ask(&'static str, serde_json::Value),
     CopyLink(String),
+    /// Shows the system's share menu for a link, at the pointer.
+    Share(String),
     /// Asks for the url a pinned tab goes back to, in a dialog holding the current one.
     EditPinnedUrl {
         tab: NodeId,
@@ -58,7 +60,38 @@ pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
             let space = sidebar.spaces().iter().find(|space| space.id == id)?;
             Some(profiles(sidebar, space))
         }
+        Target::Site => {
+            let tab = sidebar.displayed().selected?;
+            match &sidebar.node(tab)?.kind {
+                NodeKind::Tab(tab) if is_web(&tab.url) => Some(site_menu(&tab.url)),
+                _ => None,
+            }
+        }
     }
+}
+
+/// The selected tab's site controls, like Arc's: its link, and what the site keeps.
+fn site_menu(url: &str) -> Vec<Entry> {
+    vec![
+        copy_link(url),
+        item("share", "Share…", Action::Share(url.to_string())),
+        Entry::Separator,
+        item(
+            "clear-cache",
+            "Clear Cache",
+            Action::Run(Command::ClearSiteData(SiteData::Cache)),
+        ),
+        item(
+            "clear-cookies",
+            "Clear Cookies",
+            Action::Run(Command::ClearSiteData(SiteData::Cookies)),
+        ),
+    ]
+}
+
+/// Only web pages have a site to control.
+fn is_web(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
 }
 
 /// The action of the item named `id`, in submenus too.
@@ -616,6 +649,33 @@ mod tests {
             find(menu, &format!("profile/{work_id}")),
             Some(Action::Run(Command::SetSpaceProfile(home, work)))
         );
+    }
+
+    #[test]
+    fn the_selected_web_page_s_site_copies_shares_and_clears_its_data() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        assert!(build(&sidebar, Target::Site).is_none());
+        let tab = sidebar.open_tab(home, "https://a.test/page").unwrap();
+        sidebar.select(home, tab).unwrap();
+        let menu = build(&sidebar, Target::Site).unwrap();
+        assert_eq!(
+            titles(&menu),
+            ["Copy Link", "Share…", "-", "Clear Cache", "Clear Cookies"]
+        );
+        let choose = |item: &str| find(build(&sidebar, Target::Site).unwrap(), item);
+        assert_eq!(
+            choose("share"),
+            Some(Action::Share("https://a.test/page".into()))
+        );
+        assert_eq!(
+            choose("clear-cookies"),
+            Some(Action::Run(Command::ClearSiteData(SiteData::Cookies)))
+        );
+        // A page that is not on the web has no site.
+        let blank = sidebar.open_tab(home, "about:blank").unwrap();
+        sidebar.select(home, blank).unwrap();
+        assert!(build(&sidebar, Target::Site).is_none());
     }
 
     #[test]

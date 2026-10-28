@@ -146,6 +146,13 @@ test("in toolbar mode, the sidebar leaves the navigation buttons and the address
   expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
 });
 
+test("the url bar's site controls ask the app for the site's menu", () => {
+  render(<App />);
+  receive({});
+  fireEvent.click(screen.getByRole("button", { name: "Site controls" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/menu/site", { method: "POST" });
+});
+
 test("a click on the url bar edits the address in the Command Bar", () => {
   render(<App />);
   receive({});
