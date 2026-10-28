@@ -1,6 +1,5 @@
 import { activeTab, domain, NavButtons, SiteControls } from "./App";
 import { send, useAppState } from "./bridge";
-import { ExtensionButtons } from "./Extensions";
 import { Icon } from "./Icon";
 
 // The bar above the page in toolbar mode (View › Show Toolbar, toggle_toolbar in
@@ -29,8 +28,7 @@ export function Toolbar() {
       )}
       {active && (
         <div className="page-toolbar-buttons page-toolbar-end">
-          <ExtensionButtons extensions={state.extensions} view="toolbar" />
-          <SiteControls />
+          <SiteControls view="toolbar" />
         </div>
       )}
       {active && page?.loading && (

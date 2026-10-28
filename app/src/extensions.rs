@@ -222,13 +222,11 @@ pub fn icon_file(path: &str) -> Option<(PathBuf, &'static str)> {
     Some((file.clone(), mime))
 }
 
-/// Reads a profile's extensions again, and tells the UI if they changed.
+/// Reads a profile's extensions again.
 fn refresh(profile: ProfileId, dir: &Path) {
     let list = installed(dir);
-    let changed = INSTALLED.with_borrow_mut(|installed| {
-        let entry = installed.insert(profile, (dir.to_path_buf(), list.clone()));
-        entry.is_none_or(|(_, before)| before != list)
-    });
+    INSTALLED
+        .with_borrow_mut(|installed| installed.insert(profile, (dir.to_path_buf(), list.clone())));
     let id = serde_json::to_string(&profile).expect("an id");
     let mut icons = ICONS.lock().expect("not poisoned");
     icons.retain(|(key, _)| !key.starts_with(&format!("{id}/")));
@@ -237,10 +235,6 @@ fn refresh(profile: ProfileId, dir: &Path) {
             Some((format!("{id}/{}", extension.id), extension.icon.clone()?))
         }),
     );
-    drop(icons);
-    if changed {
-        crate::shell::extensions_changed();
-    }
 }
 
 /// The address of an extension's popup, if it has one.

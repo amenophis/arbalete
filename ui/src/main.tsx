@@ -8,6 +8,7 @@ import { Little } from "./Little";
 import { trackMenuTargets } from "./menuTargets";
 import { Overlay } from "./Overlay";
 import { Settings } from "./Settings";
+import { Site } from "./Site";
 import { Toolbar } from "./Toolbar";
 import "./index.css";
 
@@ -17,7 +18,7 @@ if (!root) throw new Error("index.html has no #root element");
 // The same page serves the sidebar, the sidebar revealed above the page with #reveal, the
 // overlay above the page with #overlay, the find bar above the page with #find, the import
 // assistant above the page with #import, the settings window with #settings and the bar above
-// the page in toolbar mode with #toolbar, and a Little Arbalete window's bar with #little/<id>.
+// the page in toolbar mode with #toolbar, the site controls' panel with #site, and a Little Arbalete window's bar with #little/<id>.
 if (location.hash === "#reveal") revealOnHover(document.documentElement);
 if (location.hash === "") followDocking(document.documentElement);
 const pages = {
@@ -26,6 +27,7 @@ const pages = {
   "#import": <Import />,
   "#settings": <Settings />,
   "#toolbar": <Toolbar />,
+  "#site": <Site />,
 };
 if (location.hash === "#reveal") trackMenuTargets(root, "revealed");
 if (location.hash === "") trackMenuTargets(root, "docked");
