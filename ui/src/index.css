@@ -2515,6 +2515,7 @@ button.folder:hover {
 
 .extensions-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin: 10px 0 8px;
 }

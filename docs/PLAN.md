@@ -331,8 +331,12 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - Install from the Chrome Web Store and from a local folder (developer mode), update, enable, disable, remove.
 - Extensions are installed **per profile**, like their data.
 - Extension actions in the sidebar (pinned extensions, then an overflow menu), options pages, permission prompts.
-- Acceptance list: uBlock Origin Lite, Bitwarden, 1Password, Dark Reader, plus the most used extensions found in
-  imported Chromium profiles.
+- Acceptance list: uBlock Origin Lite, Bitwarden, Dark Reader, plus the most used extensions found in imported
+  Chromium profiles. 1Password is left out: its full check needs an account.
+- **Done (2026-10-29)**: popups in windows of their own, the site controls' panel and the library's Extensions
+  section (pin, options, on and off, details, removal), installs from the Web Store in a tab and from a folder,
+  updates (Chromium's own, every few hours, and an Update button), optional permission prompts; uBlock Origin
+  Lite, Bitwarden (signed in, autofill) and Dark Reader checked.
 
 ### Phase 5 — Command Bar
 - Centered palette for "new tab" and "edit URL".

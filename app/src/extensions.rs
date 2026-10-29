@@ -824,6 +824,11 @@ enum ChromeTask {
     LoadUnpacked {
         profile: ProfileId,
     },
+    /// Checking the Web Store for updates of a profile's extensions now, as Chromium does on its
+    /// own every few hours: only its extensions page can.
+    Update {
+        profile: ProfileId,
+    },
 }
 
 thread_local! {
@@ -919,6 +924,9 @@ pub fn chrome_task_page_loaded(browser: &Browser) {
         }
         // The extension the folder loaded is the one the page lists afterwards only.
         ChromeTask::LoadUnpacked { .. } => Some(LOAD_UNPACKED.to_string()),
+        ChromeTask::Update { .. } => {
+            Some("chrome.developerPrivate.autoUpdate().then(() => true)".to_string())
+        }
     });
     let Some(action) = action else { return };
     let registration = host.add_dev_tools_message_observer(Some(&mut ChromeTaskObserver::new()));
@@ -941,6 +949,21 @@ const LOAD_UNPACKED: &str = "(async () => {
   return added ? { id: added.id, path: added.prettifiedPath } : null;
 })()";
 
+/// Updates a profile's extensions from the Web Store now, from Chromium's extensions page in an
+/// invisible window.
+pub fn update(profile: ProfileId) {
+    if CHROME_TASK.with_borrow(Option::is_some) {
+        return;
+    }
+    CHROME_TASK.set(Some(ChromeTask::Update { profile }));
+    crate::shell::open_chrome_task_window(
+        profile,
+        "chrome://extensions",
+        "Update Extensions",
+        true,
+    );
+}
+
 /// Ends the task with the user's answer, `value`, and closes the window.
 fn finish_chrome_task(value: &Value) {
     let yes = *value == true;
@@ -950,6 +973,8 @@ fn finish_chrome_task(value: &Value) {
                 loaded(profile, id, &expand_home(path));
             }
         }
+        // The versions updated show once read again.
+        Some(ChromeTask::Update { profile }) => reload(profile),
         Some(ChromeTask::Permissions {
             caller, request, ..
         }) => {
