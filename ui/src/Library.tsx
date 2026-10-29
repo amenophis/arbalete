@@ -147,7 +147,7 @@ export function Library({
         {section === "downloads" && (
           <DownloadsList downloads={downloads} query={query} now={Date.now()} />
         )}
-        {section === "extensions" && <ExtensionsList extensions={extensions} />}
+        {section === "extensions" && <ExtensionsList extensions={extensions} onOpen={onBack} />}
       </div>
     </section>
   );
