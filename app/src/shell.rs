@@ -169,11 +169,11 @@ thread_local! {
     /// The settings, in a window of their own while it is open.
     static SETTINGS_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
-    /// Chromium's extensions page, in a window of its own.
-    static EXTENSIONS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// The window Chromium asks the user in, for an extension's optional permissions or its
     /// removal (extensions::ChromeTask).
     static PERMISSION_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    /// That window is invisible, but for its sheet.
+    static PERMISSION_WINDOW_HIDDEN: Cell<bool> = const { Cell::new(false) };
     /// The browsers Chromium opened by itself (StrayClient), until an install closes them.
     static STRAYS: RefCell<Vec<Browser>> = const { RefCell::new(Vec::new()) };
     /// The app's settings, loaded when the context is initialized.
@@ -1633,6 +1633,14 @@ pub fn displayed_profile() -> ProfileId {
     STATE.with_borrow(|state| state.sidebar.displayed().profile)
 }
 
+/// The invisible window's size, which its sheet, like Chromium's folder picker, fits.
+const HIDDEN_SIZE: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 720,
+    height: 460,
+};
+
 /// The permission window's size, which holds Chromium's prompt.
 const PERMISSION_SIZE: Size = Size {
     width: 480,
@@ -1642,11 +1650,13 @@ const PERMISSION_SIZE: Size = Size {
 /// Opens a small Chrome-style window, `title`, on a page of an extension, `url`, in a profile, for
 /// Chromium to ask the user there: it prompts only from a Chrome-style page
 /// (extensions::ChromeTask).
-pub fn open_chrome_task_window(profile: ProfileId, url: &str, title: &str) {
+/// `hidden`, the window is invisible: only a sheet it shows, like Chromium's folder picker, is.
+pub fn open_chrome_task_window(profile: ProfileId, url: &str, title: &str, hidden: bool) {
     window_create_top_level(Some(&mut PermissionWindowDelegate::new(
         profile,
         url.to_string(),
         title.to_string(),
+        hidden,
     )));
 }
 
@@ -1677,6 +1687,7 @@ wrap_window_delegate! {
         profile: ProfileId,
         url: String,
         title: String,
+        hidden: bool,
     }
 
     impl ViewDelegate {
@@ -1702,8 +1713,22 @@ wrap_window_delegate! {
             )
             .expect("permission view");
             window.add_child_view(Some(&mut View::from(&view)));
-            window.center_window(Some(&PERMISSION_SIZE));
+            PERMISSION_WINDOW_HIDDEN.set(self.hidden);
+            let main = WINDOW.with_borrow(|w| w.as_ref().map(Window::bounds));
+            match main.filter(|_| self.hidden) {
+                // Its sheet shows at its top, over the main window's middle.
+                Some(main) => window.set_bounds(Some(&Rect {
+                    x: main.x + (main.width - HIDDEN_SIZE.width) / 2,
+                    y: main.y + main.height / 6,
+                    ..HIDDEN_SIZE
+                })),
+                None => window.center_window(Some(&PERMISSION_SIZE)),
+            }
             window.show();
+            #[cfg(target_os = "macos")]
+            if self.hidden {
+                crate::mac::hide_window(window.window_handle());
+            }
             PERMISSION_WINDOW.set(Some(window));
         }
 
@@ -1716,6 +1741,8 @@ wrap_window_delegate! {
         fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 0 }
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+        // Hidden, it has no title bar to show.
+        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 { self.hidden.into() }
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
 
         fn window_runtime_style(&self) -> RuntimeStyle {
@@ -1745,29 +1772,13 @@ wrap_load_handler! {
     impl LoadHandler {
         fn on_load_end(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, _http_status_code: i32) {
             if let (Some(browser), true) = (browser, frame.is_some_and(|frame| frame.is_main() == 1)) {
+                // The window exists for sure by now: hidden, it is made invisible again.
+                #[cfg(target_os = "macos")]
+                if let Some(host) = browser.host().filter(|_| PERMISSION_WINDOW_HIDDEN.get()) {
+                    crate::mac::hide_window(host.window_handle());
+                }
                 extensions::chrome_task_page_loaded(browser);
             }
-        }
-    }
-}
-
-/// The extensions page's window's size.
-const EXTENSIONS_SIZE: Size = Size {
-    width: 1000,
-    height: 760,
-};
-
-/// Opens Chromium's extensions page, to manage the displayed Space's profile's extensions, like
-/// Arc's: turning them on or off, their details and permissions, updating them, and in developer
-/// mode, loading one from a folder. Only a Chrome-style page shows it, and CEF puts none beside the
-/// main window's Alloy views: it has a window of its own, brought to the front when open.
-fn show_extensions_page() {
-    hide_site_controls();
-    match EXTENSIONS_WINDOW.with_borrow(Clone::clone) {
-        Some(window) => window.activate(),
-        None => {
-            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-            window_create_top_level(Some(&mut ExtensionsWindowDelegate::new(profile)));
         }
     }
 }
@@ -3271,7 +3282,7 @@ pub fn run(command: Command) {
         }
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
         (Command::ShowStore, _) => show_store(),
-        (Command::ShowExtensionsPage, _) => show_extensions_page(),
+        (Command::ShowExtensionsPage, _) => extensions::load_unpacked(displayed_profile()),
         (Command::ManageExtensions, _) => {
             hide_site_controls();
             if SIDEBAR_MODE.get() == SidebarMode::Hidden {
@@ -3685,57 +3696,6 @@ wrap_life_span_handler! {
     }
 }
 
-wrap_window_delegate! {
-    struct ExtensionsWindowDelegate {
-        profile: ProfileId,
-    }
-
-    impl ViewDelegate {
-        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            EXTENSIONS_SIZE
-        }
-    }
-
-    impl PanelDelegate {}
-
-    impl WindowDelegate {
-        fn on_window_created(&self, window: Option<&mut Window>) {
-            let window = window.expect("window").clone();
-            window.set_title(Some(&CefString::from("Extensions")));
-            window.set_to_fill_layout();
-            let view = browser_view_create(
-                Some(&mut ExtensionsClient::new()),
-                Some(&CefString::from("chrome://extensions")),
-                Some(&BrowserSettings::default()),
-                None,
-                profile_context(self.profile).as_mut(),
-                Some(&mut ChromeViewDelegate::new()),
-            )
-            .expect("extensions view");
-            window.add_child_view(Some(&mut View::from(&view)));
-            window.center_window(Some(&EXTENSIONS_SIZE));
-            window.show();
-            EXTENSIONS_WINDOW.set(Some(window));
-        }
-
-        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
-            EXTENSIONS_WINDOW.set(None);
-            // It may have changed them.
-            extensions::reload(self.profile);
-        }
-
-        fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
-
-        fn window_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::CHROME
-        }
-    }
-}
-
 // A Chrome-style page, without Chromium's toolbar.
 wrap_browser_view_delegate! {
     struct ChromeViewDelegate {}
@@ -3749,18 +3709,6 @@ wrap_browser_view_delegate! {
 
         fn chrome_toolbar_type(&self, _browser_view: Option<&mut BrowserView>) -> ChromeToolbarType {
             ChromeToolbarType::NONE
-        }
-    }
-}
-
-// The extensions page's links that open a window, like an extension's web site, open a tab
-// instead (BrowserLifeSpan).
-wrap_client! {
-    struct ExtensionsClient {}
-
-    impl Client {
-        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(BrowserLifeSpan::new(None))
         }
     }
 }

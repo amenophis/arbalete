@@ -17,7 +17,7 @@ use objc2_app_kit::{
     NSDownArrowFunctionKey, NSEvent, NSEventMask, NSEventModifierFlags, NSEventPhase, NSEventType,
     NSF12FunctionKey, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard,
     NSPasteboardTypeString, NSRightArrowFunctionKey, NSSharingServicePicker, NSTextField,
-    NSUpArrowFunctionKey, NSView, NSWindowButton, NSWorkspace,
+    NSUpArrowFunctionKey, NSView, NSWindow, NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{
     NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSNumber, NSRect, NSRectEdge, NSSize,
@@ -1095,6 +1095,24 @@ pub fn round_command_bar(view: *mut c_void) {
     if let Some(window) = unsafe { view.cast::<NSView>().as_ref() }.and_then(NSView::window) {
         window.setHasShadow(true);
         window.invalidateShadow();
+    }
+}
+
+/// Makes a window invisible and lets clicks through it, while a sheet it holds, like Chromium's
+/// folder picker, shows. `handle` is the window, or a view in it, as CEF gives it.
+pub fn hide_window(handle: *mut c_void) {
+    // SAFETY: CEF gives a live NSWindow or NSView, which its window keeps alive.
+    let Some(object) = (unsafe { handle.cast::<AnyObject>().as_ref() }) else {
+        return;
+    };
+    let window = if let Some(window) = object.downcast_ref::<NSWindow>() {
+        Some(objc2::Message::retain(window))
+    } else {
+        object.downcast_ref::<NSView>().and_then(NSView::window)
+    };
+    if let Some(window) = window {
+        window.setAlphaValue(0.0);
+        window.setIgnoresMouseEvents(true);
     }
 }
 
