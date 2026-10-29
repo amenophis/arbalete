@@ -228,6 +228,14 @@ export function ExtensionsList({
           >
             Load Unpacked…
           </button>
+          <button
+            type="button"
+            className="extensions-button"
+            title="Check the Web Store for updates now"
+            onClick={() => send("extension/update")}
+          >
+            Update
+          </button>
         </div>
         {extensions.length === 0 && <p className="library-empty">No extensions yet</p>}
         {extensions.length > 0 && found.length === 0 && (
