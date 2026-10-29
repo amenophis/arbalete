@@ -42,10 +42,14 @@ export const ACTIONS: { title: string; command: string }[] = [
 // How many actions show at most.
 const ACTION_ROWS = 3;
 
-// The actions whose names start a word with each word typed, like "new fo" for New Folder.
+// How many results show at once: the others scroll.
+export const VISIBLE_ROWS = 9;
+
+// The actions whose names start a word with each word typed, like "new fo" for New Folder: from
+// two letters on, as one matches too many.
 export function matchingActions(text: string): typeof ACTIONS {
   const words = text.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
+  if (words.join("").length < 2) return [];
   return ACTIONS.filter(({ title }) => {
     const names = title.toLowerCase().split(/\s+/);
     return words.every((word) => names.some((name) => name.startsWith(word)));
@@ -135,10 +139,12 @@ export function Overlay() {
     if (value !== text) input.current?.setSelectionRange(text.length, value.length);
   }, [text, value]);
   const rows = resultRows(text, results, completion, search);
+  // Past VISIBLE_ROWS, the results scroll.
+  const shown = Math.min(rows.length, VISIBLE_ROWS);
   const height = switching
     ? switching.tabs.length * RESULT_ROW + 2 * RESULTS_PADDING
-    : rows.length
-      ? SEARCH_ROW + rows.length * RESULT_ROW + 2 * RESULTS_PADDING
+    : shown
+      ? SEARCH_ROW + shown * RESULT_ROW + 2 * RESULTS_PADDING
       : SEARCH_ROW;
   useEffect(() => send(`overlay/height/${height}`), [height]);
   const open = (row: Row) => {
@@ -218,6 +224,12 @@ export function Overlay() {
                 type="button"
                 className="overlay-result"
                 aria-current={index === picked || undefined}
+                // The picked row stays in view as the arrows move through the results.
+                ref={
+                  index === picked
+                    ? (row) => row?.scrollIntoView?.({ block: "nearest" })
+                    : undefined
+                }
                 // Keeps the field focused, which a click would blur, closing the bar.
                 onMouseDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setPicked(index)}

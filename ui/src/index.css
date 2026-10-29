@@ -881,8 +881,10 @@ button.folder:hover {
 }
 
 .overlay-results {
+  min-height: 0;
   margin: 0;
   padding: 8px;
+  overflow-y: auto;
   border-top: 1px solid var(--menu-border);
   list-style: none;
 }
