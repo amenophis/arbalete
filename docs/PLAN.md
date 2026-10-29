@@ -344,6 +344,10 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - Thresholds: 1 h, 6 h, 12 h (default), 24 h, 7 d, 30 d, never; per-profile setting.
 - Browsable, restorable archive (full node kept).
 - Import Arc's archive.
+- **Done (2026-10-29)**: each tab records when it last showed; every minute, the "Today" tabs left unshown longer
+  than their profile's setting are archived (never the shown tab, a folder or a split); the library's Archived
+  Tabs section lists them, searchable, and a click opens one again in its Space; Arc's archive comes with its
+  import, each tab in the Space imported from its own.
 
 ### Phase 7 — Resource saving
 - A live page per open tab, kept in the background while another shows: switching tabs no longer reloads the

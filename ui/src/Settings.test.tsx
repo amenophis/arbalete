@@ -17,9 +17,19 @@ const detail: SettingsDetail = {
     { id: "google", name: "Google" },
     { id: "duckduckgo", name: "DuckDuckGo" },
   ],
+  delays: [
+    { id: "twelve-hours", name: "12 hours" },
+    { id: "never", name: "Never" },
+  ],
   profiles: [
-    { id: 1, name: "Default", color: "purple", searchEngine: "google" },
-    { id: 5, name: "Work", color: "blue", searchEngine: "duckduckgo" },
+    {
+      id: 1,
+      name: "Default",
+      color: "purple",
+      searchEngine: "google",
+      archiveAfter: "twelve-hours",
+    },
+    { id: 5, name: "Work", color: "blue", searchEngine: "duckduckgo", archiveAfter: "never" },
   ],
 };
 
@@ -75,6 +85,19 @@ test("Profiles picks each profile's search engine", () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/profile/search/1/duckduckgo", {
     method: "POST",
   });
+});
+
+test("Profiles picks how long each profile's tabs stay before they are archived", () => {
+  open();
+  fireEvent.click(screen.getByRole("tab", { name: "Profiles" }));
+  const work = screen.getByRole("combobox", {
+    name: "Work archives tabs after",
+  }) as HTMLSelectElement;
+  expect(work.value).toBe("never");
+  fireEvent.change(screen.getByRole("combobox", { name: "Default archives tabs after" }), {
+    target: { value: "never" },
+  });
+  expect(fetch).toHaveBeenLastCalledWith("/command/profile/archive/1/never", { method: "POST" });
 });
 
 test("Shortcuts lists every shortcut by group", () => {

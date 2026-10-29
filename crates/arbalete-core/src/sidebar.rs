@@ -35,6 +35,9 @@ pub struct Profile {
     /// The extensions whose buttons show by the address, by id, in the order they were pinned.
     #[serde(default)]
     pub pinned_extensions: Vec<String>,
+    /// How long its "Today" tabs stay unshown before they are archived.
+    #[serde(default)]
+    pub archive_after: ArchiveAfter,
 }
 
 /// How many favorites a profile holds at most: the grid keeps 3 rows of 4 tiles.
@@ -112,7 +115,75 @@ pub struct Tab {
     /// The tab's page plays no sound.
     #[serde(default)]
     pub muted: bool,
+    /// When the tab last showed, in milliseconds since the Unix epoch: unshown long enough, a
+    /// "Today" tab is archived (Sidebar::archive_due).
+    #[serde(default)]
+    pub last_shown: Option<u64>,
 }
+
+/// How long a profile's "Today" tabs stay unshown before they are archived.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArchiveAfter {
+    Hour,
+    SixHours,
+    #[default]
+    TwelveHours,
+    Day,
+    Week,
+    Month,
+    Never,
+}
+
+impl ArchiveAfter {
+    pub const ALL: [Self; 7] = [
+        Self::Hour,
+        Self::SixHours,
+        Self::TwelveHours,
+        Self::Day,
+        Self::Week,
+        Self::Month,
+        Self::Never,
+    ];
+
+    /// The delay, in milliseconds, if tabs are archived at all.
+    pub fn millis(self) -> Option<u64> {
+        const HOUR: u64 = 60 * 60 * 1000;
+        match self {
+            Self::Hour => Some(HOUR),
+            Self::SixHours => Some(6 * HOUR),
+            Self::TwelveHours => Some(12 * HOUR),
+            Self::Day => Some(24 * HOUR),
+            Self::Week => Some(7 * 24 * HOUR),
+            Self::Month => Some(30 * 24 * HOUR),
+            Self::Never => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Hour => "1 hour",
+            Self::SixHours => "6 hours",
+            Self::TwelveHours => "12 hours",
+            Self::Day => "24 hours",
+            Self::Week => "7 days",
+            Self::Month => "30 days",
+            Self::Never => "Never",
+        }
+    }
+}
+
+/// A tab archived, which may be restored to its Space.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Archived {
+    pub tab: Tab,
+    pub space: SpaceId,
+    /// When it was archived, in milliseconds since the Unix epoch.
+    pub archived_at: u64,
+}
+
+/// How many archived tabs are kept: the oldest go first.
+pub const ARCHIVE_SIZE: usize = 1000;
 
 impl Tab {
     /// What the sidebar calls the tab: its name, or its page's title.
@@ -155,6 +226,9 @@ pub struct Sidebar {
     displayed: Option<SpaceId>,
     nodes: HashMap<NodeId, Node>,
     next_id: u64,
+    /// The tabs archived, the most recent first.
+    #[serde(default)]
+    archive: Vec<Archived>,
 }
 
 impl Default for Sidebar {
@@ -179,6 +253,7 @@ impl Sidebar {
             displayed: None,
             nodes: HashMap::new(),
             next_id: 1,
+            archive: Vec::new(),
         }
     }
 
@@ -265,6 +340,7 @@ impl Sidebar {
             favorites_hint_hidden: false,
             search_engine: SearchEngine::default(),
             pinned_extensions: Vec::new(),
+            archive_after: ArchiveAfter::default(),
         });
         id
     }
@@ -430,6 +506,7 @@ impl Sidebar {
             saved_url: None,
             name: None,
             muted: false,
+            last_shown: None,
         };
         Ok(self.insert(Some(today), NodeKind::Tab(tab)))
     }
@@ -454,6 +531,7 @@ impl Sidebar {
             saved_url: self.is_pinned(parent).then(|| url.to_string()),
             name: None,
             muted: false,
+            last_shown: None,
         };
         self.show_favorites_hint(parent);
         Ok(self.insert(Some(parent), NodeKind::Tab(tab)))
@@ -774,6 +852,97 @@ impl Sidebar {
         let today = self.space(space)?.today;
         let rows = self.nodes[&today].children.clone();
         self.remove_rows(&rows)
+    }
+
+    /// Notes that a tab showed at `now`, in milliseconds since the Unix epoch.
+    pub fn touch(&mut self, tab: NodeId, now: u64) {
+        if let Some(tab) = self.tab_mut(tab) {
+            tab.last_shown = Some(now);
+        }
+    }
+
+    /// Archives the "Today" tabs left unshown longer than their profile allows, at `now`: the
+    /// tab a Space shows stays, and so do folders and splits. A tab never shown since it was
+    /// opened or loaded counts from now. Returns how many were archived.
+    pub fn archive_due(&mut self, now: u64) -> usize {
+        let mut due = Vec::new();
+        let mut unseen = Vec::new();
+        for space in &self.spaces {
+            let profile = self.profiles.iter().find(|p| p.id == space.profile);
+            let Some(delay) = profile.and_then(|p| p.archive_after.millis()) else {
+                continue;
+            };
+            for &row in &self.nodes[&space.today].children {
+                let NodeKind::Tab(tab) = &self.nodes[&row].kind else {
+                    continue;
+                };
+                match tab.last_shown {
+                    _ if space.selected == Some(row) => {}
+                    None => unseen.push(row),
+                    Some(shown) if now.saturating_sub(shown) >= delay => due.push((space.id, row)),
+                    Some(_) => {}
+                }
+            }
+        }
+        for tab in unseen {
+            self.touch(tab, now);
+        }
+        for &(space, row) in &due {
+            let Some(tab) = self.tab_mut(row).map(|tab| tab.clone()) else {
+                continue;
+            };
+            if self.remove(row).is_ok() {
+                self.archive.insert(
+                    0,
+                    Archived {
+                        tab,
+                        space,
+                        archived_at: now,
+                    },
+                );
+            }
+        }
+        self.archive.truncate(ARCHIVE_SIZE);
+        due.len()
+    }
+
+    /// The tabs archived, the most recent first.
+    pub fn archive(&self) -> &[Archived] {
+        &self.archive
+    }
+
+    /// Adds tabs archived elsewhere, like in Arc, keeping the most recent first.
+    pub fn add_archived(&mut self, items: Vec<Archived>) {
+        self.archive.extend(items);
+        self.archive
+            .sort_by_key(|archived| std::cmp::Reverse(archived.archived_at));
+        self.archive.truncate(ARCHIVE_SIZE);
+    }
+
+    /// Opens the archived tab at `index` again at the end of its Space's "Today" tabs, or of the
+    /// displayed Space's when its own is gone, as shown at `now`. Returns its Space and its id.
+    pub fn restore(&mut self, index: usize, now: u64) -> Result<(SpaceId, NodeId), Error> {
+        if index >= self.archive.len() {
+            return Err(Error::UnknownNode);
+        }
+        let archived = self.archive.remove(index);
+        let space = match self.space(archived.space) {
+            Ok(space) => space.id,
+            Err(_) => self.displayed().id,
+        };
+        let today = self.space(space)?.today;
+        let tab = Tab {
+            last_shown: Some(now),
+            opener: None,
+            ..archived.tab
+        };
+        Ok((space, self.insert(Some(today), NodeKind::Tab(tab))))
+    }
+
+    /// Changes how long a profile's "Today" tabs stay unshown before they are archived.
+    pub fn set_archive_after(&mut self, id: ProfileId, after: ArchiveAfter) -> Result<(), Error> {
+        self.profile_mut(id)?.archive_after = after;
+        Ok(())
     }
 
     /// Removes the rows after `tab`'s among its parent's, as `clear_today` removes them.
@@ -1312,6 +1481,66 @@ mod tests {
         assert_eq!(sidebar.create_profile(" "), Err(Error::EmptyTitle));
         assert_eq!(sidebar.profiles().len(), 2);
         assert_eq!(sidebar.spaces().len(), 2);
+    }
+
+    #[test]
+    fn archives_the_today_tabs_left_unshown_too_long() {
+        const HOUR: u64 = 60 * 60 * 1000;
+        let mut sidebar = Sidebar::default();
+        let space = sidebar.displayed().id;
+        let profile = sidebar.profiles()[0].id;
+        let old = sidebar.open_tab(space, "https://old.example/").unwrap();
+        let shown = sidebar.open_tab(space, "https://shown.example/").unwrap();
+        let recent = sidebar.open_tab(space, "https://recent.example/").unwrap();
+        let unseen = sidebar.open_tab(space, "https://unseen.example/").unwrap();
+        sidebar.touch(old, 0);
+        sidebar.touch(shown, 0);
+        sidebar.touch(recent, 11 * HOUR);
+        sidebar.select(space, shown).unwrap();
+        // The default keeps them 12 hours.
+        assert_eq!(sidebar.archive_due(12 * HOUR), 1);
+        assert_eq!(sidebar.archive()[0].tab.url, "https://old.example/");
+        assert_eq!(sidebar.archive()[0].archived_at, 12 * HOUR);
+        assert!(sidebar.node(old).is_none() && sidebar.node(shown).is_some());
+        // The tab never shown counts from the first check.
+        assert_eq!(sidebar.archive_due(23 * HOUR), 1);
+        assert!(sidebar.node(recent).is_none() && sidebar.node(unseen).is_some());
+        assert_eq!(sidebar.archive_due(24 * HOUR), 1);
+        assert_eq!(sidebar.archive().len(), 3);
+        sidebar
+            .set_archive_after(profile, ArchiveAfter::Never)
+            .unwrap();
+        sidebar.touch(shown, 0);
+        sidebar.select(space, old).ok();
+        assert_eq!(sidebar.archive_due(1000 * HOUR), 0);
+    }
+
+    #[test]
+    fn restores_an_archived_tab_to_its_space_or_the_displayed_one() {
+        let mut sidebar = Sidebar::default();
+        let space = sidebar.displayed().id;
+        let tab = sidebar.open_tab(space, "https://old.example/").unwrap();
+        sidebar.touch(tab, 0);
+        sidebar.archive_due(u64::MAX / 2);
+        let (to, restored) = sidebar.restore(0, 5).unwrap();
+        assert_eq!(to, space);
+        assert!(sidebar.archive().is_empty());
+        let NodeKind::Tab(tab) = sidebar.node(restored).unwrap().kind.clone() else {
+            panic!("a tab")
+        };
+        assert_eq!(
+            (tab.url.as_str(), tab.last_shown),
+            ("https://old.example/", Some(5))
+        );
+        assert_eq!(sidebar.restore(0, 5), Err(Error::UnknownNode));
+        let gone = serde_json::from_str("999").unwrap();
+        let archived = Archived {
+            tab,
+            space: gone,
+            archived_at: 1,
+        };
+        sidebar.add_archived(vec![archived]);
+        assert_eq!(sidebar.restore(0, 6).unwrap().0, space);
     }
 
     #[test]

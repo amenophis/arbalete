@@ -48,8 +48,9 @@ type Favicons = HashMap<String, Vec<u8>>;
 
 #[derive(Debug)]
 enum Data {
-    /// Arc's sidebar, if any, and the directory of the profile in `User Data`.
-    Arc(Option<String>, String),
+    /// Arc's sidebar, if any, the directory of the profile in `User Data`, and Arc's archive,
+    /// if any.
+    Arc(Option<String>, String, Option<String>),
     Bookmarks(Bookmarks),
 }
 
@@ -176,7 +177,9 @@ fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>, Favico
             if let Some(json) = &sidebar {
                 favicons = arc::favicons(dir, path, json);
             }
-            Data::Arc(sidebar, directory.unwrap_or_default().to_string())
+            // An archive that cannot be read is not worth failing the import for.
+            let archive = arc::read_archive(dir).ok().flatten();
+            Data::Arc(sidebar, directory.unwrap_or_default().to_string(), archive)
         }
         Family::Chromium => Data::Bookmarks(chromium::read_bookmarks(path).map_err(debug)?),
         Family::Firefox => Data::Bookmarks(firefox::read_bookmarks(path).map_err(debug)?),
@@ -193,9 +196,13 @@ fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>, Favico
 /// Adds a browser profile's sidebar or bookmarks to `target`.
 fn add(sidebar: &mut Sidebar, data: Data, target: Target, bar: Bar) -> Result<(), String> {
     match data {
-        Data::Arc(None, _) => Ok(()),
-        Data::Arc(Some(json), directory) => {
-            arc::add(sidebar, &json, &directory, target.profile).map_err(debug)
+        Data::Arc(None, ..) => Ok(()),
+        Data::Arc(Some(json), directory, archive) => {
+            let spaces = arc::add(sidebar, &json, &directory, target.profile).map_err(debug)?;
+            match archive {
+                Some(archive) => arc::add_archive(sidebar, &archive, &spaces).map_err(debug),
+                None => Ok(()),
+            }
         }
         Data::Bookmarks(bookmarks) => {
             let space = target.space(sidebar);
