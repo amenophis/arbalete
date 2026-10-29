@@ -235,3 +235,14 @@ test("suggests the search engine's searches below the typed text, whenever they 
     { method: "POST" },
   );
 });
+
+test("runs the app's actions it names, like Arc's", () => {
+  render(<Overlay />);
+  show();
+  fireEvent.change(field(), { target: { value: "new fo" } });
+  expect(rows()).toEqual(["new fo — Search Google", "New FolderAction"]);
+  fireEvent.click(screen.getByRole("button", { name: /New Folder/ }));
+  expect(commands().slice(-2)).toEqual(["/command/overlay/hide", "/command/folder/new"]);
+  fireEvent.change(field(), { target: { value: "settings" } });
+  expect(rows()).toContain("SettingsAction");
+});

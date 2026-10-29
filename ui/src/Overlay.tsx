@@ -13,10 +13,50 @@ type Results = {
 // How many of the search engine's suggestions show, below what is typed.
 export const SUGGESTIONS = 4;
 
+// The app's actions the Command Bar runs, like Arc's, by their names, and the commands they send
+// (app/src/command.rs). Some act on the selected tab.
+export const ACTIONS: { title: string; command: string }[] = [
+  { title: "New Folder", command: "folder/new" },
+  { title: "New Little Arbalete Window", command: "little/new" },
+  { title: "New Profile", command: "profile/new" },
+  { title: "Close Tab", command: "close" },
+  { title: "Reopen Closed Tab", command: "reopen" },
+  { title: "Pin or Unpin Tab", command: "pin" },
+  { title: "Copy URL", command: "link/copy" },
+  { title: "Clear Today", command: "today/clear" },
+  { title: "Next Space", command: "space/next" },
+  { title: "Previous Space", command: "space/previous" },
+  { title: "Toggle Sidebar", command: "sidebar/toggle" },
+  { title: "Toggle Toolbar", command: "toolbar/toggle" },
+  { title: "Open Library", command: "library/show" },
+  { title: "Show History", command: "history/show" },
+  { title: "Show Downloads", command: "downloads/show" },
+  { title: "Manage Extensions", command: "extension/manage" },
+  { title: "Add Extensions", command: "site/store" },
+  { title: "Import Browser Data", command: "import/show" },
+  { title: "Settings", command: "settings/show" },
+  { title: "View Page Source", command: "page/source" },
+  { title: "Developer Tools", command: "page/devtools" },
+];
+
+// How many actions show at most.
+const ACTION_ROWS = 3;
+
+// The actions whose names start a word with each word typed, like "new fo" for New Folder.
+export function matchingActions(text: string): typeof ACTIONS {
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  return ACTIONS.filter(({ title }) => {
+    const names = title.toLowerCase().split(/\s+/);
+    return words.every((word) => names.some((name) => name.startsWith(word)));
+  }).slice(0, ACTION_ROWS);
+}
+
 type Switching = { tabs: Results["tabs"]; picked: number };
 
 type Row =
   | { kind: "go"; url: string; title: string; search: boolean }
+  | { kind: "action"; command: string; title: string }
   | { kind: "tab"; id: number; url: string; title: string; favicon: string | null }
   | { kind: "page"; url: string; title: string };
 
@@ -105,6 +145,9 @@ export function Overlay() {
     if (row.kind === "tab") {
       send(`select/${row.id}`);
       send("overlay/hide");
+    } else if (row.kind === "action") {
+      send("overlay/hide");
+      send(row.command);
     } else {
       send(`${editing ? "navigate" : "open"}/${encodeURIComponent(row.url)}`);
     }
@@ -170,7 +213,7 @@ export function Overlay() {
       {rows.length > 0 && (
         <ul className="overlay-results" aria-label="Results">
           {rows.map((row, index) => (
-            <li key={`${row.kind}:${"id" in row ? row.id : row.url}`}>
+            <li key={`${row.kind}:${"id" in row ? row.id : "url" in row ? row.url : row.command}`}>
               <button
                 type="button"
                 className="overlay-result"
@@ -183,6 +226,7 @@ export function Overlay() {
                 <RowIcon row={row} />
                 <span className="title">{row.title}</span>
                 {row.kind === "tab" && <span className="overlay-action">Switch to Tab →</span>}
+                {row.kind === "action" && <span className="overlay-action">Action</span>}
               </button>
             </li>
           ))}
@@ -193,6 +237,8 @@ export function Overlay() {
 }
 
 function RowIcon({ row }: { row: Row }) {
+  // A bolt.
+  if (row.kind === "action") return <Icon d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" />;
   if (row.kind === "tab" && row.favicon)
     return <img className="favicon" src={row.favicon} alt="" />;
   if (row.kind === "go" && row.search) {
@@ -204,8 +250,8 @@ function RowIcon({ row }: { row: Row }) {
   );
 }
 
-// What is typed, opened as an address, completed or not, or searched, then the search engine's
-// suggestions, then the matching open tabs and history pages.
+// What is typed, opened as an address, completed or not, or searched, then the app's actions
+// it names, the search engine's suggestions, and the matching open tabs and history pages.
 export function resultRows(
   text: string,
   results: Results | null,
@@ -236,8 +282,10 @@ export function resultRows(
         search: true,
       }),
     );
+  const actions = matchingActions(typed).map((action): Row => ({ kind: "action", ...action }));
   return [
     go,
+    ...actions,
     ...suggestions,
     ...(results?.tabs ?? []).map(
       (tab): Row => ({ kind: "tab", ...tab, title: tab.title || tab.url }),

@@ -343,6 +343,8 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - Results: open tabs (all Spaces), Favorites and pinned tabs, history (including imported), search engine
   suggestions, actions.
 - Ranking: recency, frequency, typed count, exact, domain or title-prefix match.
+- **Done (2026-10-29)**: the palette and editing the URL, open tabs and history ranked and completed in the field,
+  the search engine's suggestions (per-profile setting), and the app's actions by name.
 
 ### Phase 6 — Auto-archive
 - Thresholds: 1 h, 6 h, 12 h (default), 24 h, 7 d, 30 d, never; per-profile setting.
