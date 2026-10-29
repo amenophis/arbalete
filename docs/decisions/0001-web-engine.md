@@ -61,7 +61,7 @@ a script injected through the DevTools protocol (`Page.addScriptToEvaluateOnNewD
 |---|---|---|
 | uBlock Origin Lite | "not a website" | ✅ shows the site, its filtering mode and per-site actions |
 | Dark Reader | "This page is protected" | ✅ shows the site once its **service worker** is shimmed too (its popup asks the background script for the active tab) |
-| Bitwarden | first-run screen | ✅ popup works; autofill not tested (needs an account) |
+| Bitwarden | first-run screen | ✅ popup works; sign-in and autofill work (question 7) |
 | 1Password | blank | ❌ still blank, cause unknown |
 
 ### Other spike results
@@ -168,3 +168,20 @@ To answer before the compatibility layer is built (phase 4), in this order:
    shim forwards it to Arbalete (question 4).
 6. **Several Alloy views and an overlay in one CEF Views window**: allowed by CEF. **Answered**: the app is
    built this way (the sidebar, the page's card and its overlays in one window).
+7. **Bitwarden with an account**, for the acceptance tests. **Answered (2026-10-29)**: installed from the Web
+   Store, signed in from its popup with a one-time code from email, it fills Google's sign-in fields from its
+   own suggestions in the page. Found on the way:
+   - Chromium takes the popup's page for a tab's (`chrome.extension.getViews({ type: "tab" })` lists it), and
+     Bitwarden, which sizes itself by where it shows, filled it: its window shrank to the 25-point minimum.
+     The shim lists the page among the popups instead, as in Chrome.
+   - A sign-in that needs a code from elsewhere loses the popup if it closes on losing the focus, like
+     Chrome's: Arbalete's popup window stays open until closed.
+   - Bitwarden's "make it the default password manager" step asks for the optional `privacy` permission with
+     `chrome.permissions.request`. Chromium shows no prompt for an Alloy page and refuses it, and Bitwarden
+     does not ask again. Arbalete has no password manager of its own to turn off, so nothing is lost; how
+     Arbalete prompts for optional permissions stays open (phase 4).
+   - On Google's sign-in page, Chromium shows "Use Passkey from Another Device" above Bitwarden's suggestions:
+     the page asks for passkeys from its field (conditional mediation), whatever
+     `chrome.privacy.services.passwordSavingEnabled` says. No switch hides that bubble alone, and a script
+     holding the requests back in every page was judged too intrusive: Arbalete keeps Chromium's behavior,
+     Chrome's and Arc's too.
