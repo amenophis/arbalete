@@ -31,6 +31,7 @@ const pages = {
 };
 if (location.hash === "#reveal") trackMenuTargets(root, "revealed");
 if (location.hash === "") trackMenuTargets(root, "docked");
+if (location.hash === "#toolbar") trackMenuTargets(root, "toolbar");
 createRoot(root).render(
   <StrictMode>
     {location.hash.startsWith("#little/") ? (
