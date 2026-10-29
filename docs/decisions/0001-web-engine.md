@@ -178,8 +178,11 @@ To answer before the compatibility layer is built (phase 4), in this order:
      Chrome's: Arbalete's popup window stays open until closed.
    - Bitwarden's "make it the default password manager" step asks for the optional `privacy` permission with
      `chrome.permissions.request`. Chromium shows no prompt for an Alloy page and refuses it, and Bitwarden
-     does not ask again. Arbalete has no password manager of its own to turn off, so nothing is lost; how
-     Arbalete prompts for optional permissions stays open (phase 4).
+     does not ask again. Arbalete has no password manager of its own to turn off, so nothing is lost.
+     Chromium does prompt from a Chrome-style page, though: the shim forwards `chrome.permissions.request`
+     to Arbalete, which asks again from a small Chrome-style window on the extension's `manifest.json`
+     (a page of the extension that runs none of its code), with a user gesture, and gives the answer back.
+     Allowing Bitwarden's `privacy` request there grants it.
    - On Google's sign-in page, Chromium shows "Use Passkey from Another Device" above Bitwarden's suggestions:
      the page asks for passkeys from its field (conditional mediation), whatever
      `chrome.privacy.services.passwordSavingEnabled` says. No switch hides that bubble alone, and a script
