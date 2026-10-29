@@ -193,9 +193,6 @@ thread_local! {
     /// and must not show it again.
     static SITE_CLOSED: Cell<Option<Instant>> = const { Cell::new(None) };
     static EXTENSION_POPUP: RefCell<Option<ExtensionPopup>> = const { RefCell::new(None) };
-    /// When the extension popup last closed: a click on its pinned button closes it, as it loses
-    /// the focus, and must not open it again.
-    static POPUP_CLOSED: Cell<Option<Instant>> = const { Cell::new(None) };
     /// The downloads, kept across sessions, most recent last.
     static DOWNLOADS: RefCell<Vec<Download>> = const { RefCell::new(Vec::new()) };
     /// What cancels each download in progress, by its id in the list.
@@ -1756,6 +1753,8 @@ fn hide_find(browser: Option<&Browser>) {
 
 /// An extension's popup, above the page.
 struct ExtensionPopup {
+    /// Its extension's id.
+    id: String,
     window: Window,
     view: BrowserView,
     /// Where the site controls' button is on the screen, which the window opens under.
@@ -1904,10 +1903,16 @@ fn hide_site_controls() {
 
 /// Opens an extension's popup in a small window of its own under the site controls' button, like
 /// Arc's, with a title bar to move or close it, in the displayed Space's profile, instead of the
-/// site controls. The window takes the size its page asks for, and closes when it loses the focus.
+/// site controls; or closes it, when it is the one open. The window takes the size its page asks
+/// for. Unlike Chrome's popups, it stays open while the user is elsewhere, like in another app
+/// for a sign-in code: its close button, Escape, the extension's button, or the extension close it.
 fn open_extension_popup(id: &str) {
     hide_site_controls();
+    let open = EXTENSION_POPUP.with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
     close_extension_popup();
+    if open.as_deref() == Some(id) {
+        return;
+    }
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
     let (Some(url), Some(main), Some(button)) = (
         extensions::popup_url(profile, id),
@@ -1922,7 +1927,12 @@ fn open_extension_popup(id: &str) {
         y: main.y + button.y,
         ..button
     };
-    window_create_top_level(Some(&mut PopupWindowDelegate::new(profile, url, button)));
+    window_create_top_level(Some(&mut PopupWindowDelegate::new(
+        profile,
+        id.to_string(),
+        url,
+        button,
+    )));
 }
 
 /// Shows the extension popup's window once its page has a size, under the button, with the focus.
@@ -1954,6 +1964,7 @@ pub fn close_extension_popup() {
 wrap_window_delegate! {
     struct PopupWindowDelegate {
         profile: ProfileId,
+        id: String,
         url: String,
         button: Rect,
     }
@@ -1973,19 +1984,12 @@ wrap_window_delegate! {
             let client = PopupClient::new(self.profile, self.url.clone());
             let view = browser_view(client, "about:blank", no_width, profile_context(self.profile).as_mut());
             window.add_child_view(Some(&mut View::from(&view)));
-            EXTENSION_POPUP.set(Some(ExtensionPopup { window, view, button: self.button.clone() }));
+            EXTENSION_POPUP.set(Some(ExtensionPopup { id: self.id.clone(), window, view, button: self.button.clone() }));
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
             EXTENSION_POPUP.set(None);
-            POPUP_CLOSED.set(Some(Instant::now()));
             extensions::popup_closed();
-        }
-
-        fn on_window_activation_changed(&self, window: Option<&mut Window>, active: i32) {
-            if active == 0 && let Some(window) = window {
-                window.close();
-            }
         }
 
         // Its title bar has the window buttons, like Arc's: close, and minimize.
@@ -2836,7 +2840,6 @@ pub fn run(command: Command) {
         (Command::WideLibrary(wide), _) => widen_library(wide),
         (Command::Open(url), _) => {
             show_overlay(false);
-            close_extension_popup();
             open_tab(&url);
         }
         (Command::Close(None), _) if settings_focused() => close_settings(),
@@ -3047,10 +3050,7 @@ pub fn run(command: Command) {
             let _ = update_sidebar(|sidebar| sidebar.pin_extension(profile, &id, pinned));
         }
         (Command::OpenPinnedExtension(id, button), _) => {
-            let closing = POPUP_CLOSED
-                .get()
-                .is_some_and(|at| at.elapsed() < Duration::from_millis(300));
-            if let Some(button) = button_in_window(button).filter(|_| !closing) {
+            if let Some(button) = button_in_window(button) {
                 SITE_BUTTON.set(Some(button));
                 open_extension_popup(&id);
             }

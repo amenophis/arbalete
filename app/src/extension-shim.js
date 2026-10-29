@@ -3,7 +3,7 @@
 // with the profile's active tab, which the app keeps up to date (__arbaleteSync), and creating or
 // updating a tab asks Arbalete (__arbalete, a DevTools binding) to do it in its own tabs. Injected
 // into an extension's popup too, with the active tab as it opens (__arbaleteInitial): the popup
-// closes when it loses the focus, on Escape, or when it closes itself.
+// closes on Escape, or when it closes itself.
 (() => {
   if (self.__arbaleteSync) return;
   const window_ = {
@@ -33,7 +33,6 @@
   if (typeof window !== "undefined") {
     const close = () => ask({ method: "close" });
     window.close = close;
-    window.addEventListener("blur", close);
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();
     });
