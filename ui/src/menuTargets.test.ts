@@ -91,3 +91,16 @@ test("sends the targets when they change, once a frame at most", async () => {
   await frame();
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+test("the pinned extensions' buttons open their menu, in the sidebar or the bar above the page", () => {
+  document.body.innerHTML = `
+    <div class="url">
+      <button class="pinned-extension" data-rect="200,10,26,26"></button>
+      <button class="pinned-extension" data-rect="228,10,26,26"></button>
+    </div>`;
+  const targets = menuTargets(document, new DOMRect(0, 0, 260, 800));
+  expect(targets.map(({ target, x }) => ({ target, x }))).toEqual([
+    { target: { pinned: 0 }, x: 200 },
+    { target: { pinned: 1 }, x: 228 },
+  ]);
+});

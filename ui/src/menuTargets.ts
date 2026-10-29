@@ -2,7 +2,7 @@ import { send } from "./bridge";
 
 // What a right-click on a part of the sidebar opens the menu of (Target in app/src/command.rs).
 export type HitTarget = {
-  target: { node: number } | { space: number };
+  target: { node: number } | { space: number } | { pinned: number };
   x: number;
   y: number;
   width: number;
@@ -12,14 +12,11 @@ export type HitTarget = {
 // The panels the footer opens above the rows.
 const COVERS = ".menu, .library-popover, .profiles, .space-editor";
 
-// The rows and the Space header of the displayed Space's page, as much of them as shows in
-// `viewport` and no floating panel covers. Real right-clicks reach no `contextmenu` listener on macOS: the app finds what is
+// The pinned extensions' buttons, then the rows and the Space header of the displayed Space's
+// page, as much of them as shows in `viewport` and no floating panel covers. Real right-clicks reach no `contextmenu` listener on macOS: the app finds what is
 // under the pointer among them and shows its menu at once, like a native view
 // (menu_at in app/src/shell.rs).
 export function menuTargets(root: ParentNode, viewport: DOMRect): HitTarget[] {
-  const page = root.querySelector<HTMLElement>(".space-page:not([inert])");
-  if (!page) return [];
-  const scroll = page.querySelector(".scroll")?.getBoundingClientRect() ?? viewport;
   // A right-click on a panel the footer opened is the panel's, not the rows' below it.
   const covers = [...root.querySelectorAll(COVERS)].map((cover) => cover.getBoundingClientRect());
   const targets: HitTarget[] = [];
@@ -38,6 +35,12 @@ export function menuTargets(root: ParentNode, viewport: DOMRect): HitTarget[] {
     if (covered) return;
     targets.push({ target, x: left, y: top, width: right - left, height: bottom - top });
   };
+  root.querySelectorAll(".pinned-extension").forEach((button, rank) => {
+    add({ pinned: rank }, button, viewport);
+  });
+  const page = root.querySelector<HTMLElement>(".space-page:not([inert])");
+  if (!page) return targets;
+  const scroll = page.querySelector(".scroll")?.getBoundingClientRect() ?? viewport;
   // The tile being dragged follows the pointer, out of reach.
   for (const tile of page.querySelectorAll<HTMLElement>(".favorites li[data-id]:not(.lifted)")) {
     add({ node: Number(tile.dataset.id) }, tile, viewport);
@@ -61,7 +64,7 @@ export function menuTargets(root: ParentNode, viewport: DOMRect): HitTarget[] {
 }
 
 // Sends the app the targets of the sidebar `view` whenever they change, once a frame at most.
-export function trackMenuTargets(root: HTMLElement, view: "docked" | "revealed") {
+export function trackMenuTargets(root: HTMLElement, view: "docked" | "revealed" | "toolbar") {
   let sent = "";
   let scheduled = false;
   const publish = () => {

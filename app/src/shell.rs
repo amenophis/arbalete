@@ -234,8 +234,9 @@ thread_local! {
     static CLOSING: Cell<bool> = const { Cell::new(false) };
     #[cfg(target_os = "macos")]
     static SWIPE: RefCell<crate::swipe::Tracker> = RefCell::default();
-    /// Where the docked sidebar's rows and Space header are, then the revealed one's.
-    static MENU_TARGETS: RefCell<[Vec<HitTarget>; 2]> = RefCell::default();
+    /// Where the docked sidebar's rows, Space header and pinned extensions are, then the revealed
+    /// one's, then the pinned extensions in the bar above the page.
+    static MENU_TARGETS: RefCell<[Vec<HitTarget>; 3]> = RefCell::default();
 }
 
 /// The sidebar sits beside the page, or is hidden: then a strip at the window's left edge
@@ -2493,9 +2494,32 @@ fn move_to_space(id: NodeId, space: SpaceId) {
 
 /// Shows the menu of a sidebar row at the pointer.
 fn show_menu(target: Target) {
+    if let Target::Pinned(rank) = target {
+        show_extension_menu(pinned_extensions(displayed_profile()).get(rank));
+        return;
+    }
     let Some(entries) = STATE.with_borrow(|state| menu::build(&state.sidebar, target)) else {
         return;
     };
+    #[cfg(target_os = "macos")]
+    crate::mac::pop_up(entries);
+    #[cfg(not(target_os = "macos"))]
+    let _ = entries;
+}
+
+/// Shows the menu of an extension of the displayed Space's profile, by its id.
+fn show_extension_menu(id: Option<&String>) {
+    let profile = displayed_profile();
+    let extension = id.and_then(|id| extensions::list(profile).into_iter().find(|e| &e.id == id));
+    let Some(extension) = extension else { return };
+    let pinned = pinned_extensions(profile).contains(&extension.id);
+    let entries = menu::extension_menu(
+        &extension.id,
+        &extension.name,
+        extension.options.is_some(),
+        extension.enabled,
+        pinned,
+    );
     #[cfg(target_os = "macos")]
     crate::mac::pop_up(entries);
     #[cfg(not(target_os = "macos"))]
@@ -2995,8 +3019,8 @@ pub fn run(command: Command) {
             }
         }
         (Command::Menu(target), _) => show_menu(target),
-        (Command::MenuTargets { revealed, targets }, _) => {
-            MENU_TARGETS.with_borrow_mut(|all| all[usize::from(revealed)] = targets);
+        (Command::MenuTargets { view, targets }, _) => {
+            MENU_TARGETS.with_borrow_mut(|all| all[view as usize] = targets);
         }
         (Command::ChooseMenu(target, item), _) => choose_menu(target, &item),
         // Like a selection, an unknown folder or a blank title from the UI is ignored.
@@ -3853,19 +3877,33 @@ pub fn menu_at(x: f64, y: f64) -> bool {
                 })?;
                 Some(target.id.clone())
             });
-            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-            let extension =
-                id.and_then(|id| extensions::list(profile).into_iter().find(|e| e.id == id));
-            if let Some(extension) = extension {
-                let pinned = pinned_extensions(profile).contains(&extension.id);
-                let menu = menu::extension_menu(
-                    &extension.id,
-                    &extension.name,
-                    extension.options.is_some(),
-                    extension.enabled,
-                    pinned,
-                );
-                crate::mac::pop_up(menu);
+            show_extension_menu(id.as_ref());
+            return true;
+        }
+    }
+    // The bar above the page, in toolbar mode, shows its pinned extensions' menus.
+    if let Some(toolbar) = TOOLBAR_VIEW
+        .with_borrow(Clone::clone)
+        .filter(|_| SETTINGS.get().show_toolbar)
+    {
+        // It lies in the card, an overlay of its own: its bounds are the card's.
+        let card = CARD.with_borrow(|card| card.as_ref().map(OverlayController::bounds));
+        let card = card.unwrap_or_default();
+        let bounds = toolbar.bounds();
+        let point = Point {
+            x: x as i32 - card.x - bounds.x,
+            y: y as i32 - card.y - bounds.y,
+        };
+        if (0..bounds.width).contains(&point.x) && (0..bounds.height).contains(&point.y) {
+            let targets = |all: &[Vec<HitTarget>; 3]| {
+                target_at(
+                    &all[ButtonView::Toolbar as usize],
+                    f64::from(point.x),
+                    f64::from(point.y),
+                )
+            };
+            if let Some(target) = MENU_TARGETS.with_borrow(targets) {
+                show_menu(target);
             }
             return true;
         }
@@ -3873,9 +3911,11 @@ pub fn menu_at(x: f64, y: f64) -> bool {
     let Some((view, x, y)) = sidebar_point(SIDEBAR_MODE.get(), &size, x, y) else {
         return false;
     };
-    let revealed = view == SidebarView::Revealed;
-    let target =
-        MENU_TARGETS.with_borrow(|targets| target_at(&targets[usize::from(revealed)], x, y));
+    let view = match view {
+        SidebarView::Docked => ButtonView::Docked,
+        SidebarView::Revealed => ButtonView::Revealed,
+    };
+    let target = MENU_TARGETS.with_borrow(|targets| target_at(&targets[view as usize], x, y));
     if let Some(target) = target {
         show_menu(target);
     }
