@@ -171,7 +171,8 @@ thread_local! {
     static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// Chromium's extensions page, in a window of its own.
     static EXTENSIONS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
-    /// The window Chromium asks in for an extension's optional permissions.
+    /// The window Chromium asks the user in, for an extension's optional permissions or its
+    /// removal (extensions::ChromeTask).
     static PERMISSION_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// The browsers Chromium opened by itself (StrayClient), until an install closes them.
     static STRAYS: RefCell<Vec<Browser>> = const { RefCell::new(Vec::new()) };
@@ -575,6 +576,11 @@ fn update_sidebar<R>(change: impl FnOnce(&mut Sidebar) -> R) -> R {
 }
 
 fn send_state() {
+    // The site controls' panel shows the extensions as they are, while it is open too.
+    let open = SITE.with_borrow(|site| site.as_ref().is_some_and(|site| site.is_visible() == 1));
+    if let Some(url) = selected_url().filter(|_| open) {
+        send_site_controls(&url);
+    }
     let json = STATE.with_borrow(UiState::to_json);
     let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
     dispatch(&SIDEBAR, &event);
@@ -1560,6 +1566,67 @@ fn show_settings() {
     }
 }
 
+/// Runs `expression` in a page, `url`, of a profile, loaded hidden above the page for it, then
+/// closes the page a moment later: an extension removing itself never answers.
+pub fn run_in_hidden_page(profile: ProfileId, url: &str, expression: &str) {
+    let Some(window) = WINDOW.with_borrow(Clone::clone) else {
+        return;
+    };
+    let client = HiddenPageClient::new(expression.to_string());
+    let view = browser_view(client, url, no_width, profile_context(profile).as_mut());
+    let controller = window
+        .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 0)
+        .expect("hidden page");
+    controller.set_visible(0);
+    post_delayed_task(
+        ThreadId::UI,
+        Some(&mut DestroyOverlay::new(controller)),
+        3000,
+    );
+}
+
+wrap_task! {
+    struct DestroyOverlay {
+        controller: OverlayController,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            self.controller.destroy();
+        }
+    }
+}
+
+wrap_client! {
+    struct HiddenPageClient {
+        expression: String,
+    }
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(BrowserLifeSpan::new(None))
+        }
+
+        fn load_handler(&self) -> Option<LoadHandler> {
+            Some(HiddenPageLoadHandler::new(self.expression.clone()))
+        }
+    }
+}
+
+wrap_load_handler! {
+    struct HiddenPageLoadHandler {
+        expression: String,
+    }
+
+    impl LoadHandler {
+        fn on_load_end(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _http_status_code: i32) {
+            if let Some(frame) = frame.filter(|frame| frame.is_main() == 1) {
+                frame.execute_java_script(Some(&CefString::from(self.expression.as_str())), None, 0);
+            }
+        }
+    }
+}
+
 /// The displayed Space's profile.
 pub fn displayed_profile() -> ProfileId {
     STATE.with_borrow(|state| state.sidebar.displayed().profile)
@@ -1571,18 +1638,24 @@ const PERMISSION_SIZE: Size = Size {
     height: 280,
 };
 
-/// Opens a small Chrome-style window on a page of an extension, `url`, in a profile, for
-/// Chromium to ask the user there for the optional permissions it requests: Chromium prompts
-/// only from a Chrome-style page (extensions::request_permissions).
-pub fn open_permission_window(profile: ProfileId, url: &str) {
+/// Opens a small Chrome-style window, `title`, on a page of an extension, `url`, in a profile, for
+/// Chromium to ask the user there: it prompts only from a Chrome-style page
+/// (extensions::ChromeTask).
+pub fn open_chrome_task_window(profile: ProfileId, url: &str, title: &str) {
     window_create_top_level(Some(&mut PermissionWindowDelegate::new(
         profile,
         url.to_string(),
+        title.to_string(),
     )));
 }
 
-/// Closes the permission window, later, out of the callback that learns the answer.
-pub fn close_permission_window() {
+/// An extension was removed: it is unpinned, and the UI shows the extensions left.
+pub fn extension_removed(profile: ProfileId, id: &str) {
+    let _ = update_sidebar(|sidebar| sidebar.pin_extension(profile, id, false));
+}
+
+/// Closes the window Chromium asked in, later, out of the callback that learns the answer.
+pub fn close_chrome_task_window() {
     post_task(ThreadId::UI, Some(&mut ClosePermissionWindow::new()));
 }
 
@@ -1602,6 +1675,7 @@ wrap_window_delegate! {
     struct PermissionWindowDelegate {
         profile: ProfileId,
         url: String,
+        title: String,
     }
 
     impl ViewDelegate {
@@ -1615,7 +1689,7 @@ wrap_window_delegate! {
     impl WindowDelegate {
         fn on_window_created(&self, window: Option<&mut Window>) {
             let window = window.expect("window").clone();
-            window.set_title(Some(&CefString::from("Extension Permissions")));
+            window.set_title(Some(&CefString::from(self.title.as_str())));
             window.set_to_fill_layout();
             let view = browser_view_create(
                 Some(&mut PermissionClient::new()),
@@ -1634,10 +1708,11 @@ wrap_window_delegate! {
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
             PERMISSION_WINDOW.set(None);
-            extensions::permission_window_closed();
+            extensions::chrome_task_window_closed();
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 0 }
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
@@ -1669,7 +1744,7 @@ wrap_load_handler! {
     impl LoadHandler {
         fn on_load_end(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, _http_status_code: i32) {
             if let (Some(browser), true) = (browser, frame.is_some_and(|frame| frame.is_main() == 1)) {
-                extensions::permission_page_loaded(browser);
+                extensions::chrome_task_page_loaded(browser);
             }
         }
     }
@@ -1914,23 +1989,8 @@ fn show_site_controls(button: Button) {
         return;
     };
     SITE_BUTTON.set(Some(button));
-    let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-    extensions::reload(profile);
-    let pinned = pinned_extensions(profile);
-    let extensions: Vec<_> = extensions::list(profile)
-        .iter()
-        .map(|extension| {
-            let mut json = extension_json(profile, extension);
-            json["enabled"] = extension.enabled.into();
-            json["pinned"] = pinned.contains(&extension.id).into();
-            json
-        })
-        .collect();
-    let detail = json!({ "url": url, "extensions": extensions });
-    dispatch(
-        &SITE_VIEW,
-        &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
-    );
+    extensions::reload(displayed_profile());
+    send_site_controls(&url);
     place_site_controls();
     let Some(controller) = SITE.with_borrow(Clone::clone) else {
         return;
@@ -1986,6 +2046,27 @@ fn pinned_extensions(profile: ProfileId) -> Vec<String> {
             .map(|p| p.pinned_extensions.clone())
             .unwrap_or_default()
     })
+}
+
+/// Sends the site controls' panel the selected tab's address, `url`, and the displayed Space's
+/// profile's extensions.
+fn send_site_controls(url: &str) {
+    let profile = displayed_profile();
+    let pinned = pinned_extensions(profile);
+    let extensions: Vec<_> = extensions::list(profile)
+        .iter()
+        .map(|extension| {
+            let mut json = extension_json(profile, extension);
+            json["enabled"] = extension.enabled.into();
+            json["pinned"] = pinned.contains(&extension.id).into();
+            json
+        })
+        .collect();
+    let detail = json!({ "url": url, "extensions": extensions });
+    dispatch(
+        &SITE_VIEW,
+        &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
+    );
 }
 
 /// The selected tab's address.
@@ -2515,7 +2596,6 @@ fn show_extension_menu(id: Option<&String>) {
     let pinned = pinned_extensions(profile).contains(&extension.id);
     let entries = menu::extension_menu(
         &extension.id,
-        &extension.name,
         extension.options.is_some(),
         extension.enabled,
         pinned,
@@ -3162,18 +3242,21 @@ pub fn run(command: Command) {
         (Command::ReloadExtensions, _) => {
             extensions::reload(STATE.with_borrow(|state| state.sidebar.displayed().profile));
         }
-        (Command::ConfirmRemoveExtension(id), _) => {
-            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-            let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
-            if let Some(extension) = extension {
-                perform(menu::remove_extension(&extension.id, &extension.name));
-            }
-        }
         (Command::SiteTargets(targets), _) => SITE_TARGETS.set(targets),
         (Command::RemoveExtension(id), _) => {
-            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-            extensions::uninstall(profile, &id);
-            let _ = update_sidebar(|sidebar| sidebar.pin_extension(profile, &id, false));
+            let profile = displayed_profile();
+            let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
+            let Some(extension) = extension else { return };
+            // Chromium confirms it otherwise.
+            #[cfg(target_os = "macos")]
+            if extensions::removes_itself(profile, &id) {
+                let question = format!("Remove “{}”?", extension.name);
+                let detail = "Its data in this profile is deleted too.";
+                if !crate::mac::confirm(&question, detail, "Remove") {
+                    return;
+                }
+            }
+            extensions::uninstall(profile, &extension.id);
         }
         (Command::ExtensionOptions(id), _) => {
             let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
@@ -3607,6 +3690,7 @@ wrap_window_delegate! {
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }

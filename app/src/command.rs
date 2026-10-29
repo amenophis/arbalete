@@ -126,8 +126,6 @@ pub enum Command {
     ManageExtensions,
     /// Reads the displayed Space's profile's extensions again: `extension/reload`.
     ReloadExtensions,
-    /// Asks before removing an extension, from the library: `extension/remove/<id>`.
-    ConfirmRemoveExtension(String),
     /// Where the site controls' panel shows its extensions, where a right-click opens their menu:
     /// `site/targets/<percent-encoded JSON array>`, like
     /// `[{"id":"abc","x":12,"y":80,"width":64,"height":40}]`.
@@ -485,7 +483,7 @@ impl Command {
                         "pin" => Some(Self::PinExtension(id, true)),
                         "unpin" => Some(Self::PinExtension(id, false)),
                         "options" => Some(Self::ExtensionOptions(id)),
-                        "remove" => Some(Self::ConfirmRemoveExtension(id)),
+                        "remove" => Some(Self::RemoveExtension(id)),
                         _ => None,
                     };
                 }
@@ -872,7 +870,7 @@ mod tests {
         );
         assert_eq!(
             Command::parse("extension/remove/abc"),
-            Some(Command::ConfirmRemoveExtension("abc".into()))
+            Some(Command::RemoveExtension("abc".into()))
         );
         assert_eq!(Command::parse("extension/fly/abc"), None);
         assert_eq!(
