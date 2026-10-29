@@ -245,4 +245,7 @@ test("runs the app's actions it names, like Arc's", () => {
   expect(commands().slice(-2)).toEqual(["/command/overlay/hide", "/command/folder/new"]);
   fireEvent.change(field(), { target: { value: "settings" } });
   expect(rows()).toContain("SettingsAction");
+  // One letter matches too many.
+  fireEvent.change(field(), { target: { value: "a" } });
+  expect(rows()).toEqual(["a — Search Google"]);
 });
