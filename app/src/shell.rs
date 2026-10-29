@@ -434,6 +434,7 @@ impl UiState {
                     .is_some_and(|pinned| pinned.contains(&extension.id))
                     .into();
                 json["options"] = extension.options.is_some().into();
+                json["optionsInTab"] = extension.options_in_tab.into();
                 json["description"] = extension.description.clone().into();
                 json["version"] = extension.version.clone().into();
                 let details = &extension.details;
@@ -1950,8 +1951,9 @@ struct ExtensionPopup {
     id: String,
     window: Window,
     view: BrowserView,
-    /// Where the site controls' button is on the screen, which the window opens under.
-    button: Rect,
+    /// Where the site controls' button is on the screen, which the window opens under; without
+    /// one, as for an options page, it opens over the main window's middle.
+    button: Option<Rect>,
 }
 
 /// The gap between the site controls' button and the panel under it.
@@ -2126,12 +2128,35 @@ fn open_extension_popup(id: &str) {
         y: main.y + button.y,
         ..button
     };
+    open_extension_window(profile, id.to_string(), url, Some(button));
+}
+
+/// Opens an extension's page in a small window of its own, like its popup's (PopupClient): under
+/// `button`, or without one over the main window's middle.
+fn open_extension_window(profile: ProfileId, id: String, url: String, button: Option<Rect>) {
     window_create_top_level(Some(&mut PopupWindowDelegate::new(
-        profile,
-        id.to_string(),
-        url,
-        button,
+        profile, id, url, button,
     )));
+}
+
+/// Opens an extension's options page: in a tab when it asks for one, like Chrome; otherwise, as
+/// Chrome shows it in a dialog, in a window like its popup's, over the main window's middle.
+fn open_extension_options(id: &str) {
+    let profile = displayed_profile();
+    let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
+    let (Some(extension), Some(url)) = (extension, extensions::options_url(profile, id)) else {
+        return;
+    };
+    if extension.options_in_tab {
+        open_tab(&url);
+        return;
+    }
+    let key = format!("{id}/options");
+    let open = EXTENSION_POPUP.with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
+    close_extension_popup();
+    if open != Some(key.clone()) {
+        open_extension_window(profile, key, url, None);
+    }
 }
 
 /// Shows the extension popup's window once its page has a size, under the button, with the focus.
@@ -2140,12 +2165,27 @@ fn show_extension_popup(size: &Size) {
         let Some(popup) = popup else { return };
         // The window's bounds hold its title bar too.
         let bar = popup.window.bounds().height - popup.view.bounds().height;
-        let button = &popup.button;
+        let (width, height) = (size.width, size.height + bar);
+        let (x, y) = match &popup.button {
+            Some(button) => (
+                button.x + button.width / 2 - width / 2,
+                button.y + button.height + PANEL_GAP,
+            ),
+            None => {
+                let main = WINDOW
+                    .with_borrow(|w| w.as_ref().map(|w| w.bounds()))
+                    .unwrap_or_default();
+                (
+                    main.x + (main.width - width) / 2,
+                    main.y + (main.height - height) / 3,
+                )
+            }
+        };
         popup.window.set_bounds(Some(&Rect {
-            x: button.x + button.width / 2 - size.width / 2,
-            y: button.y + button.height + PANEL_GAP,
-            width: size.width,
-            height: size.height + bar,
+            x,
+            y,
+            width,
+            height,
         }));
         popup.window.show();
         popup.view.request_focus();
@@ -2165,7 +2205,7 @@ wrap_window_delegate! {
         profile: ProfileId,
         id: String,
         url: String,
-        button: Rect,
+        button: Option<Rect>,
     }
 
     impl ViewDelegate {
@@ -3258,12 +3298,7 @@ pub fn run(command: Command) {
             }
             extensions::uninstall(profile, &extension.id);
         }
-        (Command::ExtensionOptions(id), _) => {
-            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-            if let Some(url) = extensions::options_url(profile, &id) {
-                open_tab(&url);
-            }
-        }
+        (Command::ExtensionOptions(id), _) => open_extension_options(&id),
         (Command::SetExtensionEnabled(id, enabled), _) => {
             let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
             extensions::set_enabled(profile, &id, enabled);

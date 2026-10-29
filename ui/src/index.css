@@ -1980,6 +1980,10 @@ button.folder:hover {
   padding-top: 40px;
 }
 
+.library-panel[data-section="extensions"] {
+  padding-top: 14px;
+}
+
 .library-search {
   flex: none;
   box-sizing: border-box;
@@ -2498,6 +2502,8 @@ button.folder:hover {
   flex: none;
   flex-direction: column;
   width: 260px;
+  /* Room for the search field's focus ring, which the section would clip. */
+  padding: 2px;
   overflow-y: auto;
 }
 
