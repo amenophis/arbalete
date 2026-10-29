@@ -143,11 +143,13 @@ thread_local! {
     /// macOS only rounds the corners of a window of its own. Without a selected tab, its own
     /// color paints an empty Space's panel.
     static CARD: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
-    /// The content view of each profile, `None` until its browser is created. Tabs of the same
-    /// profile share one view: switching between them only navigates.
-    static CONTENTS: RefCell<HashMap<ProfileId, Option<BrowserView>>> = RefCell::default();
-    /// The profile whose content view the window shows.
-    static SHOWN_PROFILE: Cell<Option<ProfileId>> = const { Cell::new(None) };
+    /// Each profile's web data, `None` while CEF initializes it (create_profile_context).
+    static CONTEXTS: RefCell<HashMap<ProfileId, Option<RequestContext>>> = RefCell::default();
+    /// The live page of each tab shown since it opened, hidden while another tab is shown:
+    /// switching back to it does not load it again.
+    static PAGES: RefCell<HashMap<NodeId, Live>> = RefCell::default();
+    /// The tab whose page the window shows.
+    static SHOWN: Cell<Option<NodeId>> = const { Cell::new(None) };
     /// Shown above the page, to open tabs.
     static OVERLAY_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static OVERLAY: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
@@ -549,7 +551,7 @@ fn favicon_url(profile: ProfileId, tab: &Tab) -> Option<String> {
     ))
 }
 
-/// The loading state of the content view; its title and url belong to the active tab.
+/// The loading state of the shown page; its title and url belong to the active tab.
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Page {
@@ -579,6 +581,7 @@ fn update_sidebar<R>(change: impl FnOnce(&mut Sidebar) -> R) -> R {
 }
 
 fn send_state() {
+    prune_pages();
     // The site controls' panel shows the extensions as they are, while it is open too.
     let open = SITE.with_borrow(|site| site.as_ref().is_some_and(|site| site.is_visible() == 1));
     if let Some(url) = selected_url().filter(|_| open) {
@@ -596,7 +599,10 @@ fn send_state() {
         let NodeKind::Tab(tab) = &sidebar.node(space.selected?)?.kind else {
             return None;
         };
+        let page = PAGES
+            .with_borrow(|pages| Some(pages.get(&space.selected?)?.view.browser()?.identifier()));
         let tab = extensions::ActiveTab {
+            page,
             url: tab.url.clone(),
             title: tab.label().to_string(),
             favicon: tab.favicon.clone(),
@@ -999,8 +1005,15 @@ wrap_urlrequest_client! {
 fn navigate(url: &str) {
     show_overlay(false);
     let selected = STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_some());
-    if selected {
+    if content().is_some() {
         load(url);
+    } else if selected {
+        // Its page is not created yet: it opens there.
+        update_sidebar(|sidebar| {
+            if let Some(tab) = active_tab(sidebar) {
+                tab.url = url.to_string();
+            }
+        });
     } else {
         open_tab(url);
     }
@@ -1321,7 +1334,7 @@ fn relayout_library() {
 #[cfg(target_os = "macos")]
 fn card_window() -> Option<*mut std::ffi::c_void> {
     let view = content()
-        .or_else(|| CONTENTS.with_borrow(|contents| contents.values().flatten().next().cloned()))?;
+        .or_else(|| PAGES.with_borrow(|pages| Some(pages.values().next()?.view.clone())))?;
     Some(view.browser()?.host()?.window_handle())
 }
 
@@ -1754,6 +1767,11 @@ fn restore_archived(rank: usize) {
 }
 
 /// The displayed Space's profile.
+/// The sidebar's browser, which outlives every page: the extensions' DevTools session runs in it.
+pub fn sidebar_host() -> Option<BrowserHost> {
+    SIDEBAR.with_borrow(|sidebar| sidebar.as_ref()?.browser()?.host())
+}
+
 pub fn displayed_profile() -> ProfileId {
     STATE.with_borrow(|state| state.sidebar.displayed().profile)
 }
@@ -2612,11 +2630,13 @@ fn close_keeping(tab: Option<NodeId>, keep_pinned: bool) {
     let Some(tab) = tab else { return };
     let stays = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
-        // The content view shows a pinned tab only while it is its Space's selected one.
+        // A pinned tab is open only while it is its Space's selected one.
         let open = sidebar.spaces().iter().any(|s| s.selected == Some(tab));
         sidebar.is_favorite(tab) || (sidebar.is_pinned(tab) && (open || keep_pinned))
     });
     let next = if stays {
+        // It opens again at its saved url.
+        close_page(tab);
         update_sidebar(|sidebar| {
             let space = sidebar.displayed().id;
             sidebar
@@ -2960,26 +2980,47 @@ fn reopen_tab(rank: usize) {
     });
 }
 
-/// Loads a url in the shown content view.
+/// A tab's live page, in its profile's web data.
+struct Live {
+    profile: ProfileId,
+    view: BrowserView,
+}
+
+/// Loads a url in the shown page.
 fn load(url: &str) {
     if let Some(frame) = content().and_then(|view| view.browser()?.main_frame()) {
         frame.load_url(Some(&CefString::from(url)));
     }
 }
 
-/// The content view the window shows.
+/// The page the window shows.
 fn content() -> Option<BrowserView> {
-    let profile = SHOWN_PROFILE.get()?;
-    CONTENTS.with_borrow(|contents| contents.get(&profile)?.clone())
+    let tab = SHOWN.get()?;
+    PAGES.with_borrow(|pages| Some(pages.get(&tab)?.view.clone()))
 }
 
-/// Whether a browser is the shown content view's: the other views' pages are blank.
+/// Whether a browser is the shown page's.
 fn is_shown(browser: Option<&mut Browser>) -> bool {
     let (Some(browser), Some(mut shown)) = (browser, content().and_then(|view| view.browser()))
     else {
         return false;
     };
     browser.is_same(Some(&mut shown)) == 1
+}
+
+/// The tab whose page a browser is, if it is one's.
+fn page_tab(browser: &Browser) -> Option<NodeId> {
+    let id = browser.identifier();
+    PAGES.with_borrow(|pages| {
+        pages
+            .iter()
+            .find(|(_, live)| {
+                live.view
+                    .browser()
+                    .is_some_and(|page| page.identifier() == id)
+            })
+            .map(|(tab, _)| *tab)
+    })
 }
 
 /// The selected tab's profile and url.
@@ -2991,8 +3032,8 @@ fn selected() -> Option<(ProfileId, String)> {
     })
 }
 
-/// Shows the selected tab in its profile's content view, which is created the first time, or
-/// leaves the card empty when the displayed Space has none.
+/// Shows the selected tab's page, which opens the first time, once its profile's web data is
+/// ready; or leaves the card empty when the displayed Space has no selected tab.
 fn show_selected() {
     let tab = STATE.with_borrow(|state| state.sidebar.displayed().selected);
     if let Some(tab) = tab {
@@ -3005,52 +3046,77 @@ fn show_selected() {
             state.sidebar.touch(shown, now);
         }
     });
-    let Some((profile, url)) = selected() else {
+    prune_pages();
+    let (Some(tab), Some((profile, url))) = (tab, selected()) else {
         hide_content();
         return;
     };
-    match CONTENTS.with_borrow(|contents| contents.get(&profile).cloned()) {
-        Some(Some(view)) => {
-            show_content(profile, &view);
-            load(&url);
-            mute_selected();
+    if let Some(view) = PAGES.with_borrow(|pages| Some(pages.get(&tab)?.view.clone())) {
+        return show_content(tab, &view);
+    }
+    match CONTEXTS.with_borrow(|contexts| contexts.get(&profile).cloned()) {
+        Some(Some(mut context)) => {
+            let start = if url.is_empty() { "about:blank" } else { &url };
+            let view = browser_view(
+                ContentClient::new(profile, false),
+                start,
+                no_width,
+                Some(&mut context),
+            );
+            view.set_visible(0);
+            if let Some(card) = card_panel() {
+                card.add_child_view(Some(&mut View::from(&view)));
+            }
+            PAGES.with_borrow_mut(|pages| {
+                pages.insert(
+                    tab,
+                    Live {
+                        profile,
+                        view: view.clone(),
+                    },
+                )
+            });
+            show_content(tab, &view);
         }
-        // The view shows the selected tab once its browser is created.
+        // The tab shows once its profile's web data is ready.
         Some(None) => {}
         None => create_profile_context(profile),
     }
 }
 
-/// Mutes the shown page as its tab says, or gives it its sound back: one content view shows every
-/// tab of a profile, in turn.
-fn mute_selected() {
+/// Mutes a tab's page as the tab says, or gives it its sound back.
+fn mute_page(tab: NodeId) {
     let muted =
-        STATE.with_borrow_mut(|state| active_tab(&mut state.sidebar).is_some_and(|tab| tab.muted));
-    if let Some(host) = content().and_then(|view| view.browser()?.host()) {
+        STATE.with_borrow_mut(|state| state.sidebar.tab_mut(tab).is_some_and(|tab| tab.muted));
+    let host = PAGES.with_borrow(|pages| pages.get(&tab)?.view.browser()?.host());
+    if let Some(host) = host {
         host.set_audio_muted(muted.into());
     }
 }
 
-/// Makes a profile's content view usable once its browser exists, and shows the selected tab in it
-/// if the tab belongs to the profile.
+/// Makes a page usable once its browser exists: the extensions learn it, and it takes its tab's
+/// sound and, when shown, the card's corners.
 fn content_created(profile: ProfileId, browser: Option<&mut Browser>) {
-    if let Some(browser) = browser.as_deref() {
-        extensions::content_created(profile, browser, &profile_dir(profile));
-    }
-    let view = browser_view_get_for_browser(browser);
-    CONTENTS.with_borrow_mut(|contents| contents.insert(profile, view));
-    if selected().is_some_and(|(selected, _)| selected == profile) {
-        show_selected();
+    let Some(browser) = browser else { return };
+    extensions::page_created(profile, browser);
+    let Some(tab) = page_tab(browser) else { return };
+    mute_page(tab);
+    if SHOWN.get() == Some(tab) {
+        #[cfg(target_os = "macos")]
+        if let Some(host) = browser.host() {
+            crate::mac::round_card(host.window_handle());
+        }
+        send_page_state();
     }
 }
 
-/// Puts a profile's content view in the window instead of the shown one, if any.
-fn show_content(profile: ProfileId, view: &BrowserView) {
-    if SHOWN_PROFILE.get() == Some(profile) {
+/// Puts a tab's page in the window instead of the shown one, if any.
+fn show_content(tab: NodeId, view: &BrowserView) {
+    if SHOWN.get() == Some(tab) {
         return;
     }
     hide_content();
-    SHOWN_PROFILE.set(Some(profile));
+    SHOWN.set(Some(tab));
     view.set_visible(1);
     if let Some(panel) = card_panel() {
         panel.layout();
@@ -3060,16 +3126,81 @@ fn show_content(profile: ProfileId, view: &BrowserView) {
     if let Some(host) = view.browser().and_then(|browser| browser.host()) {
         crate::mac::round_card(host.window_handle());
     }
+    send_page_state();
 }
 
-/// Hides the shown content view, left on a blank page: only the selected tab runs. Without one,
-/// the card shows its own color, an empty Space's panel.
+/// Tells the UI how the shown page stands: its progress and history are its own.
+fn send_page_state() {
+    let browser = content().and_then(|view| view.browser());
+    let loading = browser
+        .as_ref()
+        .is_none_or(|browser| browser.is_loading() == 1);
+    update_page(|page| {
+        page.loading = loading;
+        page.progress = if loading { 0.0 } else { 1.0 };
+        page.can_go_back = browser
+            .as_ref()
+            .is_some_and(|browser| browser.can_go_back() == 1);
+        page.can_go_forward = browser
+            .as_ref()
+            .is_some_and(|browser| browser.can_go_forward() == 1);
+    });
+}
+
+/// Hides the shown page, which keeps running. Without one, the card shows its own color, an empty
+/// Space's panel.
 fn hide_content() {
     if let Some(shown) = content() {
-        load("about:blank");
         shown.set_visible(0);
     }
-    SHOWN_PROFILE.set(None);
+    SHOWN.set(None);
+}
+
+/// Closes the pages of the tabs closed, archived or moved to another profile's Space, whose web
+/// data a page cannot change.
+fn prune_pages() {
+    let gone: Vec<NodeId> = STATE.with_borrow(|state| {
+        PAGES.with_borrow(|pages| {
+            pages
+                .iter()
+                .filter(|(tab, live)| state.sidebar.profile_of(**tab) != Some(live.profile))
+                .map(|(tab, _)| *tab)
+                .collect()
+        })
+    });
+    for tab in gone {
+        close_page(tab);
+    }
+}
+
+/// Closes a tab's page, if it has one: the tab opens again at its url. Its view then leaves the
+/// card (PageLifeSpan's do_close).
+fn close_page(tab: NodeId) {
+    let Some(live) = PAGES.with_borrow_mut(|pages| pages.remove(&tab)) else {
+        return;
+    };
+    if SHOWN.get() == Some(tab) {
+        SHOWN.set(None);
+    }
+    live.view.set_visible(0);
+    if let Some(host) = live.view.browser().and_then(|browser| browser.host()) {
+        host.close_browser(1);
+    }
+}
+
+wrap_task! {
+    struct RemovePage {
+        view: BrowserView,
+    }
+
+    impl Task {
+        /// Takes a closing page's view out of the card, which destroys its browser.
+        fn execute(&self) {
+            if let Some(card) = card_panel() {
+                card.remove_child_view(Some(&mut View::from(&self.view)));
+            }
+        }
+    }
 }
 
 /// Paints the window around the sidebar and the card, and the card behind its content views. The
@@ -3091,7 +3222,7 @@ fn set_window_colors(window_color: u32, card_color: u32) {
 /// directories directly in the root cache path. CEF needs it initialized before a browser can
 /// use it (ProfileContextHandler).
 fn create_profile_context(profile: ProfileId) {
-    CONTENTS.with_borrow_mut(|contents| contents.insert(profile, None));
+    CONTEXTS.with_borrow_mut(|contexts| contexts.insert(profile, None));
     let dir = profile_dir(profile);
     let settings = RequestContextSettings {
         cache_path: CefString::from(dir.to_str().expect("a UTF-8 path")),
@@ -3187,13 +3318,13 @@ wrap_request_context_handler! {
     }
 
     impl RequestContextHandler {
-        /// Adds the profile's content view to the window, hidden. Its browser is created after it
-        /// (content_created).
+        /// Keeps the profile's web data for its pages, reads its extensions, and shows the
+        /// selected tab if it waited for them.
         fn on_request_context_initialized(&self, context: Option<&mut RequestContext>) {
-            let Some(card) = card_panel() else { return };
-            let view = browser_view(ContentClient::new(self.profile, false), "about:blank", no_width, context);
-            view.set_visible(0);
-            card.add_child_view(Some(&mut View::from(&view)));
+            let Some(context) = context else { return };
+            CONTEXTS.with_borrow_mut(|contexts| contexts.insert(self.profile, Some(context.clone())));
+            extensions::profile_ready(self.profile, &profile_dir(self.profile));
+            show_selected();
         }
     }
 }
@@ -3309,7 +3440,7 @@ pub fn run(command: Command) {
         }
         (Command::ToggleMute(tab), _) => {
             if update_sidebar(|sidebar| sidebar.toggle_mute(tab)).is_ok() {
-                mute_selected();
+                mute_page(tab);
             }
         }
         (Command::Move(id, parent, index), _) => {
@@ -3650,7 +3781,7 @@ wrap_window_delegate! {
             layout.set_flex_for_view(Some(&mut view), 0);
             SIDEBAR.set(Some(sidebar));
             // The card holds the bar above the page, at the top while it is shown, then the
-            // profiles' content views, which share the rest.
+            // tabs' pages, one shown at a time in the rest.
             let card = panel_create(None).expect("card");
             // Every view shares the card's height, but the bar, which keeps its own.
             let layout = card
@@ -3719,7 +3850,7 @@ wrap_window_delegate! {
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
                 .collect();
-            views.extend(CONTENTS.with_borrow(|contents| contents.values().flatten().cloned().collect::<Vec<_>>()));
+            views.extend(PAGES.with_borrow(|pages| pages.values().map(|live| live.view.clone()).collect::<Vec<_>>()));
             let mut closed = 1;
             for view in views {
                 if let Some(host) = view.browser().and_then(|browser| browser.host()) {
@@ -4193,7 +4324,7 @@ wrap_drag_handler! {
 wrap_client! {
     struct ContentClient {
         profile: ProfileId,
-        // A Little Arbalete window's page, rather than the profile's content view.
+        // A Little Arbalete window's page, rather than a tab's.
         little: bool,
     }
 
@@ -4396,19 +4527,16 @@ wrap_display_handler! {
 
     impl DisplayHandler {
         fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
-            let mut browser = browser;
             if frame.is_none_or(|frame| frame.is_main() == 0) {
                 return;
             }
             let url = url.map(CefString::to_string).unwrap_or_default();
-            if !is_shown(browser.as_deref_mut()) {
-                if let Some(browser) = browser {
-                    little_changed(browser, |little| little.url = url);
-                }
-                return;
-            }
+            let Some(browser) = browser else { return };
+            let Some(tab) = page_tab(browser) else {
+                return little_changed(browser, |little| little.url = url);
+            };
             update_sidebar(|sidebar| {
-                if let Some(tab) = active_tab(sidebar) {
+                if let Some(tab) = sidebar.tab_mut(tab) {
                     // Another site's page has its own icon, or none: the previous page's goes
                     // until it is known (on_favicon_urlchange).
                     if site(&tab.url) != site(&url) {
@@ -4420,33 +4548,28 @@ wrap_display_handler! {
         }
 
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
-            let mut browser = browser;
             let title = title.map(CefString::to_string).unwrap_or_default();
             if let Some(frame) = browser.as_ref().and_then(|browser| browser.main_frame()) {
                 let url = CefString::from(&frame.url()).to_string();
                 update_history(self.profile, |history| history.set_title(&url, &title));
             }
-            if !is_shown(browser.as_deref_mut()) {
-                if let Some(browser) = browser {
-                    little_changed(browser, |little| little.title = title);
-                }
-                return;
-            }
+            let Some(browser) = browser else { return };
+            let Some(tab) = page_tab(browser) else {
+                return little_changed(browser, |little| little.title = title);
+            };
             update_sidebar(|sidebar| {
-                if let Some(tab) = active_tab(sidebar) {
+                if let Some(tab) = sidebar.tab_mut(tab) {
                     tab.title = title;
                 }
             });
         }
 
         fn on_favicon_urlchange(&self, browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
-            let host = browser.as_ref().and_then(|browser| browser.host());
-            if !is_shown(browser) {
-                return;
-            }
+            let Some(browser) = browser else { return };
+            let Some(tab) = page_tab(browser) else { return };
             // Not cloned: a clone of the list CEF lends lists no string.
             let source = icon_urls.and_then(|urls| std::mem::take(urls).into_iter().next());
-            change_favicon(self.profile, source, host);
+            change_favicon(self.profile, tab, source, browser.host());
         }
 
         fn on_loading_progress_change(&self, browser: Option<&mut Browser>, progress: f64) {
@@ -4464,15 +4587,19 @@ fn site(url: &str) -> &str {
         .unwrap_or(url)
 }
 
-/// Shows the selected tab's new icon once it is cached, downloading it first through its page's
-/// browser: with the page's cookies and network settings, and no service of a third party.
-fn change_favicon(profile: ProfileId, source: Option<String>, host: Option<BrowserHost>) {
-    let Some((tab, url, shown)) = STATE.with_borrow(|state| {
-        let id = state.sidebar.displayed().selected?;
-        let NodeKind::Tab(tab) = &state.sidebar.node(id)?.kind else {
+/// Shows a tab's new icon once it is cached, downloading it first through its page's browser:
+/// with the page's cookies and network settings, and no service of a third party.
+fn change_favicon(
+    profile: ProfileId,
+    tab: NodeId,
+    source: Option<String>,
+    host: Option<BrowserHost>,
+) {
+    let Some((url, shown)) = STATE.with_borrow(|state| {
+        let NodeKind::Tab(tab) = &state.sidebar.node(tab)?.kind else {
             return None;
         };
-        Some((id, tab.url.clone(), tab.favicon.clone()))
+        Some((tab.url.clone(), tab.favicon.clone()))
     }) else {
         return;
     };
@@ -4690,7 +4817,23 @@ wrap_life_span_handler! {
             }
         }
 
-        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+        /// A page closing with its tab leaves the card, which CEF would otherwise close with it;
+        /// the window closing takes its pages with it.
+        fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
+            if self.profile.is_none() || CLOSING.get() {
+                return 0;
+            }
+            let Some(view) = browser_view_get_for_browser(browser) else {
+                return 0;
+            };
+            post_task(ThreadId::UI, Some(&mut RemovePage::new(view)));
+            1
+        }
+
+        fn on_before_close(&self, browser: Option<&mut Browser>) {
+            if let (Some(browser), Some(_)) = (browser, self.profile) {
+                extensions::page_closed(browser.identifier());
+            }
             browser_closed();
         }
     }

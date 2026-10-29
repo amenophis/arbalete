@@ -114,7 +114,8 @@ body {
   flex: 1;
   min-height: 0;
   margin: 0 -3px 0 -7px;
-  overflow: hidden;
+  /* Not hidden: a field focused in another Space's page would scroll the pages sideways. */
+  overflow: clip;
 }
 
 /* Moved by the compositor alone. */

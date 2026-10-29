@@ -109,6 +109,31 @@ export async function connect(url) {
   };
 }
 
+// Connects to the page the window shows: each tab has its own, hidden while another tab is shown.
+// A page hidden or closing may still say it is visible for a moment: the one page visible twice in
+// a row is the shown one.
+export async function connectShown() {
+  const deadline = performance.now() + TIMEOUT;
+  let last;
+  while (performance.now() < deadline) {
+    const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then(
+      (response) => response.json(),
+      () => [],
+    );
+    const visible = [];
+    for (const target of list.filter((t) => t.type === "page" && !t.url.startsWith(SIDEBAR))) {
+      const page = await connect(target.url).catch(() => undefined);
+      if ((await page?.eval("document.visibilityState").catch(() => "")) === "visible") {
+        visible.push({ id: target.id, page });
+      }
+    }
+    if (visible.length === 1 && visible[0].id === last) return visible[0].page;
+    last = visible.length === 1 ? visible[0].id : undefined;
+    await sleep(200);
+  }
+  throw new Error("no page shown");
+}
+
 // An expression that resolves once `condition` is truthy, checked on every frame, and rejects
 // after a timeout. A hidden page draws no frame: it is then checked on a timer. A condition that
 // throws counts as false: thrown from a frame callback, it would leave the promise pending.
