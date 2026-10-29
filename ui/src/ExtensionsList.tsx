@@ -8,8 +8,9 @@ import { matches } from "./search";
 export type InstalledExtension = Extension & {
   enabled: boolean;
   pinned: boolean;
-  // It has an options page.
+  // It has an options page, which opens in a tab rather than a window.
   options: boolean;
+  optionsInTab: boolean;
   description: string;
   version: string;
   details: {
@@ -30,12 +31,20 @@ export type InstalledExtension = Extension & {
 const date = (ms: number) =>
   new Date(ms).toLocaleDateString("en", { year: "numeric", month: "short", day: "numeric" });
 
-// Opens a link in a tab.
-const open = (url: string) => send(`open/${encodeURIComponent(url)}`);
-
 // The selected extension, in full, like Chromium's extensions page: its icon, name, description
 // and switch, its actions, then its version, source, dates, id, permissions and site access.
-function ExtensionDetails({ extension }: { extension: InstalledExtension }) {
+function ExtensionDetails({
+  extension,
+  onOpen,
+}: {
+  extension: InstalledExtension;
+  onOpen: () => void;
+}) {
+  // Opens a tab, then leaves the library for it.
+  const open = (url: string) => {
+    send(`open/${encodeURIComponent(url)}`);
+    onOpen();
+  };
   const { details } = extension;
   const store = `https://chromewebstore.google.com/detail/${extension.id}`;
   const allSites = (site: string) => site === "<all_urls>" || site === "*://*/*";
@@ -63,7 +72,10 @@ function ExtensionDetails({ extension }: { extension: InstalledExtension }) {
           <button
             type="button"
             className="extension-action"
-            onClick={() => send(`extension/options/${extension.id}`)}
+            onClick={() => {
+              send(`extension/options/${extension.id}`);
+              if (extension.optionsInTab) onOpen();
+            }}
           >
             <Icon d="M8 5.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" />
             Options
@@ -173,7 +185,14 @@ function Switch({ extension }: { extension: InstalledExtension }) {
 // their list, each one with its switch, and the selected one's details beside it, the first
 // one at first. Loading one from a folder takes Chromium's own extensions page, in a window of
 // its own: only it can.
-export function ExtensionsList({ extensions }: { extensions: InstalledExtension[] }) {
+export function ExtensionsList({
+  extensions,
+  onOpen,
+}: {
+  extensions: InstalledExtension[];
+  // A tab opened, like the Web Store's: the library leaves for the Space it opens in.
+  onOpen: () => void;
+}) {
   const [selected, setSelected] = useState<string>();
   const [query, setQuery] = useState("");
   const found = extensions.filter((extension) =>
@@ -192,7 +211,14 @@ export function ExtensionsList({ extensions }: { extensions: InstalledExtension[
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
         <div className="extensions-buttons">
-          <button type="button" className="extensions-button" onClick={() => send("site/store")}>
+          <button
+            type="button"
+            className="extensions-button"
+            onClick={() => {
+              send("site/store");
+              onOpen();
+            }}
+          >
             Add Extensions
           </button>
           <button
@@ -233,7 +259,7 @@ export function ExtensionsList({ extensions }: { extensions: InstalledExtension[
           ))}
         </ul>
       </div>
-      {shown && <ExtensionDetails extension={shown} />}
+      {shown && <ExtensionDetails extension={shown} onOpen={onOpen} />}
     </div>
   );
 }

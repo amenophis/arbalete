@@ -37,6 +37,10 @@ pub struct Installed {
     /// Its options page, a path in the extension, if it has one.
     #[serde(skip)]
     pub options: Option<String>,
+    /// Its options page opens in a tab rather than a window: its manifest asks for it, or it
+    /// predates `options_ui`.
+    #[serde(skip)]
+    pub options_in_tab: bool,
     /// Turned off by the user (or by Chromium), it stays installed but does not run.
     pub enabled: bool,
     pub description: String,
@@ -145,6 +149,8 @@ fn read_manifest(id: &str, dir: &Path) -> Option<Installed> {
             .as_str()
             .or(manifest["options_page"].as_str())
             .map(str::to_string),
+        options_in_tab: manifest["options_ui"]["open_in_tab"] == true
+            || manifest["options_ui"]["page"].is_null(),
         enabled: true,
         description: localized(
             dir,
