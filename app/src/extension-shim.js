@@ -37,6 +37,11 @@
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();
     });
+    // Chromium takes the popup's page for a tab's: extensions that size themselves by where they
+    // show, like Bitwarden, would fill a tab. It is the popup, as in Chrome.
+    const getViews = chrome.extension.getViews.bind(chrome.extension);
+    chrome.extension.getViews = (info = {}) =>
+      info.type === "popup" ? [window] : getViews(info).filter((view) => view !== window);
   }
   // chrome.windows.WINDOW_ID_CURRENT.
   const CURRENT = -2;
