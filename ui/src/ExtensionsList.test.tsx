@@ -59,7 +59,7 @@ const extensions = [
 const sent = () => fetch.mock.lastCall?.[0];
 
 test("lists the extensions, the first one detailed beside them", () => {
-  render(<ExtensionsList extensions={extensions} query="" />);
+  render(<ExtensionsList extensions={extensions} />);
   const details = screen.getByRole("region", { name: "Dark Reader details" });
   expect(details.textContent).toContain("4.9 · Manifest V3");
   expect(details.textContent).toContain("Oct 28, 2026");
@@ -77,7 +77,7 @@ test("lists the extensions, the first one detailed beside them", () => {
 });
 
 test("details the extension picked, and turns each one on or off", () => {
-  render(<ExtensionsList extensions={extensions} query="" />);
+  render(<ExtensionsList extensions={extensions} />);
   fireEvent.click(screen.getByRole("button", { name: "uBlock Origin Lite" }));
   const details = screen.getByRole("region", { name: "uBlock Origin Lite details" });
   expect(details.textContent).toContain("Unpacked, from /Users/me/block");
@@ -95,7 +95,10 @@ test("details the extension picked, and turns each one on or off", () => {
 });
 
 test("searches the extensions by name and description", () => {
-  render(<ExtensionsList extensions={extensions} query="blocker" />);
+  render(<ExtensionsList extensions={extensions} />);
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search Extensions" }), {
+    target: { value: "blocker" },
+  });
   expect(screen.queryByRole("button", { name: /Dark Reader/ })).toBeNull();
   expect(screen.getByRole("region", { name: "uBlock Origin Lite details" })).toBeTruthy();
 });

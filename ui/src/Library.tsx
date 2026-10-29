@@ -122,7 +122,8 @@ export function Library({
         </button>
       </div>
       <div className="library-panel" role="tabpanel" aria-label={label} data-section={section}>
-        {section !== "spaces" && (
+        {/* The extensions search their list only, above it, beside their details. */}
+        {!wide && (
           <input
             type="search"
             className="library-search"
@@ -146,7 +147,7 @@ export function Library({
         {section === "downloads" && (
           <DownloadsList downloads={downloads} query={query} now={Date.now()} />
         )}
-        {section === "extensions" && <ExtensionsList extensions={extensions} query={query} />}
+        {section === "extensions" && <ExtensionsList extensions={extensions} />}
       </div>
     </section>
   );
