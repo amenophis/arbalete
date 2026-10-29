@@ -1,0 +1,42 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "check",
+      "detail": "Run every check listed in CONTRIBUTING.md",
+      "type": "shell",
+      "command": "mise run check",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": ["$rustc", "$tsc"]
+    },
+    {
+      "label": "ui",
+      "detail": "Build the UI",
+      "type": "shell",
+      "command": "mise run ui",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "app",
+      "detail": "Build the UI and bundle the app",
+      "type": "shell",
+      "command": "mise run app",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$rustc", "$tsc"]
+    },
+    {
+      "label": "run",
+      "detail": "Build and run the app",
+      "type": "shell",
+      "command": "mise run run",
+      "problemMatcher": ["$rustc", "$tsc"]
+    },
+    {
+      "label": "e2e",
+      "detail": "Check the app end to end through DevTools (opens a window)",
+      "type": "shell",
+      "command": "mise run e2e",
+      "problemMatcher": ["$rustc", "$tsc"]
+    }
+  ]
+}

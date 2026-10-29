@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "vadimcn.vscode-lldb",
+    "tamasfe.even-better-toml",
+    "biomejs.biome",
+    "vitest.explorer",
+    "typescriptteam.native-preview",
+    "hverlin.mise-vscode"
+  ]
+}
