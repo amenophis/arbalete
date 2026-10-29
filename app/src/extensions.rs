@@ -238,16 +238,18 @@ const HELPER_SCRIPT: &str = "/arbalete-helper.js";
 
 const SHIM: &str = include_str!("extension-shim.js");
 
-/// The selected tab of a profile's content view, as extensions see it.
+/// The selected tab of a profile, as extensions see it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ActiveTab {
+    /// Its page's browser, once created.
+    pub page: Option<i32>,
     pub url: String,
     pub title: String,
     pub favicon: Option<String>,
 }
 
-/// A profile's content view: its DevTools target, its browser context and, once the helper has
-/// told it, its tab id.
+/// A tab's page: its DevTools target, its browser context and, once the helper has told it, its
+/// tab id.
 struct Content {
     target: String,
     context: String,
@@ -278,8 +280,30 @@ struct Bridge {
     helpers: HashMap<String, String>,
     /// The helper's extension id, which its folder's path sets.
     helper_id: Option<String>,
-    contents: HashMap<ProfileId, Content>,
+    /// Each profile's browser context.
+    contexts: HashMap<ProfileId, String>,
+    /// The pages, by their browser's identifier.
+    contents: HashMap<i32, Content>,
+    /// Each page's own DevTools observer, which asks for its target.
+    page_registrations: HashMap<i32, Registration>,
     tabs: HashMap<ProfileId, ActiveTab>,
+}
+
+impl Bridge {
+    /// The profile of a browser context.
+    fn profile_of(&self, context: &str) -> Option<ProfileId> {
+        let (profile, _) = self.contexts.iter().find(|(_, c)| *c == context)?;
+        Some(*profile)
+    }
+
+    /// The state a profile's extensions see: its active tab, with its page's tab id.
+    fn state(&self, profile: ProfileId) -> Value {
+        let tab = self.tabs.get(&profile);
+        let tab_id = tab
+            .and_then(|tab| self.contents.get(&tab.page?))
+            .and_then(|content| content.tab_id);
+        state_json(tab, tab_id)
+    }
 }
 
 thread_local! {
@@ -336,14 +360,9 @@ fn worker_started(context: &str, url: &str) {
     else {
         return;
     };
-    let profile = BRIDGE.with_borrow(|bridge| {
-        let (profile, _) = bridge
-            .contents
-            .iter()
-            .find(|(_, content)| content.context == context)?;
-        Some(*profile)
-    });
-    let Some(profile) = profile else { return };
+    let Some(profile) = BRIDGE.with_borrow(|bridge| bridge.profile_of(context)) else {
+        return;
+    };
     let new = INSTALLED.with_borrow(|installed| {
         let (dir, list) = installed.get(&profile)?;
         (!list.iter().any(|extension| extension.id == id)).then(|| dir.clone())
@@ -396,7 +415,7 @@ pub fn options_url(profile: ProfileId, id: &str) -> Option<String> {
 /// Evaluates an expression in a profile's helper, which holds the `management` permission.
 fn helper_evaluate(profile: ProfileId, expression: &str) {
     let session = BRIDGE.with_borrow(|bridge| {
-        let context = &bridge.contents.get(&profile)?.context;
+        let context = bridge.contexts.get(&profile)?;
         bridge.helpers.get(context).cloned()
     });
     if let Some(session) = session {
@@ -426,7 +445,7 @@ fn refresh(profile: ProfileId, dir: &Path) {
     update_icons(profile);
     crate::shell::extensions_changed();
     let session = BRIDGE.with_borrow(|bridge| {
-        let context = &bridge.contents.get(&profile)?.context;
+        let context = bridge.contexts.get(&profile)?;
         bridge.helpers.get(context).cloned()
     });
     if let Some(session) = session {
@@ -537,13 +556,7 @@ pub fn popup_created(profile: ProfileId, browser: &Browser, url: &str) {
     let mut observer = PopupObserver::new(url.to_string());
     let registration = host.add_dev_tools_message_observer(Some(&mut observer));
     POPUP.set(registration);
-    let state = BRIDGE.with_borrow(|bridge| {
-        let tab_id = bridge
-            .contents
-            .get(&profile)
-            .and_then(|content| content.tab_id);
-        state_json(bridge.tabs.get(&profile), tab_id)
-    });
+    let state = BRIDGE.with_borrow(|bridge| bridge.state(profile));
     let source = format!("self.__arbaleteInitial = {state};\n{SHIM}");
     // New documents get the binding only while the Runtime domain is enabled, and the scripts
     // added for them only while the Page domain is.
@@ -562,16 +575,20 @@ pub fn popup_closed() {
     POPUP.set(None);
 }
 
-/// Starts watching the extensions from a profile's content view once its browser exists, learns
-/// which target the view is, and reads the profile's extensions from its directory.
-pub fn content_created(profile: ProfileId, browser: &Browser, dir: &Path) {
+/// Reads a profile's extensions from its directory, once its web data is ready.
+pub fn profile_ready(profile: ProfileId, dir: &Path) {
     refresh(profile, dir);
+}
+
+/// Starts watching the extensions from the sidebar's browser, which outlives the pages, with the
+/// first page, then learns which target each page is.
+pub fn page_created(profile: ProfileId, browser: &Browser) {
     let Some(host) = browser.host() else { return };
     let started = BRIDGE.with_borrow(|bridge| bridge.host.is_some());
-    if !started {
-        let registration = host.add_dev_tools_message_observer(Some(&mut BridgeObserver::new()));
+    if !started && let Some(sidebar) = crate::shell::sidebar_host() {
+        let registration = sidebar.add_dev_tools_message_observer(Some(&mut BridgeObserver::new()));
         BRIDGE.with_borrow_mut(|bridge| {
-            bridge.host = Some(host.clone());
+            bridge.host = Some(sidebar.clone());
             bridge.registrations.extend(registration);
         });
         let params = json!({ "discover": true });
@@ -580,15 +597,29 @@ pub fn content_created(profile: ProfileId, browser: &Browser, dir: &Path) {
             None,
         );
     }
-    // The view's own session answers with the view's target.
+    // The page's own session answers with the page's target.
+    let page = browser.identifier();
     let registration =
-        host.add_dev_tools_message_observer(Some(&mut ContentObserver::new(profile)));
-    BRIDGE.with_borrow_mut(|bridge| bridge.registrations.extend(registration));
+        host.add_dev_tools_message_observer(Some(&mut ContentObserver::new(profile, page)));
+    BRIDGE.with_borrow_mut(|bridge| {
+        if let Some(registration) = registration {
+            bridge.page_registrations.insert(page, registration);
+        }
+    });
     let message = json!({ "id": CONTENT_INFO, "method": "Target.getTargetInfo" });
     host.send_dev_tools_message(Some(message.to_string().as_bytes()));
 }
 
-/// The id of the message asking a content view's session for its own target, apart from the
+/// Forgets a page as its browser closes.
+pub fn page_closed(page: i32) {
+    let registration = BRIDGE.with_borrow_mut(|bridge| {
+        bridge.contents.remove(&page);
+        bridge.page_registrations.remove(&page)
+    });
+    drop(registration);
+}
+
+/// The id of the message asking a page's session for its own target, apart from the
 /// bridge's, which start above it.
 const CONTENT_INFO: i32 = 1;
 
@@ -596,10 +627,10 @@ const CONTENT_INFO: i32 = 1;
 pub fn sync(tabs: HashMap<ProfileId, ActiveTab>) {
     let changed = BRIDGE.with_borrow_mut(|bridge| {
         let changed: Vec<_> = bridge
-            .contents
+            .contexts
             .iter()
             .filter(|(profile, _)| bridge.tabs.get(profile) != tabs.get(profile))
-            .map(|(_, content)| content.context.clone())
+            .map(|(_, context)| context.clone())
             .collect();
         bridge.tabs = tabs;
         changed
@@ -643,10 +674,8 @@ fn push_state(context: &str) {
             .map(|(session, _)| session.clone())
             .collect();
         let state = bridge
-            .contents
-            .iter()
-            .find(|(_, content)| content.context == context)
-            .map(|(profile, content)| state_json(bridge.tabs.get(profile), content.tab_id));
+            .profile_of(context)
+            .map(|profile| bridge.state(profile));
         (state, workers)
     });
     let Some(state) = state else { return };
@@ -752,7 +781,7 @@ fn ask_tab_ids(context: &str) {
     send_in(&session, "Runtime.evaluate", params, Some(pending));
 }
 
-/// Records the tab id of the content views of a browser context.
+/// Records the tab id of the pages of a browser context.
 fn tab_ids(context: &str, targets: &[Value]) {
     BRIDGE.with_borrow_mut(|bridge| {
         for content in bridge
@@ -791,14 +820,9 @@ impl Caller {
     /// The profile the caller runs in.
     fn profile(&self) -> Option<ProfileId> {
         match self {
-            Self::Worker(session) => BRIDGE.with_borrow(|bridge| {
-                let context = bridge.workers.get(session)?;
-                let (profile, _) = bridge
-                    .contents
-                    .iter()
-                    .find(|(_, c)| &c.context == context)?;
-                Some(*profile)
-            }),
+            Self::Worker(session) => {
+                BRIDGE.with_borrow(|bridge| bridge.profile_of(bridge.workers.get(session)?))
+            }
             // Popups open in the displayed Space's profile.
             Self::Popup(_) => Some(crate::shell::displayed_profile()),
         }
@@ -1125,8 +1149,8 @@ fn message_received(message: &Value) {
     }
 }
 
-/// Records a profile's content view's target, from its own session's answer.
-fn content_info(profile: ProfileId, message: &Value) {
+/// Records a page's target, from its own session's answer.
+fn content_info(profile: ProfileId, page: i32, message: &Value) {
     let info = &message["result"]["targetInfo"];
     let (Some(target), Some(context)) =
         (info["targetId"].as_str(), info["browserContextId"].as_str())
@@ -1138,7 +1162,13 @@ fn content_info(profile: ProfileId, message: &Value) {
         context: context.to_string(),
         tab_id: None,
     };
-    BRIDGE.with_borrow_mut(|bridge| bridge.contents.insert(profile, content));
+    BRIDGE.with_borrow_mut(|bridge| {
+        bridge.contexts.insert(profile, context.to_string());
+        // A page closed meanwhile is not recorded.
+        if bridge.page_registrations.contains_key(&page) {
+            bridge.contents.insert(page, content);
+        }
+    });
     ask_tab_ids(context);
 }
 
@@ -1187,12 +1217,13 @@ wrap_dev_tools_message_observer! {
 wrap_dev_tools_message_observer! {
     struct ContentObserver {
         profile: ProfileId,
+        page: i32,
     }
 
     impl DevToolsMessageObserver {
         fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
             if let Some(message) = parse(message).filter(|m| m["id"] == CONTENT_INFO && m["sessionId"].is_null()) {
-                content_info(self.profile, &message);
+                content_info(self.profile, self.page, &message);
             }
             0
         }
@@ -1312,6 +1343,7 @@ mod tests {
     #[test]
     fn answers_with_the_active_tab_once_its_tab_id_is_known() {
         let tab = ActiveTab {
+            page: Some(1),
             url: "https://example.com/".into(),
             title: "Example".into(),
             favicon: None,

@@ -357,7 +357,7 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 
 ### Phase 7 — Resource saving
 - A live page per open tab, kept in the background while another shows: switching tabs no longer reloads the
-  page. Today one view per profile loads the selected tab's address.
+  page. Done: a tab's page opens the first time it is shown and closes with the tab.
 - New Window (⌘N): several full windows, each with its sidebar. Both change how the window's state and its
   pages are held, so they go together.
 - Freeze, then unload hidden tabs on timers; reload on selection from the saved URL, with the snapshot shown

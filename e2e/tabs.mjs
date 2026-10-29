@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
-import { connect, launch, pages, quit, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs";
+import { connect, connectShown, launch, pages, quit, REVEAL, SIDEBAR, waitFor } from "./devtools.mjs";
 
 const dataDir = process.argv[2];
 if (!dataDir) throw new Error("usage: node e2e/tabs.mjs <data dir>");
@@ -541,7 +541,7 @@ try {
   );
 
   const reveal = await connect(REVEAL);
-  const content = await connect((await pages()).find((url) => !url.startsWith(SIDEBAR)));
+  const content = await connectShown();
   const width = (await content.eval("innerWidth")) + 260;
   // The card's margin, 9 pt from the window's edges and from the sidebar (CARD_MARGIN in shell.rs),
   // measured from the sidebar at the window's left edge: the card is a window of its own.
@@ -895,6 +895,7 @@ try {
       && document.querySelector(".sidebar").style.getPropertyValue("--tinted") === "0"
       && e2e.spaceIcons().length === ${spaceCount}`,
   );
+  const left = await connectShown();
   await type("Novels");
   await sidebar.eval(`e2e.newField("emoji").focus()`);
   await type("📖");
@@ -915,8 +916,7 @@ try {
     ``,
     `e2e.colors() === ${JSON.stringify(await windowColors("#3e7bfa"))}`,
   );
-  const blank = await connect("about:blank");
-  await check("the page's view is hidden on a blank page", ``, `document.visibilityState === "hidden"`, blank);
+  await check("the page left is hidden, still at its url", ``, `document.visibilityState === "hidden"`, left);
   await check(
     "clicking the displayed Space's icon opens its editor",
     `e2e.last().click()`,
@@ -1076,6 +1076,8 @@ try {
      e2e.closing.querySelector(".close").click()`,
     `e2e.rows().length === e2e.count - 1 && e2e.state.closed.length > 0`,
   );
+  // The tab's page closed with it: the window shows the next tab's.
+  const shown = await connectShown();
   await check(
     "on the way to the library the card follows the fingers and the first Space's page fades",
     `e2e.library = () => document.querySelector(".library:not([inert])");
@@ -1116,7 +1118,7 @@ try {
     "the app widens the sidebar for the library, the card resting beside it",
     ``,
     `innerWidth === ${width - 440}`,
-    content,
+    shown,
   );
   await check("the library is as wide as the sidebar", ``, `innerWidth === 440`);
   await check(
@@ -1136,7 +1138,9 @@ try {
     `e2e.settled(0) && !e2e.library() && e2e.rows().length === e2e.count
       && e2e.state.closed.length === e2e.closedCount - 1 && innerWidth === 260`,
   );
-  await check("the card gets its place back beside the sidebar", ``, `innerWidth === ${width - 260}`, content);
+  // The reopened tab shows in a page of its own.
+  const reopened = await connectShown();
+  await check("the card gets its place back beside the sidebar", ``, `innerWidth === ${width - 260}`, reopened);
   await check(
     "the footer's Library button slides to the library on the section picked last, the app keeping the first Space",
     `document.querySelector('.switcher [aria-label="Library"]').click()`,
@@ -1562,9 +1566,9 @@ try {
   );
   // The library: its sections, searching them, and managing Spaces from their cards.
   await check(
-    "the Library button opens the library, wider, on the section picked last",
+    "the Library button opens the library on the section picked last, the Spaces over the whole window",
     `document.querySelector('.switcher [aria-label="Library"]').click()`,
-    `e2e.library() && e2e.offset() === 100 && innerWidth === 440
+    `e2e.library() && e2e.offset() === 100 && innerWidth > 440
       && e2e.library().querySelector("[role=tab][aria-selected=true]").textContent === "Spaces"`,
   );
   await check(
