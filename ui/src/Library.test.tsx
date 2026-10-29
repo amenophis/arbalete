@@ -32,6 +32,7 @@ function renderLibrary(closed: ClosedTab[] = [], onBack = () => {}) {
     <Library
       closed={closed}
       downloads={[]}
+      extensions={[]}
       spaces={spaces}
       profiles={[{ id: 1, name: "Default", color: "purple" }]}
       shown
@@ -54,6 +55,7 @@ test("a rail of sections opens on the Spaces, and the one picked shows under its
     "History",
     "Media",
     "Downloads",
+    "Extensions",
   ]);
   expect(section("Spaces").getAttribute("aria-selected")).toBe("true");
   // The Spaces, which fit at a glance, have no search field.
@@ -79,6 +81,7 @@ test("the section picked stays picked until the Space menu's Manage Spaces asks 
     <Library
       closed={[]}
       downloads={[]}
+      extensions={[]}
       spaces={spaces}
       profiles={[]}
       shown={false}

@@ -119,6 +119,15 @@ pub enum Command {
     CloseExtensionPopup,
     /// Opens the Chrome Web Store, to install extensions: `site/store`.
     ShowStore,
+    /// Opens Chromium's extensions page, to load an extension from a folder:
+    /// `extension/load-unpacked`.
+    ShowExtensionsPage,
+    /// Opens the library on the extensions, from the site controls' panel: `extension/manage`.
+    ManageExtensions,
+    /// Reads the displayed Space's profile's extensions again: `extension/reload`.
+    ReloadExtensions,
+    /// Asks before removing an extension, from the library: `extension/remove/<id>`.
+    ConfirmRemoveExtension(String),
     /// Where the site controls' panel shows its extensions, where a right-click opens their menu:
     /// `site/targets/<percent-encoded JSON array>`, like
     /// `[{"id":"abc","x":12,"y":80,"width":64,"height":40}]`.
@@ -458,7 +467,26 @@ impl Command {
             "extension/close" => Some(Self::CloseExtensionPopup),
             "site/hide" => Some(Self::HideSiteControls),
             "site/store" => Some(Self::ShowStore),
+            "extension/load-unpacked" => Some(Self::ShowExtensionsPage),
+            "extension/manage" => Some(Self::ManageExtensions),
+            "extension/reload" => Some(Self::ReloadExtensions),
             _ => {
+                if let Some((action, id)) = path
+                    .strip_prefix("extension/")
+                    .and_then(|r| r.split_once('/'))
+                    .filter(|(action, _)| *action != "popup")
+                {
+                    let id = id.to_string();
+                    return match action {
+                        "on" => Some(Self::SetExtensionEnabled(id, true)),
+                        "off" => Some(Self::SetExtensionEnabled(id, false)),
+                        "pin" => Some(Self::PinExtension(id, true)),
+                        "unpin" => Some(Self::PinExtension(id, false)),
+                        "options" => Some(Self::ExtensionOptions(id)),
+                        "remove" => Some(Self::ConfirmRemoveExtension(id)),
+                        _ => None,
+                    };
+                }
                 if let Some(button) = path.strip_prefix("site/show/") {
                     return Button::parse(button).map(Self::ShowSiteControls);
                 }
@@ -823,6 +851,27 @@ mod tests {
         );
         assert_eq!(Command::parse("site/hide"), Some(Command::HideSiteControls));
         assert_eq!(Command::parse("site/store"), Some(Command::ShowStore));
+        assert_eq!(
+            Command::parse("extension/load-unpacked"),
+            Some(Command::ShowExtensionsPage)
+        );
+        assert_eq!(
+            Command::parse("extension/manage"),
+            Some(Command::ManageExtensions)
+        );
+        assert_eq!(
+            Command::parse("extension/off/abc"),
+            Some(Command::SetExtensionEnabled("abc".into(), false))
+        );
+        assert_eq!(
+            Command::parse("extension/pin/abc"),
+            Some(Command::PinExtension("abc".into(), true))
+        );
+        assert_eq!(
+            Command::parse("extension/remove/abc"),
+            Some(Command::ConfirmRemoveExtension("abc".into()))
+        );
+        assert_eq!(Command::parse("extension/fly/abc"), None);
         assert_eq!(
             Command::parse(
                 "site/targets/%5B%7B%22id%22%3A%22abc%22%2C%22x%22%3A1%2C%22y%22%3A2%2C%22width%22%3A3%2C%22height%22%3A4%7D%5D"

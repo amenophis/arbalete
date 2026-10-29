@@ -46,6 +46,8 @@ test("acts on the site and opens an extension's popup", () => {
   expect(screen.getAllByLabelText("Pinned")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Dark Reader" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/site/extension/dark", { method: "POST" });
+  fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/extension/manage", { method: "POST" });
   fireEvent.click(screen.getByRole("button", { name: "Add Extensions" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/site/store", { method: "POST" });
 });
