@@ -55,6 +55,56 @@ impl SearchEngine {
             Self::Yahoo => "https://search.yahoo.com/search?p=",
         }
     }
+
+    /// The address of its suggestions for typed text, before the percent-encoded text, if it
+    /// offers any. Each answers in the OpenSearch format (suggestions).
+    pub fn suggest_url(self) -> Option<&'static str> {
+        match self {
+            Self::Google => {
+                Some("https://suggestqueries.google.com/complete/search?client=firefox&q=")
+            }
+            Self::DuckDuckGo => Some("https://duckduckgo.com/ac/?type=list&q="),
+            Self::Bing => Some("https://api.bing.com/osjson.aspx?query="),
+            Self::Ecosia => Some("https://ac.ecosia.org/autocomplete?type=list&q="),
+            Self::Qwant => Some("https://api.qwant.com/api/suggest/?client=opensearch&q="),
+            Self::Brave => Some("https://search.brave.com/api/suggest?q="),
+            Self::Perplexity => None,
+            Self::Yahoo => Some("https://ff.search.yahoo.com/gossip?output=fxjson&command="),
+        }
+    }
+}
+
+/// Text percent-encoded for a query, as `encodeURIComponent` does in the UI: what is not a letter,
+/// a digit or one of `-_.!~*'()` goes as its UTF-8 bytes.
+pub fn encode(text: &str) -> String {
+    text.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => (byte as char).to_string(),
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+/// The suggestions of an engine's OpenSearch answer, `["typed text", ["suggestion", …], …]`:
+/// none when it is not one.
+pub fn suggestions(answer: &str) -> Vec<String> {
+    let answer: serde_json::Value = serde_json::from_str(answer).unwrap_or_default();
+    let list = answer.get(1).and_then(serde_json::Value::as_array);
+    list.into_iter()
+        .flatten()
+        .filter_map(|suggestion| suggestion.as_str().map(str::to_string))
+        .collect()
 }
 
 #[cfg(test)]
@@ -69,5 +119,28 @@ mod tests {
             assert!(engine.url().starts_with("https://"));
         }
         assert_eq!(SearchEngine::default(), SearchEngine::Google);
+    }
+
+    #[test]
+    fn encodes_queries_like_the_ui() {
+        assert_eq!(
+            encode("rust lang & café?"),
+            "rust%20lang%20%26%20caf%C3%A9%3F"
+        );
+        assert_eq!(encode("a-b_c.d!~*'()"), "a-b_c.d!~*'()");
+    }
+
+    #[test]
+    fn reads_the_suggestions_of_an_opensearch_answer() {
+        let answer = r#"["rust",["rustdesk","rust language"],[],{"google:suggesttype":[]}]"#;
+        assert_eq!(suggestions(answer), ["rustdesk", "rust language"]);
+        assert!(suggestions("not json").is_empty());
+        assert!(suggestions(r#"{"rust":1}"#).is_empty());
+        assert!(
+            SearchEngine::ALL
+                .iter()
+                .filter_map(|e| e.suggest_url())
+                .all(|u| u.starts_with("https://"))
+        );
     }
 }

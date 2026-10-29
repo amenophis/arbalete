@@ -938,6 +938,59 @@ fn search_overlay(text: &str) {
         &OVERLAY_VIEW,
         &format!(r#"new CustomEvent("arbalete:results", {{ detail: {detail} }})"#),
     );
+    suggest(profile, text);
+}
+
+/// Asks the displayed Space's profile's search engine for searches completing `text`, unless the
+/// profile asks for none: the Command Bar shows them once they come (SuggestionsClient). An
+/// address typed is not sent, nor any cookie.
+fn suggest(profile: ProfileId, text: &str) {
+    let typed = text.trim();
+    let engine = STATE.with_borrow(|state| {
+        let profiles = state.sidebar.profiles();
+        let profile = profiles.iter().find(|p| p.id == profile)?;
+        profile.search_suggestions.then_some(profile.search_engine)
+    });
+    let Some(base) = engine.and_then(SearchEngine::suggest_url) else {
+        return;
+    };
+    if typed.is_empty() || typed.contains("://") {
+        return;
+    }
+    let Some(request) = request_create() else {
+        return;
+    };
+    let url = format!("{base}{}", arbalete_core::search::encode(typed));
+    request.set_url(Some(&CefString::from(url.as_str())));
+    request.set_method(Some(&CefString::from("GET")));
+    let mut client = SuggestionsClient::new(text.to_string(), std::rc::Rc::default());
+    let _ = urlrequest_create(Some(&mut request.clone()), Some(&mut client), None);
+}
+
+wrap_urlrequest_client! {
+    struct SuggestionsClient {
+        text: String,
+        body: std::rc::Rc<RefCell<Vec<u8>>>,
+    }
+
+    impl UrlrequestClient {
+        fn on_download_data(&self, _request: Option<&mut Urlrequest>, data: *const u8, data_length: usize) {
+            if !data.is_null() {
+                // SAFETY: CEF hands the chunk received, `data_length` bytes long.
+                let chunk = unsafe { std::slice::from_raw_parts(data, data_length) };
+                self.body.borrow_mut().extend_from_slice(chunk);
+            }
+        }
+
+        fn on_request_complete(&self, _request: Option<&mut Urlrequest>) {
+            let body = String::from_utf8_lossy(&self.body.borrow()).into_owned();
+            let detail = json!({ "text": self.text, "suggestions": arbalete_core::search::suggestions(&body) });
+            dispatch(
+                &OVERLAY_VIEW,
+                &format!(r#"new CustomEvent("arbalete:suggestions", {{ detail: {detail} }})"#),
+            );
+        }
+    }
 }
 
 /// Loads an address in the selected tab, or in a new one when none is selected.
@@ -1841,7 +1894,7 @@ fn send_settings() {
     let profiles: Vec<_> = STATE.with_borrow(|state| {
         let profiles = state.sidebar.profiles().iter();
         profiles
-            .map(|p| json!({ "id": p.id, "name": p.name, "color": p.color, "searchEngine": p.search_engine }))
+            .map(|p| json!({ "id": p.id, "name": p.name, "color": p.color, "searchEngine": p.search_engine, "searchSuggestions": p.search_suggestions }))
             .collect()
     });
     let detail = json!({ "settings": settings, "engines": engines, "profiles": profiles });
@@ -3199,6 +3252,11 @@ pub fn run(command: Command) {
         }
         (Command::SetSearchEngine(id, engine), _) => {
             if update_sidebar(|sidebar| sidebar.set_search_engine(id, engine)).is_ok() {
+                send_settings();
+            }
+        }
+        (Command::SetSearchSuggestions(id, on), _) => {
+            if update_sidebar(|sidebar| sidebar.set_search_suggestions(id, on)).is_ok() {
                 send_settings();
             }
         }
