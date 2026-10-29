@@ -3288,6 +3288,7 @@ pub fn run(command: Command) {
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
         (Command::ShowStore, _) => show_store(),
         (Command::ShowExtensionsPage, _) => extensions::load_unpacked(displayed_profile()),
+        (Command::UpdateExtensions, _) => extensions::update(displayed_profile()),
         (Command::ManageExtensions, _) => {
             hide_site_controls();
             if SIDEBAR_MODE.get() == SidebarMode::Hidden {

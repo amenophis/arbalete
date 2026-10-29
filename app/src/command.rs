@@ -122,6 +122,9 @@ pub enum Command {
     /// Opens Chromium's extensions page, to load an extension from a folder:
     /// `extension/load-unpacked`.
     ShowExtensionsPage,
+    /// Updates the displayed Space's profile's extensions from the Web Store now:
+    /// `extension/update`.
+    UpdateExtensions,
     /// Opens the library on the extensions, from the site controls' panel: `extension/manage`.
     ManageExtensions,
     /// Reads the displayed Space's profile's extensions again: `extension/reload`.
@@ -468,6 +471,7 @@ impl Command {
             "site/hide" => Some(Self::HideSiteControls),
             "site/store" => Some(Self::ShowStore),
             "extension/load-unpacked" => Some(Self::ShowExtensionsPage),
+            "extension/update" => Some(Self::UpdateExtensions),
             "extension/manage" => Some(Self::ManageExtensions),
             "extension/reload" => Some(Self::ReloadExtensions),
             _ => {
