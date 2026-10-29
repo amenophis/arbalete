@@ -173,14 +173,9 @@ function Switch({ extension }: { extension: InstalledExtension }) {
 // their list, each one with its switch, and the selected one's details beside it, the first
 // one at first. Loading one from a folder takes Chromium's own extensions page, in a window of
 // its own: only it can.
-export function ExtensionsList({
-  extensions,
-  query,
-}: {
-  extensions: InstalledExtension[];
-  query: string;
-}) {
+export function ExtensionsList({ extensions }: { extensions: InstalledExtension[] }) {
   const [selected, setSelected] = useState<string>();
+  const [query, setQuery] = useState("");
   const found = extensions.filter((extension) =>
     matches(query, extension.name, extension.description),
   );
@@ -188,6 +183,14 @@ export function ExtensionsList({
   return (
     <div className="extensions">
       <div className="extensions-list">
+        <input
+          type="search"
+          className="library-search"
+          aria-label="Search Extensions"
+          placeholder="Search Extensions…"
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+        />
         <div className="extensions-buttons">
           <button type="button" className="extensions-button" onClick={() => send("site/store")}>
             Add Extensions
