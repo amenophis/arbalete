@@ -32,6 +32,9 @@ pub struct Profile {
     /// What the Command Bar searches with, in this profile's Spaces.
     #[serde(default)]
     pub search_engine: SearchEngine,
+    /// The extensions whose buttons show by the address, by id, in the order they were pinned.
+    #[serde(default)]
+    pub pinned_extensions: Vec<String>,
 }
 
 /// How many favorites a profile holds at most: the grid keeps 3 rows of 4 tiles.
@@ -261,6 +264,7 @@ impl Sidebar {
             favorites,
             favorites_hint_hidden: false,
             search_engine: SearchEngine::default(),
+            pinned_extensions: Vec::new(),
         });
         id
     }
@@ -290,6 +294,21 @@ impl Sidebar {
 
     pub fn set_search_engine(&mut self, id: ProfileId, engine: SearchEngine) -> Result<(), Error> {
         self.profile_mut(id)?.search_engine = engine;
+        Ok(())
+    }
+
+    /// Pins an extension of a profile, its button then showing by the address, or unpins it.
+    pub fn pin_extension(
+        &mut self,
+        id: ProfileId,
+        extension: &str,
+        pinned: bool,
+    ) -> Result<(), Error> {
+        let list = &mut self.profile_mut(id)?.pinned_extensions;
+        list.retain(|pinned| pinned != extension);
+        if pinned {
+            list.push(extension.to_string());
+        }
         Ok(())
     }
 
@@ -1293,6 +1312,23 @@ mod tests {
         assert_eq!(sidebar.create_profile(" "), Err(Error::EmptyTitle));
         assert_eq!(sidebar.profiles().len(), 2);
         assert_eq!(sidebar.spaces().len(), 2);
+    }
+
+    #[test]
+    fn pins_extensions_in_the_order_they_are_pinned() {
+        let mut sidebar = Sidebar::default();
+        let id = sidebar.profiles()[0].id;
+        sidebar.pin_extension(id, "dark", true).unwrap();
+        sidebar.pin_extension(id, "block", true).unwrap();
+        sidebar.pin_extension(id, "dark", true).unwrap();
+        assert_eq!(sidebar.profiles()[0].pinned_extensions, ["block", "dark"]);
+        sidebar.pin_extension(id, "block", false).unwrap();
+        assert_eq!(sidebar.profiles()[0].pinned_extensions, ["dark"]);
+        let unknown = serde_json::from_str("999").unwrap();
+        assert_eq!(
+            sidebar.pin_extension(unknown, "dark", true),
+            Err(Error::UnknownProfile)
+        );
     }
 
     #[test]

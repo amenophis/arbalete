@@ -89,10 +89,21 @@ fn site_menu(url: &str) -> Vec<Entry> {
     ]
 }
 
-/// An extension's menu, from the site controls' panel: its options page, turning it off or on,
-/// and removing it.
-pub fn extension_menu(id: &str, name: &str, options: bool, enabled: bool) -> Vec<Entry> {
-    let mut menu = Vec::new();
+/// An extension's menu, from the site controls' panel: pinning it by the address, its options
+/// page, turning it off or on, and removing it.
+pub fn extension_menu(
+    id: &str,
+    name: &str,
+    options: bool,
+    enabled: bool,
+    pinned: bool,
+) -> Vec<Entry> {
+    let pin = if pinned { "Unpin" } else { "Pin" };
+    let mut menu = vec![item(
+        "pin",
+        pin,
+        Action::Run(Command::PinExtension(id.to_string(), !pinned)),
+    )];
     if options {
         menu.push(item(
             "options",

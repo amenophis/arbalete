@@ -191,6 +191,9 @@ thread_local! {
     /// and must not show it again.
     static SITE_CLOSED: Cell<Option<Instant>> = const { Cell::new(None) };
     static EXTENSION_POPUP: RefCell<Option<ExtensionPopup>> = const { RefCell::new(None) };
+    /// When the extension popup last closed: a click on its pinned button closes it, as it loses
+    /// the focus, and must not open it again.
+    static POPUP_CLOSED: Cell<Option<Instant>> = const { Cell::new(None) };
     /// The downloads, kept across sessions, most recent last.
     static DOWNLOADS: RefCell<Vec<Download>> = const { RefCell::new(Vec::new()) };
     /// What cancels each download in progress, by its id in the list.
@@ -375,6 +378,9 @@ impl UiState {
                 "name": p.name,
                 "color": p.color,
             })).collect::<Vec<_>>(),
+            // The displayed Space's profile's pinned extensions, installed and turned on, whose
+            // buttons show by the address.
+            "extensions": self.pinned_extensions(),
             "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, profile, at)| json!({
                 "url": tab.url,
                 "title": tab.label(),
@@ -382,6 +388,28 @@ impl UiState {
                 "closedAt": at.duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64),
             })).collect::<Vec<_>>(),
         })
+    }
+
+    /// The displayed Space's profile's pinned extensions that are installed and turned on, in the
+    /// order they were pinned.
+    fn pinned_extensions(&self) -> Vec<serde_json::Value> {
+        let profile = self.sidebar.displayed().profile;
+        let installed = extensions::list(profile);
+        let profiles = self.sidebar.profiles();
+        let pinned = profiles
+            .iter()
+            .find(|p| p.id == profile)
+            .map(|p| &p.pinned_extensions);
+        pinned
+            .into_iter()
+            .flatten()
+            .filter_map(|id| {
+                installed
+                    .iter()
+                    .find(|extension| &extension.id == id && extension.enabled)
+            })
+            .map(|extension| extension_json(profile, extension))
+            .collect()
     }
 
     /// A Space's tabs and its profile's favorites. `roots` names the sections' containers, which
@@ -1705,36 +1733,19 @@ fn show_site_controls(button: Button) {
         hide_site_controls();
         return;
     }
-    let source = match button.view {
-        ButtonView::Docked => &SIDEBAR,
-        ButtonView::Revealed => &REVEAL_VIEW,
-        ButtonView::Toolbar => &TOOLBAR_VIEW,
-    };
-    let (Some(source), Some(url)) = (source.with_borrow(Clone::clone), selected_url()) else {
+    let (Some(button), Some(url)) = (button_in_window(button), selected_url()) else {
         return;
     };
-    let mut origin = Point {
-        x: button.x,
-        y: button.y,
-    };
-    source.convert_point_to_window(Some(&mut origin));
-    SITE_BUTTON.set(Some(Rect {
-        x: origin.x,
-        y: origin.y,
-        width: button.width,
-        height: button.height,
-    }));
+    SITE_BUTTON.set(Some(button));
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+    let pinned = pinned_extensions(profile);
     let extensions: Vec<_> = extensions::list(profile)
         .iter()
         .map(|extension| {
-            json!({
-                "id": extension.id,
-                "name": extension.name,
-                "icon": extensions::icon_path(profile, extension).map(|path| format!("{UI_ORIGIN}{path}")),
-                "popup": extension.popup.is_some(),
-                "enabled": extension.enabled,
-            })
+            let mut json = extension_json(profile, extension);
+            json["enabled"] = extension.enabled.into();
+            json["pinned"] = pinned.contains(&extension.id).into();
+            json
         })
         .collect();
     let detail = json!({ "url": url, "extensions": extensions });
@@ -1754,6 +1765,49 @@ fn show_site_controls(button: Button) {
     if let Some(view) = controller.contents_view() {
         view.request_focus();
     }
+}
+
+/// Where a button of a UI view is, in the window.
+fn button_in_window(button: Button) -> Option<Rect> {
+    let source = match button.view {
+        ButtonView::Docked => &SIDEBAR,
+        ButtonView::Revealed => &REVEAL_VIEW,
+        ButtonView::Toolbar => &TOOLBAR_VIEW,
+    };
+    let source = source.with_borrow(Clone::clone)?;
+    let mut origin = Point {
+        x: button.x,
+        y: button.y,
+    };
+    source.convert_point_to_window(Some(&mut origin));
+    Some(Rect {
+        x: origin.x,
+        y: origin.y,
+        width: button.width,
+        height: button.height,
+    })
+}
+
+/// What the UI shows of an extension: its name, its icon and whether its button opens a popup.
+fn extension_json(profile: ProfileId, extension: &extensions::Installed) -> serde_json::Value {
+    let icon = extensions::icon_path(profile, extension).map(|path| format!("{UI_ORIGIN}{path}"));
+    json!({ "id": extension.id, "name": extension.name, "icon": icon, "popup": extension.popup.is_some() })
+}
+
+/// Sends the UI the pinned extensions again, after an extension was installed or removed.
+pub fn extensions_changed() {
+    send_state();
+}
+
+/// The ids of a profile's pinned extensions.
+fn pinned_extensions(profile: ProfileId) -> Vec<String> {
+    STATE.with_borrow(|state| {
+        let profiles = state.sidebar.profiles();
+        let profile = profiles.iter().find(|p| p.id == profile);
+        profile
+            .map(|p| p.pinned_extensions.clone())
+            .unwrap_or_default()
+    })
 }
 
 /// The selected tab's address.
@@ -1863,6 +1917,7 @@ wrap_window_delegate! {
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
             EXTENSION_POPUP.set(None);
+            POPUP_CLOSED.set(Some(Instant::now()));
             extensions::popup_closed();
         }
 
@@ -2895,6 +2950,7 @@ pub fn run(command: Command) {
         (Command::RemoveExtension(id), _) => {
             let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
             extensions::uninstall(profile, &id);
+            let _ = update_sidebar(|sidebar| sidebar.pin_extension(profile, &id, false));
         }
         (Command::ExtensionOptions(id), _) => {
             let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
@@ -2905,6 +2961,20 @@ pub fn run(command: Command) {
         (Command::SetExtensionEnabled(id, enabled), _) => {
             let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
             extensions::set_enabled(profile, &id, enabled);
+            send_state();
+        }
+        (Command::PinExtension(id, pinned), _) => {
+            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            let _ = update_sidebar(|sidebar| sidebar.pin_extension(profile, &id, pinned));
+        }
+        (Command::OpenPinnedExtension(id, button), _) => {
+            let closing = POPUP_CLOSED
+                .get()
+                .is_some_and(|at| at.elapsed() < Duration::from_millis(300));
+            if let Some(button) = button_in_window(button).filter(|_| !closing) {
+                SITE_BUTTON.set(Some(button));
+                open_extension_popup(&id);
+            }
         }
         (Command::CloseExtensionPopup, _) => close_extension_popup(),
         (Command::Print, Some(browser)) => {
@@ -3512,11 +3582,13 @@ pub fn menu_at(x: f64, y: f64) -> bool {
             let extension =
                 id.and_then(|id| extensions::list(profile).into_iter().find(|e| e.id == id));
             if let Some(extension) = extension {
+                let pinned = pinned_extensions(profile).contains(&extension.id);
                 let menu = menu::extension_menu(
                     &extension.id,
                     &extension.name,
                     extension.options.is_some(),
                     extension.enabled,
+                    pinned,
                 );
                 crate::mac::pop_up(menu);
             }

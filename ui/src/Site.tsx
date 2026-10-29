@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { send } from "./bridge";
 import { Icon } from "./Icon";
 
-// An extension the user installed and enabled in the displayed Space's profile (installed in
+// An extension the user installed in the displayed Space's profile (installed in
 // app/src/extensions.rs).
 export type Extension = {
   id: string;
@@ -10,11 +10,14 @@ export type Extension = {
   icon: string | null;
   // Its button opens a popup, rather than telling the extension it was clicked.
   popup: boolean;
-  // Turned off, it does not run: its menu turns it on again.
-  enabled: boolean;
 };
 
-type Detail = { url: string; extensions: Extension[] };
+type Detail = {
+  url: string;
+  // Turned off, an extension does not run: its menu turns it on again. Pinned, its button shows
+  // by the address too.
+  extensions: (Extension & { enabled: boolean; pinned: boolean })[];
+};
 
 // The panel taking the focus makes Chromium focus its first button as if tabbed to, with a ring:
 // only the Tab key may leave a button focused.
@@ -48,6 +51,34 @@ const ACTIONS = [
 // whose popup a click opens in place of the panel, the Chrome Web Store to add more, and whether
 // the connection is secure. The
 // panel closes on losing the focus and on Escape, and sizes itself to what it shows.
+// The pinned extensions' buttons, by the address (UiState::pinned_extensions in
+// app/src/shell.rs): a click opens the extension's popup under its button, in a window of its own.
+export function PinnedExtensions({
+  extensions = [],
+  view,
+}: {
+  extensions?: Extension[];
+  view: "docked" | "revealed" | "toolbar";
+}) {
+  return extensions.map((extension) => (
+    <button
+      key={extension.id}
+      type="button"
+      className="pinned-extension"
+      aria-label={extension.name}
+      title={extension.name}
+      disabled={!extension.popup}
+      onClick={(event) => {
+        const { x, y, width, height } = event.currentTarget.getBoundingClientRect();
+        const button = [x, y, width, height].map(Math.round).join("/");
+        send(`extension/popup/${extension.id}/${view}/${button}`);
+      }}
+    >
+      {extension.icon ? <img src={extension.icon} alt="" /> : extension.name.slice(0, 1)}
+    </button>
+  ));
+}
+
 export function Site() {
   const panel = useRef<HTMLDivElement>(null);
   const [site, setSite] = useState<Detail>();
@@ -122,6 +153,11 @@ export function Site() {
             onClick={() => send(`site/extension/${extension.id}`)}
           >
             {extension.icon ? <img src={extension.icon} alt="" /> : extension.name.slice(0, 1)}
+            {extension.pinned && (
+              <span className="site-pinned" role="img" aria-label="Pinned">
+                <Icon d="M6 2.5h4M7 2.5v4l-2 2.5h6L9 6.5v-4M8 9v4.5" size={10} />
+              </span>
+            )}
           </button>
         ))}
         <button

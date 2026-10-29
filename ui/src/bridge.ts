@@ -1,4 +1,5 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
+import type { Extension } from "./Site";
 
 // The app serves the UI and answers these requests itself (app/src/command.rs).
 export function send(command: string) {
@@ -18,6 +19,8 @@ export type State = {
   closed: ClosedTab[];
   // The bar above the page holds the navigation buttons and the address (View › Show Toolbar).
   toolbar: boolean;
+  // The displayed Space's profile's pinned extensions, whose buttons show by the address.
+  extensions: Extension[];
 };
 
 export type ClosedTab = {
