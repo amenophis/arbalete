@@ -207,3 +207,31 @@ test("tells addresses from searches", () => {
   expect(toUrl("weather")).toBeNull();
   expect(toUrl("v1.2")).toBeNull();
 });
+
+test("suggests the search engine's searches below the typed text, whenever they come", () => {
+  render(<Overlay />);
+  show();
+  fireEvent.change(field(), { target: { value: "rust" } });
+  const suggest = (text: string, suggestions: string[]) =>
+    act(() => {
+      dispatchEvent(new CustomEvent("arbalete:suggestions", { detail: { text, suggestions } }));
+    });
+  suggest("ru", ["ruby"]);
+  expect(rows()).toEqual(["rust — Search Google"]);
+  suggest("rust", ["rust", "rustdesk", "rust language", "rustica", "rust belt", "rusty"]);
+  answer("rust", [], [{ url: "https://www.rust-lang.org/", title: "Rust" }]);
+  // The history page completes the typed text, first.
+  expect(rows()).toEqual([
+    "rust-lang.org",
+    "rustdesk",
+    "rust language",
+    "rustica",
+    "rust belt",
+    "Rust",
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: "rustdesk" }));
+  expect(fetch).toHaveBeenLastCalledWith(
+    `/command/open/${encodeURIComponent("https://www.google.com/search?q=rustdesk")}`,
+    { method: "POST" },
+  );
+});

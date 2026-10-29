@@ -285,6 +285,9 @@ pub enum Command {
     /// Changes what a profile's Command Bar searches with:
     /// `profile/search/<profile id>/<engine>`, like `duckduckgo`.
     SetSearchEngine(ProfileId, SearchEngine),
+    /// Lets a profile's Command Bar suggest searches, or not:
+    /// `profile/suggestions/<profile id>/<on or off>`.
+    SetSearchSuggestions(ProfileId, bool),
     /// Shows the settings window, from the menu: `settings/show`.
     ShowSettings,
     /// Closes the settings window: `settings/hide`.
@@ -566,6 +569,18 @@ impl Command {
                 {
                     let id = serde_json::from_str(id).ok()?;
                     return percent_decode(name).map(|name| Self::RenameProfile(id, name));
+                }
+                if let Some((id, on)) = path
+                    .strip_prefix("profile/suggestions/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    let on = match on {
+                        "on" => true,
+                        "off" => false,
+                        _ => return None,
+                    };
+                    return Some(Self::SetSearchSuggestions(id, on));
                 }
                 if let Some((id, engine)) = path
                     .strip_prefix("profile/search/")
@@ -1405,6 +1420,11 @@ mod tests {
         );
         assert_eq!(Command::parse("settings/unknown/true"), None);
         assert_eq!(Command::parse("settings/restore-session/yes"), None);
+        assert!(matches!(
+            Command::parse("profile/suggestions/1/off"),
+            Some(Command::SetSearchSuggestions(_, false))
+        ));
+        assert_eq!(Command::parse("profile/suggestions/1/maybe"), None);
         let Some(Command::SetSearchEngine(id, engine)) =
             Command::parse("profile/search/1/duckduckgo")
         else {

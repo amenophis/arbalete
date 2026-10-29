@@ -32,9 +32,18 @@ pub struct Profile {
     /// What the Command Bar searches with, in this profile's Spaces.
     #[serde(default)]
     pub search_engine: SearchEngine,
+    /// The Command Bar suggests searches as text is typed, from the search engine: what is typed
+    /// goes to it.
+    #[serde(default = "yes")]
+    pub search_suggestions: bool,
     /// The extensions whose buttons show by the address, by id, in the order they were pinned.
     #[serde(default)]
     pub pinned_extensions: Vec<String>,
+}
+
+/// A setting on by default, for profiles saved before it existed.
+fn yes() -> bool {
+    true
 }
 
 /// How many favorites a profile holds at most: the grid keeps 3 rows of 4 tiles.
@@ -264,6 +273,7 @@ impl Sidebar {
             favorites,
             favorites_hint_hidden: false,
             search_engine: SearchEngine::default(),
+            search_suggestions: true,
             pinned_extensions: Vec::new(),
         });
         id
@@ -294,6 +304,12 @@ impl Sidebar {
 
     pub fn set_search_engine(&mut self, id: ProfileId, engine: SearchEngine) -> Result<(), Error> {
         self.profile_mut(id)?.search_engine = engine;
+        Ok(())
+    }
+
+    /// Lets a profile's Command Bar suggest searches from its search engine, or not.
+    pub fn set_search_suggestions(&mut self, id: ProfileId, on: bool) -> Result<(), Error> {
+        self.profile_mut(id)?.search_suggestions = on;
         Ok(())
     }
 
@@ -1329,6 +1345,19 @@ mod tests {
             sidebar.pin_extension(unknown, "dark", true),
             Err(Error::UnknownProfile)
         );
+    }
+
+    #[test]
+    fn a_profile_suggests_searches_until_told_not_to() {
+        let mut sidebar = Sidebar::default();
+        let id = sidebar.profiles()[0].id;
+        assert!(sidebar.profiles()[0].search_suggestions);
+        sidebar.set_search_suggestions(id, false).unwrap();
+        assert!(!sidebar.profiles()[0].search_suggestions);
+        let mut saved = serde_json::to_value(&sidebar.profiles()[0]).unwrap();
+        saved.as_object_mut().unwrap().remove("search_suggestions");
+        let profile: Profile = serde_json::from_value(saved).unwrap();
+        assert!(profile.search_suggestions);
     }
 
     #[test]

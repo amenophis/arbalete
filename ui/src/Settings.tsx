@@ -7,7 +7,13 @@ import { Icon } from "./Icon";
 export type SettingsDetail = {
   settings: { warnBeforeQuit: boolean; restoreSession: boolean };
   engines: { id: string; name: string }[];
-  profiles: { id: number; name: string; color: Color; searchEngine: string }[];
+  profiles: {
+    id: number;
+    name: string;
+    color: Color;
+    searchEngine: string;
+    searchSuggestions: boolean;
+  }[];
 };
 
 type Section = "general" | "profiles" | "shortcuts";
@@ -203,6 +209,19 @@ function Profiles({ detail }: { detail: SettingsDetail }) {
                 </option>
               ))}
             </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              aria-label={`${profile.name} search suggestions`}
+              checked={profile.searchSuggestions}
+              onChange={(event) =>
+                send(
+                  `profile/suggestions/${profile.id}/${event.currentTarget.checked ? "on" : "off"}`,
+                )
+              }
+            />{" "}
+            Suggestions
           </label>
         </li>
       ))}
