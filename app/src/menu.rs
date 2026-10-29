@@ -89,9 +89,25 @@ fn site_menu(url: &str) -> Vec<Entry> {
     ]
 }
 
-/// An extension's menu, from the site controls' panel.
-pub fn extension_menu(id: &str, name: &str) -> Vec<Entry> {
-    vec![item(
+/// An extension's menu, from the site controls' panel: its options page, turning it off or on,
+/// and removing it.
+pub fn extension_menu(id: &str, name: &str, options: bool, enabled: bool) -> Vec<Entry> {
+    let mut menu = Vec::new();
+    if options {
+        menu.push(item(
+            "options",
+            "Options",
+            Action::Run(Command::ExtensionOptions(id.to_string())),
+        ));
+    }
+    let toggle = if enabled { "Turn Off" } else { "Turn On" };
+    menu.push(item(
+        "toggle",
+        toggle,
+        Action::Run(Command::SetExtensionEnabled(id.to_string(), !enabled)),
+    ));
+    menu.push(Entry::Separator);
+    menu.push(item(
         "remove",
         "Remove from Arbalete…",
         Action::Confirm {
@@ -100,7 +116,8 @@ pub fn extension_menu(id: &str, name: &str) -> Vec<Entry> {
             button: "Remove",
             command: Command::RemoveExtension(id.to_string()),
         },
-    )]
+    ));
+    menu
 }
 
 /// Only web pages have a site to control.

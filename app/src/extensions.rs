@@ -34,6 +34,11 @@ pub struct Installed {
     /// Its button's icon file.
     #[serde(skip)]
     pub icon: Option<PathBuf>,
+    /// Its options page, a path in the extension, if it has one.
+    #[serde(skip)]
+    pub options: Option<String>,
+    /// Turned off by the user (or by Chromium), it stays installed but does not run.
+    pub enabled: bool,
 }
 
 /// Where Chromium installs extensions, as its preferences record it: from the Web Store or
@@ -42,7 +47,7 @@ pub struct Installed {
 /// user's.
 const USER_LOCATIONS: [i64; 4] = [1, 4, 6, 7];
 
-/// The extensions installed and enabled in a profile's directory, by name.
+/// The extensions installed in a profile's directory, enabled or not, by name.
 pub fn installed(profile_dir: &Path) -> Vec<Installed> {
     let preferences = std::fs::read(profile_dir.join("Secure Preferences")).ok();
     let preferences: Value = preferences
@@ -55,10 +60,7 @@ pub fn installed(profile_dir: &Path) -> Vec<Installed> {
         .iter()
         .filter(|(_, setting)| {
             let location = setting["location"].as_i64().unwrap_or_default();
-            let disabled = setting["disable_reasons"]
-                .as_array()
-                .is_some_and(|reasons| !reasons.is_empty());
-            USER_LOCATIONS.contains(&location) && !disabled
+            USER_LOCATIONS.contains(&location)
         })
         .filter_map(|(id, setting)| {
             let path = Path::new(setting["path"].as_str()?);
@@ -67,7 +69,14 @@ pub fn installed(profile_dir: &Path) -> Vec<Installed> {
             } else {
                 profile_dir.join("Extensions").join(path)
             };
-            read_manifest(id, &dir)
+            let disabled = setting["disable_reasons"]
+                .as_array()
+                .is_some_and(|reasons| !reasons.is_empty());
+            let extension = read_manifest(id, &dir)?;
+            Some(Installed {
+                enabled: !disabled,
+                ..extension
+            })
         })
         .collect();
     list.sort_by_key(|extension| extension.name.to_lowercase());
@@ -93,6 +102,11 @@ fn read_manifest(id: &str, dir: &Path) -> Option<Installed> {
             .filter(|popup| !popup.is_empty())
             .map(str::to_string),
         icon: icon.map(|icon| dir.join(icon.trim_start_matches('/'))),
+        options: manifest["options_ui"]["page"]
+            .as_str()
+            .or(manifest["options_page"].as_str())
+            .map(str::to_string),
+        enabled: true,
     })
 }
 
@@ -266,26 +280,66 @@ fn worker_started(context: &str, url: &str) {
     crate::shell::extension_installed();
 }
 
-/// Removes an extension from a profile, through the profile's helper, which holds the
-/// `management` permission.
+/// Removes an extension from a profile, through the profile's helper.
 pub fn uninstall(profile: ProfileId, id: &str) {
-    let session = BRIDGE.with_borrow(|bridge| {
-        let context = &bridge.contents.get(&profile)?.context;
-        bridge.helpers.get(context).cloned()
-    });
-    let Some(session) = session else { return };
     let id_json = serde_json::to_string(id).expect("a string");
     // Without Chromium's own confirmation: the app asks first.
-    let expression =
-        format!("chrome.management.uninstall({id_json}, {{ showConfirmDialog: false }})");
-    let params = json!({ "expression": expression });
-    send_in(&session, "Runtime.evaluate", params, None);
+    helper_evaluate(
+        profile,
+        &format!("chrome.management.uninstall({id_json}, {{ showConfirmDialog: false }})"),
+    );
     INSTALLED.with_borrow_mut(|installed| {
         if let Some((_, list)) = installed.get_mut(&profile) {
             list.retain(|extension| extension.id != id);
         }
     });
     update_icons(profile);
+}
+
+/// Turns an extension of a profile on or off, through the profile's helper.
+pub fn set_enabled(profile: ProfileId, id: &str, enabled: bool) {
+    let id_json = serde_json::to_string(id).expect("a string");
+    helper_evaluate(
+        profile,
+        &format!("chrome.management.setEnabled({id_json}, {enabled})"),
+    );
+    INSTALLED.with_borrow_mut(|installed| {
+        let list = installed.get_mut(&profile).map(|(_, list)| list);
+        if let Some(extension) = list
+            .into_iter()
+            .flatten()
+            .find(|extension| extension.id == id)
+        {
+            extension.enabled = enabled;
+        }
+    });
+}
+
+/// The address of an extension's options page, if it has one.
+pub fn options_url(profile: ProfileId, id: &str) -> Option<String> {
+    let extension = list(profile)
+        .into_iter()
+        .find(|extension| extension.id == id)?;
+    Some(format!(
+        "chrome-extension://{id}/{}",
+        extension.options?.trim_start_matches('/')
+    ))
+}
+
+/// Evaluates an expression in a profile's helper, which holds the `management` permission.
+fn helper_evaluate(profile: ProfileId, expression: &str) {
+    let session = BRIDGE.with_borrow(|bridge| {
+        let context = &bridge.contents.get(&profile)?.context;
+        bridge.helpers.get(context).cloned()
+    });
+    if let Some(session) = session {
+        send_in(
+            &session,
+            "Runtime.evaluate",
+            json!({ "expression": expression }),
+            None,
+        );
+    }
 }
 
 /// Reads a profile's extensions again.
@@ -721,7 +775,7 @@ mod tests {
     }
 
     #[test]
-    fn lists_the_extensions_the_user_installed_and_enabled() {
+    fn lists_the_extensions_the_user_installed() {
         let profile = TestDir::new("extensions");
         let preferences = json!({ "extensions": { "settings": {
             "dark": { "location": 1, "path": "dark/1.0_0", "disable_reasons": [] },
@@ -737,7 +791,7 @@ mod tests {
         );
         profile.write(
             "Extensions/block/2.0_0/manifest.json",
-            r#"{ "name": "__MSG_extName__", "default_locale": "en", "icons": { "16": "/i16.png", "128": "i128.png" } }"#,
+            r#"{ "name": "__MSG_extName__", "default_locale": "en", "icons": { "16": "/i16.png", "128": "i128.png" }, "options_ui": { "page": "options.html" } }"#,
         );
         profile.write(
             "Extensions/block/2.0_0/_locales/en/messages.json",
@@ -749,13 +803,17 @@ mod tests {
             .iter()
             .map(|extension| extension.name.as_str())
             .collect();
-        assert_eq!(names, ["Dark Reader", "uBlock Origin Lite"]);
+        assert_eq!(names, ["Dark Reader", "Off", "uBlock Origin Lite"]);
+        assert!(list[0].enabled && !list[1].enabled && list[2].enabled);
+        let list = [&list[0], &list[2]];
         assert_eq!(list[0].popup.as_deref(), Some("ui/popup.html"));
         assert_eq!(
             list[0].icon,
             Some(profile.0.join("Extensions/dark/1.0_0/i38.png"))
         );
         assert_eq!(list[1].popup, None);
+        assert_eq!(list[1].options.as_deref(), Some("options.html"));
+        assert_eq!(list[0].options, None);
         assert_eq!(
             list[1].icon,
             Some(profile.0.join("Extensions/block/2.0_0/i128.png"))
