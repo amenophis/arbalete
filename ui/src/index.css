@@ -1894,16 +1894,7 @@ button.folder:hover {
 }
 
 .library
-  :is(
-    button,
-    input,
-    li,
-    .space-cards,
-    .downloads-list,
-    .history-list,
-    .closed-tabs,
-    .extensions-list
-  ) {
+  :is(button, input, li, .space-cards, .downloads-list, .history-list, .closed-tabs, .extensions) {
   -webkit-app-region: no-drag;
 }
 
@@ -2467,8 +2458,20 @@ button.folder:hover {
   opacity: 0.75;
 }
 
-/* The extensions, in the library: a row each, its controls at its end. */
+/* The extensions, in the library, which they fill: their list, and the selected one's details
+   beside it. */
+.extensions {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  min-height: 0;
+}
+
 .extensions-list {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 260px;
   overflow-y: auto;
 }
 
@@ -2478,13 +2481,17 @@ button.folder:hover {
   list-style: none;
 }
 
-.extensions-actions {
+.extensions-buttons {
   display: flex;
   gap: 6px;
-  margin: 4px 8px 8px;
+  margin: 0 0 8px;
 }
 
-.extensions-action {
+.extensions-button,
+.extension-action {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   padding: 4px 10px;
   border: 0;
   border-radius: 6px;
@@ -2496,33 +2503,23 @@ button.folder:hover {
 .extension-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 6px;
+  padding-right: 8px;
   border-radius: 8px;
 }
 
-.extension-row:hover {
+.extension-row:hover,
+.extension-row[aria-current] {
   background: var(--hover);
 }
 
-.extension-row[data-off] > :is(.extension-icon, .extension-text) {
-  opacity: 0.45;
-}
-
-.extension-icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-}
-
-.extension-text {
+.extension-select {
   display: flex;
   flex: 1;
-  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  padding: 0;
+  padding: 6px 8px;
   border: 0;
   background: none;
   color: inherit;
@@ -2530,40 +2527,28 @@ button.folder:hover {
   text-align: left;
 }
 
-.extension-title,
-.extension-description {
+.extension-row[data-off] .extension-select {
+  opacity: 0.45;
+}
+
+.extension-name {
+  flex: 1;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.extension-version,
-.extension-description {
-  font-size: 11px;
+.extension-pinned {
+  display: grid;
   opacity: 0.6;
 }
 
-.extension-control {
+.extension-icon {
   display: grid;
   flex: none;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: none;
-  color: inherit;
-  opacity: 0.6;
-}
-
-.extension-control:hover,
-.extension-control[aria-pressed="true"] {
-  opacity: 1;
-}
-
-.extension-control:hover {
-  background: var(--hover);
+  width: 20px;
+  height: 20px;
 }
 
 .extension-switch {
@@ -2571,22 +2556,79 @@ button.folder:hover {
   accent-color: var(--accent);
 }
 
-/* An extension's details, under its row, label beside value. */
 .extension-details {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 4px 12px;
-  margin: 2px 8px 10px 40px;
-  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 16px 16px 0;
+  overflow-y: auto;
 }
 
-.extension-details dt {
+.extension-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.extension-header .extension-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.extension-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Over the library's headings. */
+.extension-header .extension-title {
+  margin: 0;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 600;
+  opacity: 1;
+}
+
+.extension-description {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.extension-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0;
+}
+
+.extension-remove {
+  color: #e5484d;
+}
+
+.extension-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--menu-border);
+}
+
+.extension-facts dt,
+.extension-details h4 {
   opacity: 0.55;
 }
 
-.extension-details dd {
+.extension-facts dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.extension-details h4 {
+  margin: 14px 0 6px;
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 .extension-id {
@@ -2594,11 +2636,23 @@ button.folder:hover {
   user-select: text;
 }
 
-.extension-link {
+.extension-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
   padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  text-align: left;
+  list-style: none;
+}
+
+.extension-chips li {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12px;
+}
+
+.extension-chips li[data-warning] {
+  background: #f5a6232e;
+  color: #f5a623;
 }

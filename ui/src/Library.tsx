@@ -83,8 +83,10 @@ export function Library({
     // Their page may have changed them.
     if (next === "extensions") send("extension/reload");
   };
-  // The Spaces fill the window, the page hidden; the other sections rest beside it.
-  useEffect(() => send(section === "spaces" ? "library/wide" : "library/narrow"), [section]);
+  // The Spaces and the extensions fill the window, the page hidden; the other sections rest
+  // beside it.
+  const wide = section === "spaces" || section === "extensions";
+  useEffect(() => send(wide ? "library/wide" : "library/narrow"), [wide]);
   const label = SECTIONS.find(({ id }) => id === section)?.label;
   return (
     <section
