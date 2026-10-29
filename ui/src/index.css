@@ -2393,21 +2393,45 @@ button.folder:hover {
   outline: none;
 }
 
-.site-extensions .site-button {
+.site-tile {
   position: relative;
+  display: grid;
 }
 
-/* A pinned extension's badge, at its tile's bottom right corner. */
-.site-pinned {
+/* An extension's pin, over its tile's bottom right corner, like Arc's: shown on a pinned
+   extension, and on the others once the pointer has rested on them a moment. */
+.site-pin {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
+  right: -5px;
+  bottom: -5px;
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid var(--menu);
   border-radius: 50%;
-  background: var(--menu);
+  background: var(--tile-hover);
+  color: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.site-tile:hover .site-pin {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0.5s;
+}
+
+.site-tile[data-pinned] .site-pin {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+
+.site-pin:hover {
+  background: var(--accent);
 }
 
 .pinned-extension {
@@ -2465,6 +2489,8 @@ button.folder:hover {
   flex: 1;
   gap: 16px;
   min-height: 0;
+  /* While the library narrows back to the sidebar, its content stays in its page. */
+  overflow: hidden;
 }
 
 .extensions-list {

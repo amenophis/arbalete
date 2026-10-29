@@ -43,7 +43,9 @@ test("acts on the site and opens an extension's popup", () => {
   });
   expect(screen.getByRole("button", { name: "No Popup" })).toHaveProperty("disabled", true);
   expect(screen.getByRole("button", { name: "Off" })).toHaveProperty("disabled", true);
-  expect(screen.getAllByLabelText("Pinned")).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Unpin Dark Reader" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Pin No Popup" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/extension/pin/quiet", { method: "POST" });
   fireEvent.click(screen.getByRole("button", { name: "Dark Reader" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/site/extension/dark", { method: "POST" });
   fireEvent.click(screen.getByRole("button", { name: "Manage" }));

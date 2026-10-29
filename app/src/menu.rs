@@ -93,13 +93,7 @@ fn site_menu(url: &str) -> Vec<Entry> {
 
 /// An extension's menu, from the site controls' panel: pinning it by the address, its options
 /// page, turning it off or on, and removing it.
-pub fn extension_menu(
-    id: &str,
-    name: &str,
-    options: bool,
-    enabled: bool,
-    pinned: bool,
-) -> Vec<Entry> {
+pub fn extension_menu(id: &str, options: bool, enabled: bool, pinned: bool) -> Vec<Entry> {
     let pin = if pinned { "Unpin" } else { "Pin" };
     let mut menu = vec![item(
         "pin",
@@ -120,22 +114,13 @@ pub fn extension_menu(
         Action::Run(Command::SetExtensionEnabled(id.to_string(), !enabled)),
     ));
     menu.push(Entry::Separator);
+    // The app or Chromium asks first (Command::RemoveExtension).
     menu.push(item(
         "remove",
         "Remove from Arbalete…",
-        remove_extension(id, name),
+        Action::Run(Command::RemoveExtension(id.to_string())),
     ));
     menu
-}
-
-/// Removes an extension once the user confirms it.
-pub fn remove_extension(id: &str, name: &str) -> Action {
-    Action::Confirm {
-        question: format!("Remove “{name}”?"),
-        detail: "Its data in this profile is deleted too.",
-        button: "Remove",
-        command: Command::RemoveExtension(id.to_string()),
-    }
 }
 
 /// Only web pages have a site to control.
