@@ -1724,6 +1724,11 @@ wrap_window_delegate! {
                 })),
                 None => window.center_window(Some(&PERMISSION_SIZE)),
             }
+            // Made invisible before it shows, then again once shown, in case showing undid it.
+            #[cfg(target_os = "macos")]
+            if self.hidden {
+                crate::mac::hide_window(window.window_handle());
+            }
             window.show();
             #[cfg(target_os = "macos")]
             if self.hidden {
