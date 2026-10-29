@@ -29,6 +29,20 @@
     callback(value);
   };
   const ask = (message) => self.__arbalete(JSON.stringify(message));
+  // Chromium prompts for optional permissions only from a Chrome-style page: Arbalete asks there
+  // (request_permissions in app/src/extensions.rs), then gives the answer to __arbaleteAnswer.
+  let asked = 0;
+  const answers = new Map();
+  self.__arbaleteAnswer = (request, granted) => {
+    answers.get(request)?.(granted);
+    answers.delete(request);
+  };
+  chrome.permissions.request = (permissions, ...rest) => {
+    asked += 1;
+    const granted = new Promise((resolve) => answers.set(asked, resolve));
+    ask({ method: "permissions", request: asked, extension: chrome.runtime.id, permissions });
+    return granted.then((value) => reply(rest, value));
+  };
   // A popup's page, rather than a service worker.
   if (typeof window !== "undefined") {
     const close = () => ask({ method: "close" });

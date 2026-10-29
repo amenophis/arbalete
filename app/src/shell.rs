@@ -171,6 +171,8 @@ thread_local! {
     static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// Chromium's extensions page, in a window of its own.
     static EXTENSIONS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    /// The window Chromium asks in for an extension's optional permissions.
+    static PERMISSION_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// The browsers Chromium opened by itself (StrayClient), until an install closes them.
     static STRAYS: RefCell<Vec<Browser>> = const { RefCell::new(Vec::new()) };
     /// The app's settings, loaded when the context is initialized.
@@ -1553,6 +1555,121 @@ fn show_settings() {
         Some(window) => window.activate(),
         None => {
             window_create_top_level(Some(&mut SettingsWindowDelegate::new()));
+        }
+    }
+}
+
+/// The displayed Space's profile.
+pub fn displayed_profile() -> ProfileId {
+    STATE.with_borrow(|state| state.sidebar.displayed().profile)
+}
+
+/// The permission window's size, which holds Chromium's prompt.
+const PERMISSION_SIZE: Size = Size {
+    width: 480,
+    height: 280,
+};
+
+/// Opens a small Chrome-style window on a page of an extension, `url`, in a profile, for
+/// Chromium to ask the user there for the optional permissions it requests: Chromium prompts
+/// only from a Chrome-style page (extensions::request_permissions).
+pub fn open_permission_window(profile: ProfileId, url: &str) {
+    window_create_top_level(Some(&mut PermissionWindowDelegate::new(
+        profile,
+        url.to_string(),
+    )));
+}
+
+/// Closes the permission window, later, out of the callback that learns the answer.
+pub fn close_permission_window() {
+    post_task(ThreadId::UI, Some(&mut ClosePermissionWindow::new()));
+}
+
+wrap_task! {
+    struct ClosePermissionWindow {}
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(window) = PERMISSION_WINDOW.with_borrow(Clone::clone) {
+                window.close();
+            }
+        }
+    }
+}
+
+wrap_window_delegate! {
+    struct PermissionWindowDelegate {
+        profile: ProfileId,
+        url: String,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            PERMISSION_SIZE
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let window = window.expect("window").clone();
+            window.set_title(Some(&CefString::from("Extension Permissions")));
+            window.set_to_fill_layout();
+            let view = browser_view_create(
+                Some(&mut PermissionClient::new()),
+                Some(&CefString::from(self.url.as_str())),
+                Some(&BrowserSettings::default()),
+                None,
+                profile_context(self.profile).as_mut(),
+                Some(&mut ChromeViewDelegate::new()),
+            )
+            .expect("permission view");
+            window.add_child_view(Some(&mut View::from(&view)));
+            window.center_window(Some(&PERMISSION_SIZE));
+            window.show();
+            PERMISSION_WINDOW.set(Some(window));
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            PERMISSION_WINDOW.set(None);
+            extensions::permission_window_closed();
+        }
+
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+
+        fn window_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::CHROME
+        }
+    }
+}
+
+// The permission window's page: Chromium is asked once it has loaded.
+wrap_client! {
+    struct PermissionClient {}
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(BrowserLifeSpan::new(None))
+        }
+
+        fn load_handler(&self) -> Option<LoadHandler> {
+            Some(PermissionLoadHandler::new())
+        }
+    }
+}
+
+wrap_load_handler! {
+    struct PermissionLoadHandler {}
+
+    impl LoadHandler {
+        fn on_load_end(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, _http_status_code: i32) {
+            if let (Some(browser), true) = (browser, frame.is_some_and(|frame| frame.is_main() == 1)) {
+                extensions::permission_page_loaded(browser);
+            }
         }
     }
 }
