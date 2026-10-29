@@ -67,6 +67,8 @@ pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
                 _ => None,
             }
         }
+        // Its menu needs the extension's own state, which the shell knows (show_menu).
+        Target::Pinned(_) => None,
     }
 }
 

@@ -244,11 +244,11 @@ pub enum Command {
     /// Opens the native menu of a sidebar row at the pointer: `menu/node/<tab or folder id>`, or
     /// of a Space's header, `menu/space/<space id>`.
     Menu(Target),
-    /// The rows and Space header a sidebar shows, where a right-click opens their menu:
-    /// `menu/targets/<docked or revealed>/<percent-encoded JSON array of targets>`, like
-    /// `[{"target":{"node":12},"x":7,"y":180,"width":250,"height":41}]`.
+    /// The rows, Space header and pinned extensions a view shows, where a right-click opens
+    /// their menu: `menu/targets/<docked, revealed or toolbar>/<percent-encoded JSON array of
+    /// targets>`, like `[{"target":{"node":12},"x":7,"y":180,"width":250,"height":41}]`.
     MenuTargets {
-        revealed: bool,
+        view: ButtonView,
         targets: Vec<HitTarget>,
     },
     /// Runs an item of a menu without showing it, by the item's id (app/src/menu.rs), as the
@@ -381,6 +381,8 @@ pub enum Target {
     SpaceProfile(SpaceId),
     /// The site of the selected tab, from the url bar's site controls: `menu/site`.
     Site,
+    /// A pinned extension, by its rank among the displayed Space's profile's, from its button.
+    Pinned(usize),
 }
 
 /// Where an extension shows in the site controls' panel, in CSS pixels from its top left corner.
@@ -614,13 +616,14 @@ impl Command {
                     .strip_prefix("menu/targets/")
                     .and_then(|r| r.split_once('/'))
                 {
-                    let revealed = match view {
-                        "docked" => false,
-                        "revealed" => true,
+                    let view = match view {
+                        "docked" => ButtonView::Docked,
+                        "revealed" => ButtonView::Revealed,
+                        "toolbar" => ButtonView::Toolbar,
                         _ => return None,
                     };
                     let targets = serde_json::from_str(&percent_decode(targets)?).ok()?;
-                    return Some(Self::MenuTargets { revealed, targets });
+                    return Some(Self::MenuTargets { view, targets });
                 }
                 if let Some(args) = path.strip_prefix("menu/choose/") {
                     // The target's kind and id, then the item's id, which may hold slashes.
@@ -1300,12 +1303,12 @@ mod tests {
         // encodeURIComponent('[{"target":{"space":4},"x":7,"y":180.5,"width":250,"height":32}]')
         let encoded = "%5B%7B%22target%22%3A%7B%22space%22%3A4%7D%2C%22x%22%3A7%2C%22y%22%3A180.5\
                        %2C%22width%22%3A250%2C%22height%22%3A32%7D%5D";
-        let Some(Command::MenuTargets { revealed, targets }) =
+        let Some(Command::MenuTargets { view, targets }) =
             Command::parse(&format!("menu/targets/revealed/{encoded}"))
         else {
             panic!("not menu targets")
         };
-        assert!(revealed);
+        assert_eq!(view, ButtonView::Revealed);
         let Target::Space(id) = targets[0].target else {
             panic!("not a Space")
         };
@@ -1315,10 +1318,22 @@ mod tests {
         assert!(matches!(
             Command::parse("menu/targets/docked/%5B%5D"),
             Some(Command::MenuTargets {
-                revealed: false,
+                view: ButtonView::Docked,
                 ..
             })
         ));
+        // encodeURIComponent('[{"target":{"pinned":1},"x":0,"y":0,"width":26,"height":26}]')
+        let pinned = "%5B%7B%22target%22%3A%7B%22pinned%22%3A1%7D%2C%22x%22%3A0%2C%22y%22%3A0\
+                      %2C%22width%22%3A26%2C%22height%22%3A26%7D%5D";
+        let Some(Command::MenuTargets { view, targets }) =
+            Command::parse(&format!("menu/targets/toolbar/{pinned}"))
+        else {
+            panic!("not menu targets")
+        };
+        assert_eq!(
+            (view, targets[0].target),
+            (ButtonView::Toolbar, Target::Pinned(1))
+        );
         assert_eq!(Command::parse("menu/targets/floating/%5B%5D"), None);
         assert_eq!(Command::parse("menu/targets/docked/%5B"), None);
         assert_eq!(Command::parse("menu/space/x"), None);
