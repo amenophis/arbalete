@@ -147,23 +147,33 @@ export function Site() {
       </div>
       <div className="site-extensions">
         {site.extensions.map((extension) => (
-          <button
-            key={extension.id}
-            data-extension={extension.id}
-            type="button"
-            className="site-button"
-            aria-label={extension.name}
-            title={extension.enabled ? extension.name : `${extension.name} (off)`}
-            disabled={!extension.popup || !extension.enabled}
-            onClick={() => send(`site/extension/${extension.id}`)}
-          >
-            {extension.icon ? <img src={extension.icon} alt="" /> : extension.name.slice(0, 1)}
-            {extension.pinned && (
-              <span className="site-pinned" role="img" aria-label="Pinned">
-                <Icon d="M6 2.5h4M7 2.5v4l-2 2.5h6L9 6.5v-4M8 9v4.5" size={10} />
-              </span>
-            )}
-          </button>
+          // Like Arc's: a pin at the tile's corner, shown on a pinned extension, and on the others
+          // after the pointer rests on them.
+          <div key={extension.id} className="site-tile" data-pinned={extension.pinned || undefined}>
+            <button
+              data-extension={extension.id}
+              type="button"
+              className="site-button"
+              aria-label={extension.name}
+              title={extension.enabled ? extension.name : `${extension.name} (off)`}
+              disabled={!extension.popup || !extension.enabled}
+              onClick={() => send(`site/extension/${extension.id}`)}
+            >
+              {extension.icon ? <img src={extension.icon} alt="" /> : extension.name.slice(0, 1)}
+            </button>
+            <button
+              type="button"
+              className="site-pin"
+              aria-label={extension.pinned ? `Unpin ${extension.name}` : `Pin ${extension.name}`}
+              aria-pressed={extension.pinned}
+              title={extension.pinned ? "Unpin" : "Pin"}
+              onClick={() =>
+                send(`extension/${extension.pinned ? "unpin" : "pin"}/${extension.id}`)
+              }
+            >
+              <Icon d="M6 2.5h4M7 2.5v4l-2 2.5h6L9 6.5v-4M8 9v4.5" size={11} />
+            </button>
+          </div>
         ))}
         <button
           type="button"

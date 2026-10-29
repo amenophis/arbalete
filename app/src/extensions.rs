@@ -254,6 +254,8 @@ enum Pending {
     Attach { context: String, helper: bool },
     /// The helper's list of targets and their tab ids, in a browser context.
     TabIds(String),
+    /// The helper's list of a profile's extensions, as Chromium has them now.
+    Extensions(ProfileId),
 }
 
 #[derive(Default)]
@@ -268,6 +270,8 @@ struct Bridge {
     workers: HashMap<String, String>,
     /// The helper's session in each browser context.
     helpers: HashMap<String, String>,
+    /// The helper's extension id, which its folder's path sets.
+    helper_id: Option<String>,
     contents: HashMap<ProfileId, Content>,
     tabs: HashMap<ProfileId, ActiveTab>,
 }
@@ -339,15 +343,7 @@ fn worker_started(context: &str, url: &str) {
         (!list.iter().any(|extension| extension.id == id)).then(|| dir.clone())
     });
     let Some(dir) = new else { return };
-    // Its files are in a directory named after its version.
-    let versions = std::fs::read_dir(dir.join("Extensions").join(id))
-        .into_iter()
-        .flatten()
-        .flatten();
-    let Some(extension) = versions
-        .filter_map(|version| read_manifest(id, &version.path()))
-        .next()
-    else {
+    let Some(extension) = read_installed(&dir, id) else {
         return;
     };
     INSTALLED.with_borrow_mut(|installed| {
@@ -359,22 +355,6 @@ fn worker_started(context: &str, url: &str) {
     update_icons(profile);
     crate::shell::extensions_changed();
     crate::shell::extension_installed();
-}
-
-/// Removes an extension from a profile, through the profile's helper.
-pub fn uninstall(profile: ProfileId, id: &str) {
-    let id_json = serde_json::to_string(id).expect("a string");
-    // Without Chromium's own confirmation: the app asks first.
-    helper_evaluate(
-        profile,
-        &format!("chrome.management.uninstall({id_json}, {{ showConfirmDialog: false }})"),
-    );
-    INSTALLED.with_borrow_mut(|installed| {
-        if let Some((_, list)) = installed.get_mut(&profile) {
-            list.retain(|extension| extension.id != id);
-        }
-    });
-    update_icons(profile);
 }
 
 /// Turns an extension of a profile on or off, through the profile's helper.
@@ -431,25 +411,81 @@ pub fn reload(profile: ProfileId) {
     }
 }
 
-/// Reads a profile's extensions again. Chromium writes its preferences only seconds after a
-/// change: the extensions just installed that they do not list yet are kept while their files
-/// are there.
+/// Reads a profile's extensions again: from Chromium's preferences, which list their files, then
+/// as Chromium has them now, from the helper (reconcile). Chromium writes its preferences only
+/// seconds after a change: alone, they would bring back an extension just removed or turned off.
 fn refresh(profile: ProfileId, dir: &Path) {
-    let mut list = installed(dir);
-    let known = INSTALLED.with_borrow(|all| all.get(&profile).map(|(_, list)| list.clone()));
-    let kept: Vec<_> = known
-        .into_iter()
-        .flatten()
-        .filter(|extension| {
-            !list.iter().any(|listed| listed.id == extension.id)
-                && dir.join("Extensions").join(&extension.id).exists()
-        })
-        .collect();
-    list.extend(kept);
-    list.sort_by_key(|extension| extension.name.to_lowercase());
+    let list = installed(dir);
     INSTALLED.with_borrow_mut(|all| all.insert(profile, (dir.to_path_buf(), list)));
     update_icons(profile);
     crate::shell::extensions_changed();
+    let session = BRIDGE.with_borrow(|bridge| {
+        let context = &bridge.contents.get(&profile)?.context;
+        bridge.helpers.get(context).cloned()
+    });
+    if let Some(session) = session {
+        let expression = "chrome.management.getAll().then((all) => all.map(({ id, enabled }) => ({ id, enabled })))";
+        let params =
+            json!({ "expression": expression, "awaitPromise": true, "returnByValue": true });
+        send_in(
+            &session,
+            "Runtime.evaluate",
+            params,
+            Some(Pending::Extensions(profile)),
+        );
+    }
+}
+
+/// Makes a profile's extensions those Chromium has now, `live`, as the helper lists them: the
+/// removed ones go, the others are turned on or off, and those the preferences do not list yet
+/// are read from their files.
+fn reconcile(profile: ProfileId, live: &[Value]) {
+    let Some(dir) = INSTALLED.with_borrow(|all| Some(all.get(&profile)?.0.clone())) else {
+        return;
+    };
+    let changed = INSTALLED.with_borrow_mut(|all| {
+        let Some((_, list)) = all.get_mut(&profile) else {
+            return false;
+        };
+        let before = list.clone();
+        list.retain(|extension| live.iter().any(|e| e["id"] == extension.id.as_str()));
+        for extension in list.iter_mut() {
+            let state = live.iter().find(|e| e["id"] == extension.id.as_str());
+            extension.enabled = state.is_some_and(|e| e["enabled"] == true);
+        }
+        for state in live {
+            let Some(id) = state["id"].as_str() else {
+                continue;
+            };
+            if list.iter().any(|extension| extension.id == id) {
+                continue;
+            }
+            if let Some(extension) = read_installed(&dir, id) {
+                list.push(Installed {
+                    enabled: state["enabled"] == true,
+                    ..extension
+                });
+            }
+        }
+        list.sort_by_key(|extension| extension.name.to_lowercase());
+        *list != before
+    });
+    if changed {
+        update_icons(profile);
+        crate::shell::extensions_changed();
+    }
+}
+
+/// An extension installed into a profile's directory, from its files, in a directory named after
+/// its version: the helper and extensions loaded from a folder are not there.
+fn read_installed(dir: &Path, id: &str) -> Option<Installed> {
+    let versions = std::fs::read_dir(dir.join("Extensions").join(id))
+        .into_iter()
+        .flatten()
+        .flatten();
+    versions
+        .filter_map(|version| read_manifest(id, &version.path()))
+        .next()
 }
 
 /// Lets the UI load a profile's extensions' icons (icon_file).
@@ -662,8 +698,14 @@ fn target_seen(target: &Value) {
     if !BRIDGE.with_borrow_mut(|bridge| bridge.attached.insert(id.to_string())) {
         return;
     }
-    if !helper {
-        worker_started(&context, target["url"].as_str().unwrap_or_default());
+    let url = target["url"].as_str().unwrap_or_default();
+    let extension = url
+        .strip_prefix("chrome-extension://")
+        .and_then(|rest| rest.split('/').next());
+    if helper {
+        BRIDGE.with_borrow_mut(|bridge| bridge.helper_id = extension.map(str::to_string));
+    } else {
+        worker_started(&context, url);
     }
     let params = json!({ "targetId": id, "flatten": true });
     let message = json!({ "method": "Target.attachToTarget", "params": params });
@@ -757,89 +799,151 @@ impl Caller {
     }
 }
 
-/// An extension's request for optional permissions, while Chromium asks the user.
-struct PermissionRequest {
-    caller: Caller,
-    /// The shim's number for the request, which its answer names.
-    request: i64,
-    permissions: Value,
+/// What Chromium asks the user about in the app's Chrome-style window, where only it can: an
+/// extension's request for optional permissions, or removing an extension, which Chromium always
+/// confirms when another extension, the helper, asks for it.
+enum ChromeTask {
+    Permissions {
+        caller: Caller,
+        /// The shim's number for the request, which its answer names.
+        request: i64,
+        permissions: Value,
+    },
+    Uninstall {
+        profile: ProfileId,
+        id: String,
+    },
 }
 
 thread_local! {
-    static PERMISSIONS: RefCell<Option<PermissionRequest>> = const { RefCell::new(None) };
-    /// The permission window's observer, kept until the window closes: dropped from its own
-    /// callback, where the answer comes, it would free itself while running.
-    static PERMISSION_OBSERVER: RefCell<Option<Registration>> = const { RefCell::new(None) };
+    static CHROME_TASK: RefCell<Option<ChromeTask>> = const { RefCell::new(None) };
+    /// The window's observer, kept until the window closes: dropped from its own callback, where
+    /// the answer comes, it would free itself while running.
+    static CHROME_TASK_OBSERVER: RefCell<Option<Registration>> = const { RefCell::new(None) };
 }
 
 /// Asks the user for the optional permissions an extension requests. Chromium only prompts for
 /// them from a Chrome-style page: the app opens one on the extension's manifest, a page of the
-/// extension that runs none of its code, and asks there (permission_page_loaded). One request at
-/// a time: another meanwhile is refused.
+/// extension that runs none of its code, and asks there (chrome_task_page_loaded). One task at a
+/// time: a request meanwhile is refused.
 fn request_permissions(caller: Caller, call: &Value) {
     let (Some(request), Some(extension)) = (call["request"].as_i64(), call["extension"].as_str())
     else {
         return;
     };
-    let busy = PERMISSIONS.with_borrow(Option::is_some);
+    let busy = CHROME_TASK.with_borrow(Option::is_some);
     let Some(profile) = caller.profile().filter(|_| !busy) else {
         caller.evaluate(&format!("self.__arbaleteAnswer({request}, false)"));
         return;
     };
-    PERMISSIONS.set(Some(PermissionRequest {
+    let permissions = call["permissions"].clone();
+    CHROME_TASK.set(Some(ChromeTask::Permissions {
         caller,
         request,
-        permissions: call["permissions"].clone(),
+        permissions,
     }));
-    crate::shell::open_permission_window(
-        profile,
-        &format!("chrome-extension://{extension}/manifest.json"),
-    );
+    let url = format!("chrome-extension://{extension}/manifest.json");
+    crate::shell::open_chrome_task_window(profile, &url, "Extension Permissions");
 }
 
-/// Asks Chromium for the requested permissions, with a user gesture, once the permission
-/// window's page has loaded: Chromium prompts the user in it.
-pub fn permission_page_loaded(browser: &Browser) {
-    let Some(host) = browser.host() else { return };
-    let Some(permissions) = PERMISSIONS.with_borrow(|p| Some(p.as_ref()?.permissions.to_string()))
-    else {
+/// Whether a profile's extension can remove itself, at the app's asking: turned on, its pages
+/// run. It then asks no confirmation, which the app's own stands for.
+pub fn removes_itself(profile: ProfileId, id: &str) -> bool {
+    list(profile)
+        .iter()
+        .any(|extension| extension.id == id && extension.enabled)
+}
+
+/// Removes an extension from a profile. Turned on, it removes itself, which Chromium confirms
+/// nothing for, from one of its own pages, its manifest, in a hidden view (removes_itself).
+/// Otherwise, as it runs no page, the helper removes it, which holds the `management`
+/// permission, once the user confirms it in Chromium's dialog: Chromium always asks when an
+/// extension removes another.
+pub fn uninstall(profile: ProfileId, id: &str) {
+    if removes_itself(profile, id) {
+        let expression = "chrome.management.uninstallSelf({ showConfirmDialog: false })";
+        let url = format!("chrome-extension://{id}/manifest.json");
+        crate::shell::run_in_hidden_page(profile, &url, expression);
+        removed(profile, id);
+        return;
+    }
+    let Some(helper) = BRIDGE.with_borrow(|bridge| bridge.helper_id.clone()) else {
         return;
     };
-    let registration = host.add_dev_tools_message_observer(Some(&mut PermissionObserver::new()));
-    PERMISSION_OBSERVER.set(registration);
+    if CHROME_TASK.with_borrow(Option::is_some) {
+        return;
+    }
+    CHROME_TASK.set(Some(ChromeTask::Uninstall {
+        profile,
+        id: id.to_string(),
+    }));
+    let url = format!("chrome-extension://{helper}/manifest.json");
+    crate::shell::open_chrome_task_window(profile, &url, "Remove Extension");
+}
+
+/// Asks Chromium, with a user gesture, once the window's page has loaded: Chromium shows its
+/// prompt in it.
+pub fn chrome_task_page_loaded(browser: &Browser) {
+    let Some(host) = browser.host() else { return };
+    let action = CHROME_TASK.with_borrow(|task| match task.as_ref()? {
+        ChromeTask::Permissions { permissions, .. } => {
+            Some(format!("chrome.permissions.request({permissions})"))
+        }
+        ChromeTask::Uninstall { id, .. } => {
+            let id = serde_json::to_string(id).expect("a string");
+            Some(format!(
+                "chrome.management.uninstall({id}).then(() => true, () => false)"
+            ))
+        }
+    });
+    let Some(action) = action else { return };
+    let registration = host.add_dev_tools_message_observer(Some(&mut ChromeTaskObserver::new()));
+    CHROME_TASK_OBSERVER.set(registration);
     // The manifest's text would show under the prompt.
-    let expression =
-        format!("document.body.textContent = ''; chrome.permissions.request({permissions})");
+    let expression = format!("document.body.textContent = ''; {action}");
     let params = json!({ "expression": expression, "awaitPromise": true, "userGesture": true, "returnByValue": true });
     let message = json!({ "id": 1, "method": "Runtime.evaluate", "params": params });
     host.send_dev_tools_message(Some(message.to_string().as_bytes()));
 }
 
-/// Answers the extension's request, and closes the permission window.
-fn answer_permissions(granted: bool) {
-    let Some(request) = PERMISSIONS.take() else {
-        return;
-    };
-    request.caller.evaluate(&format!(
-        "self.__arbaleteAnswer({}, {granted})",
-        request.request
-    ));
-    crate::shell::close_permission_window();
+/// Ends the task with the user's answer, and closes the window.
+fn finish_chrome_task(yes: bool) {
+    match CHROME_TASK.take() {
+        Some(ChromeTask::Permissions {
+            caller, request, ..
+        }) => {
+            caller.evaluate(&format!("self.__arbaleteAnswer({request}, {yes})"));
+        }
+        Some(ChromeTask::Uninstall { profile, id }) if yes => removed(profile, &id),
+        Some(ChromeTask::Uninstall { .. }) | None => {}
+    }
+    crate::shell::close_chrome_task_window();
 }
 
-/// The permission window closed: an unanswered request is refused.
-pub fn permission_window_closed() {
-    answer_permissions(false);
-    PERMISSION_OBSERVER.set(None);
+/// Forgets a profile's extension just removed.
+fn removed(profile: ProfileId, id: &str) {
+    INSTALLED.with_borrow_mut(|installed| {
+        if let Some((_, list)) = installed.get_mut(&profile) {
+            list.retain(|extension| extension.id != id);
+        }
+    });
+    update_icons(profile);
+    crate::shell::extension_removed(profile, id);
+}
+
+/// The window closed: an unanswered prompt is a no.
+pub fn chrome_task_window_closed() {
+    finish_chrome_task(false);
+    CHROME_TASK_OBSERVER.set(None);
 }
 
 wrap_dev_tools_message_observer! {
-    struct PermissionObserver {}
+    struct ChromeTaskObserver {}
 
     impl DevToolsMessageObserver {
         fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
             if let Some(message) = parse(message).filter(|m| m["id"] == 1) {
-                answer_permissions(message["result"]["result"]["value"] == true);
+                finish_chrome_task(message["result"]["result"]["value"] == true);
             }
             0
         }
@@ -913,6 +1017,11 @@ fn message_received(message: &Value) {
         Some(Pending::TabIds(context)) => {
             let targets = message["result"]["result"]["value"].as_array().cloned();
             tab_ids(&context, &targets.unwrap_or_default());
+        }
+        Some(Pending::Extensions(profile)) => {
+            if let Some(live) = message["result"]["result"]["value"].as_array() {
+                reconcile(profile, live);
+            }
         }
         None => {}
     }
