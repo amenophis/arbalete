@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug the app",
+      "type": "lldb",
+      "request": "launch",
+      "preLaunchTask": "app",
+      "program": "${workspaceFolder}/target/bundle/Arbalete.app/Contents/MacOS/arbalete",
+      // A session and a home of its own, never the user's, and DevTools on the UI. Not the
+      // repository, which may sit in Documents: macOS asks before an app reads it.
+      "cwd": "${env:TMPDIR}",
+      "env": {
+        "ARBALETE_DATA_DIR": "${env:TMPDIR}/arbalete-debug/data",
+        "ARBALETE_HOME": "${env:TMPDIR}/arbalete-debug/home",
+        "ARBALETE_DEBUG_PORT": "9222"
+      }
+    },
+    {
+      "name": "Debug the core's tests",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": { "args": ["test", "--no-run", "--package", "arbalete-core", "--lib"] }
+    },
+    {
+      "name": "Debug the app's tests",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": { "args": ["test", "--no-run", "--package", "arbalete", "--bin", "arbalete"] }
+    }
+  ]
+}

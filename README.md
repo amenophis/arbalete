@@ -31,6 +31,10 @@ mise run run     # build the UI, bundle the app and run it
 
 `mise run setup` downloads CEF (about 350 MB) to `~/cef` once; every build uses it through `CEF_PATH`.
 
+In Visual Studio Code, install the recommended extensions and open the repository from a shell where mise is
+active (`code .`), so that rust-analyzer builds with the same toolchain and `CEF_PATH`. The mise tasks are VS Code
+tasks, and "Debug the app" builds and debugs the app on a session of its own in the temporary folder.
+
 On macOS, builds are signed ad hoc, so the system asks again for each permission (such as access to the
 Documents folder) after every build. To keep permissions across builds, create a code signing certificate in
 Keychain Access (Certificate Assistant → Create a Certificate, type "Code Signing", trusted for code signing)
