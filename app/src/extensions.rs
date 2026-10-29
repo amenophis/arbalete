@@ -719,13 +719,144 @@ fn tab_ids(context: &str, targets: &[Value]) {
     push_state(context);
 }
 
+/// Where a shim's call came from, to answer it there: a service worker's session in the
+/// bridge, or a popup's browser.
+#[derive(Clone)]
+enum Caller {
+    Worker(String),
+    Popup(BrowserHost),
+}
+
+impl Caller {
+    /// Evaluates an expression where the call came from.
+    fn evaluate(&self, expression: &str) {
+        let params = json!({ "expression": expression });
+        match self {
+            Self::Worker(session) => send_in(session, "Runtime.evaluate", params, None),
+            Self::Popup(host) => {
+                let message = json!({ "id": 0, "method": "Runtime.evaluate", "params": params });
+                host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+            }
+        }
+    }
+
+    /// The profile the caller runs in.
+    fn profile(&self) -> Option<ProfileId> {
+        match self {
+            Self::Worker(session) => BRIDGE.with_borrow(|bridge| {
+                let context = bridge.workers.get(session)?;
+                let (profile, _) = bridge
+                    .contents
+                    .iter()
+                    .find(|(_, c)| &c.context == context)?;
+                Some(*profile)
+            }),
+            // Popups open in the displayed Space's profile.
+            Self::Popup(_) => Some(crate::shell::displayed_profile()),
+        }
+    }
+}
+
+/// An extension's request for optional permissions, while Chromium asks the user.
+struct PermissionRequest {
+    caller: Caller,
+    /// The shim's number for the request, which its answer names.
+    request: i64,
+    permissions: Value,
+}
+
+thread_local! {
+    static PERMISSIONS: RefCell<Option<PermissionRequest>> = const { RefCell::new(None) };
+    /// The permission window's observer, kept until the window closes: dropped from its own
+    /// callback, where the answer comes, it would free itself while running.
+    static PERMISSION_OBSERVER: RefCell<Option<Registration>> = const { RefCell::new(None) };
+}
+
+/// Asks the user for the optional permissions an extension requests. Chromium only prompts for
+/// them from a Chrome-style page: the app opens one on the extension's manifest, a page of the
+/// extension that runs none of its code, and asks there (permission_page_loaded). One request at
+/// a time: another meanwhile is refused.
+fn request_permissions(caller: Caller, call: &Value) {
+    let (Some(request), Some(extension)) = (call["request"].as_i64(), call["extension"].as_str())
+    else {
+        return;
+    };
+    let busy = PERMISSIONS.with_borrow(Option::is_some);
+    let Some(profile) = caller.profile().filter(|_| !busy) else {
+        caller.evaluate(&format!("self.__arbaleteAnswer({request}, false)"));
+        return;
+    };
+    PERMISSIONS.set(Some(PermissionRequest {
+        caller,
+        request,
+        permissions: call["permissions"].clone(),
+    }));
+    crate::shell::open_permission_window(
+        profile,
+        &format!("chrome-extension://{extension}/manifest.json"),
+    );
+}
+
+/// Asks Chromium for the requested permissions, with a user gesture, once the permission
+/// window's page has loaded: Chromium prompts the user in it.
+pub fn permission_page_loaded(browser: &Browser) {
+    let Some(host) = browser.host() else { return };
+    let Some(permissions) = PERMISSIONS.with_borrow(|p| Some(p.as_ref()?.permissions.to_string()))
+    else {
+        return;
+    };
+    let registration = host.add_dev_tools_message_observer(Some(&mut PermissionObserver::new()));
+    PERMISSION_OBSERVER.set(registration);
+    // The manifest's text would show under the prompt.
+    let expression =
+        format!("document.body.textContent = ''; chrome.permissions.request({permissions})");
+    let params = json!({ "expression": expression, "awaitPromise": true, "userGesture": true, "returnByValue": true });
+    let message = json!({ "id": 1, "method": "Runtime.evaluate", "params": params });
+    host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+}
+
+/// Answers the extension's request, and closes the permission window.
+fn answer_permissions(granted: bool) {
+    let Some(request) = PERMISSIONS.take() else {
+        return;
+    };
+    request.caller.evaluate(&format!(
+        "self.__arbaleteAnswer({}, {granted})",
+        request.request
+    ));
+    crate::shell::close_permission_window();
+}
+
+/// The permission window closed: an unanswered request is refused.
+pub fn permission_window_closed() {
+    answer_permissions(false);
+    PERMISSION_OBSERVER.set(None);
+}
+
+wrap_dev_tools_message_observer! {
+    struct PermissionObserver {}
+
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
+            if let Some(message) = parse(message).filter(|m| m["id"] == 1) {
+                answer_permissions(message["result"]["result"]["value"] == true);
+            }
+            0
+        }
+    }
+}
+
 /// Runs what an extension's shim asks for, through its binding: in a popup, closing it too.
-fn binding_called(payload: &str) {
+fn binding_called(payload: &str, caller: Caller) {
     let Ok(call) = serde_json::from_str::<Value>(payload) else {
         return;
     };
     if call["method"] == "close" {
         crate::shell::post(crate::command::Command::CloseExtensionPopup);
+        return;
+    }
+    if call["method"] == "permissions" {
+        request_permissions(caller, &call);
         return;
     }
     let Some(url) = call["props"]["url"].as_str() else {
@@ -757,7 +888,16 @@ fn message_received(message: &Value) {
             }
         }
         Some("Runtime.bindingCalled") if message["params"]["name"] == "__arbalete" => {
-            binding_called(message["params"]["payload"].as_str().unwrap_or_default());
+            let caller = Caller::Worker(
+                message["sessionId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            binding_called(
+                message["params"]["payload"].as_str().unwrap_or_default(),
+                caller,
+            );
         }
         _ => {}
     }
@@ -821,8 +961,10 @@ wrap_dev_tools_message_observer! {
     impl DevToolsMessageObserver {
         fn on_dev_tools_message(&self, browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
             let Some(message) = parse(message) else { return 0 };
-            if message["method"] == "Runtime.bindingCalled" {
-                binding_called(message["params"]["payload"].as_str().unwrap_or_default());
+            if message["method"] == "Runtime.bindingCalled"
+                && let Some(host) = browser.as_deref().and_then(Browser::host)
+            {
+                binding_called(message["params"]["payload"].as_str().unwrap_or_default(), Caller::Popup(host));
             }
             // The shim is added for new documents: the popup's may load.
             if message["id"] == 2
