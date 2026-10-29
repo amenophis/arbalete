@@ -58,44 +58,44 @@ const extensions = [
 
 const sent = () => fetch.mock.lastCall?.[0];
 
-test("manages each extension of the profile", () => {
+test("lists the extensions, the first one detailed beside them", () => {
   render(<ExtensionsList extensions={extensions} query="" />);
-  fireEvent.click(screen.getByRole("switch", { name: "Turn Dark Reader on" }));
-  expect(sent()).toBe("/command/extension/off/dark");
-  fireEvent.click(screen.getByRole("switch", { name: "Turn uBlock Origin Lite on" }));
-  expect(sent()).toBe("/command/extension/on/block");
-  fireEvent.click(screen.getByRole("button", { name: "Unpin Dark Reader" }));
+  const details = screen.getByRole("region", { name: "Dark Reader details" });
+  expect(details.textContent).toContain("4.9 · Manifest V3");
+  expect(details.textContent).toContain("Oct 28, 2026");
+  expect(details.textContent).toContain("storage");
+  expect(details.textContent).toContain("All sites");
+  fireEvent.click(screen.getByRole("button", { name: "Web Store" }));
+  expect(sent()).toBe(
+    `/command/open/${encodeURIComponent("https://chromewebstore.google.com/detail/dark")}`,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Unpin" }));
   expect(sent()).toBe("/command/extension/unpin/dark");
-  expect(screen.queryByRole("button", { name: "Dark Reader options" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "uBlock Origin Lite options" }));
+  expect(screen.queryByRole("button", { name: "Options" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+  expect(sent()).toBe("/command/extension/remove/dark");
+});
+
+test("details the extension picked, and turns each one on or off", () => {
+  render(<ExtensionsList extensions={extensions} query="" />);
+  fireEvent.click(screen.getByRole("button", { name: "uBlock Origin Lite" }));
+  const details = screen.getByRole("region", { name: "uBlock Origin Lite details" });
+  expect(details.textContent).toContain("Unpacked, from /Users/me/block");
+  fireEvent.click(screen.getByRole("button", { name: "Options" }));
   expect(sent()).toBe("/command/extension/options/block");
-  fireEvent.click(screen.getByRole("button", { name: "Remove uBlock Origin Lite" }));
-  expect(sent()).toBe("/command/extension/remove/block");
+  fireEvent.click(screen.getByRole("button", { name: "Website" }));
+  expect(sent()).toBe(`/command/open/${encodeURIComponent("https://example.org/")}`);
+  const switches = screen.getAllByRole("switch", { name: "Turn uBlock Origin Lite on" });
+  fireEvent.click(switches[0]);
+  expect(sent()).toBe("/command/extension/on/block");
+  fireEvent.click(screen.getAllByRole("switch", { name: "Turn Dark Reader on" })[0]);
+  expect(sent()).toBe("/command/extension/off/dark");
   fireEvent.click(screen.getByRole("button", { name: "Load Unpacked…" }));
   expect(sent()).toBe("/command/extension/load-unpacked");
 });
 
 test("searches the extensions by name and description", () => {
   render(<ExtensionsList extensions={extensions} query="blocker" />);
-  expect(screen.queryByText("Dark Reader")).toBeNull();
-  expect(screen.getByText("uBlock Origin Lite")).toBeTruthy();
-});
-
-test("details an extension like Chromium's extensions page", () => {
-  render(<ExtensionsList extensions={extensions} query="" />);
-  const row = screen.getByRole("button", { name: /^Dark Reader 4/ });
-  expect(row.getAttribute("aria-expanded")).toBe("false");
-  fireEvent.click(row);
-  expect(screen.getByText("dark")).toBeTruthy();
-  expect(screen.getByText("4.9 (Manifest V3)")).toBeTruthy();
-  expect(screen.getByText("Oct 28, 2026")).toBeTruthy();
-  expect(screen.getByText("storage")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Chrome Web Store" }));
-  expect(sent()).toBe(
-    `/command/open/${encodeURIComponent("https://chromewebstore.google.com/detail/dark")}`,
-  );
-  fireEvent.click(screen.getByRole("button", { name: /^uBlock Origin Lite 2026/ }));
-  expect(screen.queryByText("4.9 (Manifest V3)")).toBeNull();
-  expect(screen.getByText("Unpacked, from /Users/me/block")).toBeTruthy();
-  expect(screen.getAllByText("None")).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: /Dark Reader/ })).toBeNull();
+  expect(screen.getByRole("region", { name: "uBlock Origin Lite details" })).toBeTruthy();
 });
