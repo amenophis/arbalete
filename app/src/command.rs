@@ -473,6 +473,8 @@ impl Command {
             "extension/load-unpacked" => Some(Self::ShowExtensionsPage),
             "extension/manage" => Some(Self::ManageExtensions),
             "extension/reload" => Some(Self::ReloadExtensions),
+            "history/show" => Some(Self::ShowHistory),
+            "downloads/show" => Some(Self::ShowDownloads),
             _ => {
                 if let Some((action, id)) = path
                     .strip_prefix("extension/")
@@ -841,6 +843,11 @@ mod tests {
         assert_eq!(Command::parse("forward"), Some(Command::Forward));
         assert_eq!(Command::parse("reload"), Some(Command::Reload));
         assert_eq!(Command::parse("find/hide"), Some(Command::HideFind));
+        assert_eq!(Command::parse("history/show"), Some(Command::ShowHistory));
+        assert_eq!(
+            Command::parse("downloads/show"),
+            Some(Command::ShowDownloads)
+        );
         assert_eq!(
             Command::parse("site/show/toolbar/10/4/28/28"),
             Some(Command::ShowSiteControls(Button {
