@@ -48,8 +48,8 @@ const ACTIONS = [
 
 // The selected tab's site controls, in a panel under their button, like Arc's (show_site_controls
 // in app/src/shell.rs): actions on its link and what the site keeps, the profile's extensions,
-// whose popup a click opens in place of the panel, the Chrome Web Store to add more, and whether
-// the connection is secure. The
+// whose popup a click opens in place of the panel, the Chrome Web Store to add more, the library to
+// manage them, and whether the connection is secure. The
 // panel closes on losing the focus and on Escape, and sizes itself to what it shows.
 // The pinned extensions' buttons, by the address (UiState::pinned_extensions in
 // app/src/shell.rs): a click opens the extension's popup under its button, in a window of its own.
@@ -139,7 +139,12 @@ export function Site() {
           </button>
         ))}
       </div>
-      <h2>Extensions</h2>
+      <div className="site-heading">
+        <h2>Extensions</h2>
+        <button type="button" className="site-manage" onClick={() => send("extension/manage")}>
+          Manage
+        </button>
+      </div>
       <div className="site-extensions">
         {site.extensions.map((extension) => (
           <button

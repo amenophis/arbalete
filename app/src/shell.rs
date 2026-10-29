@@ -169,6 +169,8 @@ thread_local! {
     /// The settings, in a window of their own while it is open.
     static SETTINGS_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static SETTINGS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+    /// Chromium's extensions page, in a window of its own.
+    static EXTENSIONS_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
     /// The browsers Chromium opened by itself (StrayClient), until an install closes them.
     static STRAYS: RefCell<Vec<Browser>> = const { RefCell::new(Vec::new()) };
     /// The app's settings, loaded when the context is initialized.
@@ -381,6 +383,8 @@ impl UiState {
             // The displayed Space's profile's pinned extensions, installed and turned on, whose
             // buttons show by the address.
             "extensions": self.pinned_extensions(),
+            // All of them, which the library lists.
+            "installed": self.installed_extensions(),
             "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|(tab, profile, at)| json!({
                 "url": tab.url,
                 "title": tab.label(),
@@ -409,6 +413,41 @@ impl UiState {
                     .find(|extension| &extension.id == id && extension.enabled)
             })
             .map(|extension| extension_json(profile, extension))
+            .collect()
+    }
+
+    /// The displayed Space's profile's extensions, by name, with what the library shows of them.
+    fn installed_extensions(&self) -> Vec<serde_json::Value> {
+        let profile = self.sidebar.displayed().profile;
+        let profiles = self.sidebar.profiles();
+        let pinned = profiles
+            .iter()
+            .find(|p| p.id == profile)
+            .map(|p| &p.pinned_extensions);
+        extensions::list(profile)
+            .iter()
+            .map(|extension| {
+                let mut json = extension_json(profile, extension);
+                json["enabled"] = extension.enabled.into();
+                json["pinned"] = pinned
+                    .is_some_and(|pinned| pinned.contains(&extension.id))
+                    .into();
+                json["options"] = extension.options.is_some().into();
+                json["description"] = extension.description.clone().into();
+                json["version"] = extension.version.clone().into();
+                let details = &extension.details;
+                json["details"] = json!({
+                    "permissions": details.permissions,
+                    "sites": details.sites,
+                    "homepage": details.homepage,
+                    "manifestVersion": details.manifest_version,
+                    "fromStore": details.from_store,
+                    "unpacked": details.unpacked,
+                    "installedAt": details.installed_at,
+                    "updatedAt": details.updated_at,
+                });
+                json
+            })
             .collect()
     }
 
@@ -1521,6 +1560,27 @@ fn show_settings() {
     }
 }
 
+/// The extensions page's window's size.
+const EXTENSIONS_SIZE: Size = Size {
+    width: 1000,
+    height: 760,
+};
+
+/// Opens Chromium's extensions page, to manage the displayed Space's profile's extensions, like
+/// Arc's: turning them on or off, their details and permissions, updating them, and in developer
+/// mode, loading one from a folder. Only a Chrome-style page shows it, and CEF puts none beside the
+/// main window's Alloy views: it has a window of its own, brought to the front when open.
+fn show_extensions_page() {
+    hide_site_controls();
+    match EXTENSIONS_WINDOW.with_borrow(Clone::clone) {
+        Some(window) => window.activate(),
+        None => {
+            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            window_create_top_level(Some(&mut ExtensionsWindowDelegate::new(profile)));
+        }
+    }
+}
+
 /// Opens the Chrome Web Store in a tab, to install extensions, like Arc.
 fn show_store() {
     hide_site_controls();
@@ -1738,6 +1798,7 @@ fn show_site_controls(button: Button) {
     };
     SITE_BUTTON.set(Some(button));
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+    extensions::reload(profile);
     let pinned = pinned_extensions(profile);
     let extensions: Vec<_> = extensions::list(profile)
         .iter()
@@ -2946,6 +3007,24 @@ pub fn run(command: Command) {
         }
         (Command::OpenExtensionPopup(id), _) => open_extension_popup(&id),
         (Command::ShowStore, _) => show_store(),
+        (Command::ShowExtensionsPage, _) => show_extensions_page(),
+        (Command::ManageExtensions, _) => {
+            hide_site_controls();
+            if SIDEBAR_MODE.get() == SidebarMode::Hidden {
+                set_sidebar(SidebarMode::Shown);
+            }
+            dispatch(shown_sidebar(), r#"new Event("arbalete:show-extensions")"#);
+        }
+        (Command::ReloadExtensions, _) => {
+            extensions::reload(STATE.with_borrow(|state| state.sidebar.displayed().profile));
+        }
+        (Command::ConfirmRemoveExtension(id), _) => {
+            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
+            if let Some(extension) = extension {
+                perform(menu::remove_extension(&extension.id, &extension.name));
+            }
+        }
         (Command::SiteTargets(targets), _) => SITE_TARGETS.set(targets),
         (Command::RemoveExtension(id), _) => {
             let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
@@ -3343,6 +3422,85 @@ wrap_life_span_handler! {
                 STRAYS.with_borrow_mut(|strays| strays.retain(|stray| stray.is_same(Some(browser)) == 0));
             }
             browser_closed();
+        }
+    }
+}
+
+wrap_window_delegate! {
+    struct ExtensionsWindowDelegate {
+        profile: ProfileId,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            EXTENSIONS_SIZE
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let window = window.expect("window").clone();
+            window.set_title(Some(&CefString::from("Extensions")));
+            window.set_to_fill_layout();
+            let view = browser_view_create(
+                Some(&mut ExtensionsClient::new()),
+                Some(&CefString::from("chrome://extensions")),
+                Some(&BrowserSettings::default()),
+                None,
+                profile_context(self.profile).as_mut(),
+                Some(&mut ChromeViewDelegate::new()),
+            )
+            .expect("extensions view");
+            window.add_child_view(Some(&mut View::from(&view)));
+            window.center_window(Some(&EXTENSIONS_SIZE));
+            window.show();
+            EXTENSIONS_WINDOW.set(Some(window));
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            EXTENSIONS_WINDOW.set(None);
+            // It may have changed them.
+            extensions::reload(self.profile);
+        }
+
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+
+        fn window_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::CHROME
+        }
+    }
+}
+
+// A Chrome-style page, without Chromium's toolbar.
+wrap_browser_view_delegate! {
+    struct ChromeViewDelegate {}
+
+    impl ViewDelegate {}
+
+    impl BrowserViewDelegate {
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::CHROME
+        }
+
+        fn chrome_toolbar_type(&self, _browser_view: Option<&mut BrowserView>) -> ChromeToolbarType {
+            ChromeToolbarType::NONE
+        }
+    }
+}
+
+// The extensions page's links that open a window, like an extension's web site, open a tab
+// instead (BrowserLifeSpan).
+wrap_client! {
+    struct ExtensionsClient {}
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(BrowserLifeSpan::new(None))
         }
     }
 }

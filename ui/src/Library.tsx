@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { type ClosedTab, type Profile, type Space, send, useAppEvent } from "./bridge";
 import { type Download, DownloadsList } from "./Downloads";
+import { ExtensionsList, type InstalledExtension } from "./ExtensionsList";
 import { HistoryList } from "./History";
 import { Icon } from "./Icon";
 import { ManageSpaces } from "./ManageSpaces";
 import { MediaList } from "./Media";
 import { matches } from "./search";
 
-export type Section = "spaces" | "closed" | "history" | "media" | "downloads";
+export type Section = "spaces" | "closed" | "history" | "media" | "downloads" | "extensions";
 
 // The sections the library holds so far, in its rail.
 export const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -36,6 +37,11 @@ export const SECTIONS: { id: Section; label: string; icon: string }[] = [
     label: "Downloads",
     icon: "M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10",
   },
+  {
+    id: "extensions",
+    label: "Extensions",
+    icon: "M6.5 2.5h3v2a1.5 1.5 0 0 0 3 0v-2h1v4h-2a1.5 1.5 0 0 0 0 3h2v4h-11v-11h4z",
+  },
 ];
 
 // The page before the first Space: a rail of sections, the one picked last kept until the app
@@ -45,6 +51,7 @@ export const SECTIONS: { id: Section; label: string; icon: string }[] = [
 export function Library({
   closed,
   downloads,
+  extensions,
   spaces,
   profiles,
   shown,
@@ -54,6 +61,7 @@ export function Library({
 }: {
   closed: ClosedTab[];
   downloads: Download[];
+  extensions: InstalledExtension[];
   spaces: Space[];
   profiles: Profile[];
   shown: boolean;
@@ -68,9 +76,12 @@ export function Library({
   useAppEvent("arbalete:library", () => pick("spaces"));
   useAppEvent("arbalete:show-downloads", () => pick("downloads"));
   useAppEvent("arbalete:show-history", () => pick("history"));
+  useAppEvent("arbalete:show-extensions", () => pick("extensions"));
   const pick = (next: Section) => {
     setSection(next);
     setQuery("");
+    // Their page may have changed them.
+    if (next === "extensions") send("extension/reload");
   };
   // The Spaces fill the window, the page hidden; the other sections rest beside it.
   useEffect(() => send(section === "spaces" ? "library/wide" : "library/narrow"), [section]);
@@ -133,6 +144,7 @@ export function Library({
         {section === "downloads" && (
           <DownloadsList downloads={downloads} query={query} now={Date.now()} />
         )}
+        {section === "extensions" && <ExtensionsList extensions={extensions} query={query} />}
       </div>
     </section>
   );

@@ -121,14 +121,19 @@ pub fn extension_menu(
     menu.push(item(
         "remove",
         "Remove from Arbalete…",
-        Action::Confirm {
-            question: format!("Remove “{name}”?"),
-            detail: "Its data in this profile is deleted too.",
-            button: "Remove",
-            command: Command::RemoveExtension(id.to_string()),
-        },
+        remove_extension(id, name),
     ));
     menu
+}
+
+/// Removes an extension once the user confirms it.
+pub fn remove_extension(id: &str, name: &str) -> Action {
+    Action::Confirm {
+        question: format!("Remove “{name}”?"),
+        detail: "Its data in this profile is deleted too.",
+        button: "Remove",
+        command: Command::RemoveExtension(id.to_string()),
+    }
 }
 
 /// Only web pages have a site to control.

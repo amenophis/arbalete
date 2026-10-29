@@ -39,6 +39,37 @@ pub struct Installed {
     pub options: Option<String>,
     /// Turned off by the user (or by Chromium), it stays installed but does not run.
     pub enabled: bool,
+    pub description: String,
+    pub version: String,
+    /// What the library details, like Chromium's extensions page.
+    #[serde(skip)]
+    pub details: Details,
+}
+
+/// An extension's details, from its manifest and from Chromium's preferences.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Details {
+    /// The browser APIs it asks for, like `storage` or `tabs`.
+    pub permissions: Vec<String>,
+    /// The sites it may read and change, like `<all_urls>`.
+    pub sites: Vec<String>,
+    pub homepage: Option<String>,
+    pub manifest_version: u64,
+    /// Installed from the Chrome Web Store.
+    pub from_store: bool,
+    /// Loaded from a folder of the user's, in developer mode: its path.
+    pub unpacked: Option<PathBuf>,
+    /// When it was installed and last updated, in milliseconds since the Unix epoch.
+    pub installed_at: Option<u64>,
+    pub updated_at: Option<u64>,
+}
+
+/// A time Chromium's preferences hold, in microseconds since 1601 as text, in milliseconds since
+/// the Unix epoch.
+fn preference_time(value: &Value) -> Option<u64> {
+    const UNIX_EPOCH_SINCE_1601_MICROS: u64 = 11_644_473_600_000_000;
+    let micros: u64 = value.as_str()?.parse().ok()?;
+    Some(micros.checked_sub(UNIX_EPOCH_SINCE_1601_MICROS)? / 1000)
 }
 
 /// Where Chromium installs extensions, as its preferences record it: from the Web Store or
@@ -73,8 +104,16 @@ pub fn installed(profile_dir: &Path) -> Vec<Installed> {
                 .as_array()
                 .is_some_and(|reasons| !reasons.is_empty());
             let extension = read_manifest(id, &dir)?;
+            let details = Details {
+                from_store: setting["from_webstore"].as_bool().unwrap_or_default(),
+                unpacked: (setting["location"] == 4).then(|| dir.clone()),
+                installed_at: preference_time(&setting["first_install_time"]),
+                updated_at: preference_time(&setting["last_update_time"]),
+                ..extension.details
+            };
             Some(Installed {
                 enabled: !disabled,
+                details,
                 ..extension
             })
         })
@@ -107,7 +146,48 @@ fn read_manifest(id: &str, dir: &Path) -> Option<Installed> {
             .or(manifest["options_page"].as_str())
             .map(str::to_string),
         enabled: true,
+        description: localized(
+            dir,
+            &manifest,
+            manifest["description"].as_str().unwrap_or_default(),
+        ),
+        version: manifest["version"].as_str().unwrap_or_default().to_string(),
+        details: manifest_details(&manifest),
     })
+}
+
+/// What an extension's manifest says it asks for: the browser APIs, and the sites its permissions
+/// and content scripts reach, each once.
+fn manifest_details(manifest: &Value) -> Details {
+    let strings = |value: &Value| -> Vec<String> {
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect()
+    };
+    let is_site = |entry: &String| entry.contains("://") || entry == "<all_urls>";
+    // Manifest V2 lists the sites among its permissions.
+    let (mut sites, permissions): (Vec<_>, Vec<_>) = strings(&manifest["permissions"])
+        .into_iter()
+        .partition(is_site);
+    sites.extend(strings(&manifest["host_permissions"]));
+    let scripts = manifest["content_scripts"].as_array().into_iter().flatten();
+    sites.extend(scripts.flat_map(|script| strings(&script["matches"])));
+    let mut unique = Vec::new();
+    for site in sites {
+        if !unique.contains(&site) {
+            unique.push(site);
+        }
+    }
+    Details {
+        permissions,
+        sites: unique,
+        homepage: manifest["homepage_url"].as_str().map(str::to_string),
+        manifest_version: manifest["manifest_version"].as_u64().unwrap_or(2),
+        ..Details::default()
+    }
 }
 
 /// The path of an icon, or of the largest of several by size.
@@ -343,9 +423,30 @@ fn helper_evaluate(profile: ProfileId, expression: &str) {
     }
 }
 
-/// Reads a profile's extensions again.
+/// Reads a profile's extensions again, after their page may have changed them.
+pub fn reload(profile: ProfileId) {
+    let dir = INSTALLED.with_borrow(|all| Some(all.get(&profile)?.0.clone()));
+    if let Some(dir) = dir {
+        refresh(profile, &dir);
+    }
+}
+
+/// Reads a profile's extensions again. Chromium writes its preferences only seconds after a
+/// change: the extensions just installed that they do not list yet are kept while their files
+/// are there.
 fn refresh(profile: ProfileId, dir: &Path) {
-    let list = installed(dir);
+    let mut list = installed(dir);
+    let known = INSTALLED.with_borrow(|all| all.get(&profile).map(|(_, list)| list.clone()));
+    let kept: Vec<_> = known
+        .into_iter()
+        .flatten()
+        .filter(|extension| {
+            !list.iter().any(|listed| listed.id == extension.id)
+                && dir.join("Extensions").join(&extension.id).exists()
+        })
+        .collect();
+    list.extend(kept);
+    list.sort_by_key(|extension| extension.name.to_lowercase());
     INSTALLED.with_borrow_mut(|all| all.insert(profile, (dir.to_path_buf(), list)));
     update_icons(profile);
     crate::shell::extensions_changed();
@@ -780,7 +881,7 @@ mod tests {
     fn lists_the_extensions_the_user_installed() {
         let profile = TestDir::new("extensions");
         let preferences = json!({ "extensions": { "settings": {
-            "dark": { "location": 1, "path": "dark/1.0_0", "disable_reasons": [] },
+            "dark": { "location": 1, "path": "dark/1.0_0", "disable_reasons": [], "from_webstore": true, "first_install_time": "13437699171529348" },
             "block": { "location": 1, "path": "block/2.0_0", "disable_reasons": [] },
             "off": { "location": 1, "path": "off/1.0_0", "disable_reasons": [1] },
             "pdf": { "location": 5, "path": "/framework/pdf" },
@@ -789,7 +890,7 @@ mod tests {
         profile.write("Secure Preferences", &preferences.to_string());
         profile.write(
             "Extensions/dark/1.0_0/manifest.json",
-            r#"{ "name": "Dark Reader", "action": { "default_popup": "ui/popup.html", "default_icon": { "19": "i19.png", "38": "i38.png" } } }"#,
+            r#"{ "name": "Dark Reader", "version": "4.9", "manifest_version": 3, "permissions": ["storage", "*://*/*"], "content_scripts": [{ "matches": ["<all_urls>"] }], "action": { "default_popup": "ui/popup.html", "default_icon": { "19": "i19.png", "38": "i38.png" } } }"#,
         );
         profile.write(
             "Extensions/block/2.0_0/manifest.json",
@@ -816,6 +917,15 @@ mod tests {
         assert_eq!(list[1].popup, None);
         assert_eq!(list[1].options.as_deref(), Some("options.html"));
         assert_eq!(list[0].options, None);
+        let details = &list[0].details;
+        assert!(details.from_store && details.unpacked.is_none());
+        assert_eq!(details.installed_at, Some(1_793_225_571_529));
+        assert_eq!(details.permissions, ["storage"]);
+        assert_eq!(details.sites, ["*://*/*", "<all_urls>"]);
+        assert_eq!(
+            (list[0].version.as_str(), details.manifest_version),
+            ("4.9", 3)
+        );
         assert_eq!(
             list[1].icon,
             Some(profile.0.join("Extensions/block/2.0_0/i128.png"))

@@ -1893,7 +1893,17 @@ button.folder:hover {
   -webkit-app-region: drag;
 }
 
-.library :is(button, input, li, .space-cards, .downloads-list, .history-list, .closed-tabs) {
+.library
+  :is(
+    button,
+    input,
+    li,
+    .space-cards,
+    .downloads-list,
+    .history-list,
+    .closed-tabs,
+    .extensions-list
+  ) {
   -webkit-app-region: no-drag;
 }
 
@@ -2332,10 +2342,32 @@ button.folder:hover {
   color: var(--text);
 }
 
+.site-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
 .site h2 {
-  margin: 4px 0 0;
+  margin: 0;
   font-size: 13px;
   font-weight: 600;
+  opacity: 0.85;
+}
+
+/* Like Arc's: a link at the heading's end. */
+.site-manage {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  opacity: 0.55;
+}
+
+.site-manage:hover {
   opacity: 0.85;
 }
 
@@ -2433,4 +2465,140 @@ button.folder:hover {
   padding-top: 10px;
   border-top: 1px solid var(--menu-border);
   opacity: 0.75;
+}
+
+/* The extensions, in the library: a row each, its controls at its end. */
+.extensions-list {
+  overflow-y: auto;
+}
+
+.extensions-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extensions-actions {
+  display: flex;
+  gap: 6px;
+  margin: 4px 8px 8px;
+}
+
+.extensions-action {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--hover);
+  color: inherit;
+  font: inherit;
+}
+
+.extension-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.extension-row:hover {
+  background: var(--hover);
+}
+
+.extension-row[data-off] > :is(.extension-icon, .extension-text) {
+  opacity: 0.45;
+}
+
+.extension-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+}
+
+.extension-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.extension-title,
+.extension-description {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.extension-version,
+.extension-description {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.extension-control {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+}
+
+.extension-control:hover,
+.extension-control[aria-pressed="true"] {
+  opacity: 1;
+}
+
+.extension-control:hover {
+  background: var(--hover);
+}
+
+.extension-switch {
+  flex: none;
+  accent-color: var(--accent);
+}
+
+/* An extension's details, under its row, label beside value. */
+.extension-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 2px 8px 10px 40px;
+  font-size: 12px;
+}
+
+.extension-details dt {
+  opacity: 0.55;
+}
+
+.extension-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.extension-id {
+  font-family: ui-monospace, monospace;
+  user-select: text;
+}
+
+.extension-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
 }

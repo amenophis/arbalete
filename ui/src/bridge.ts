@@ -1,4 +1,5 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
+import type { InstalledExtension } from "./ExtensionsList";
 import type { Extension } from "./Site";
 
 // The app serves the UI and answers these requests itself (app/src/command.rs).
@@ -21,6 +22,8 @@ export type State = {
   toolbar: boolean;
   // The displayed Space's profile's pinned extensions, whose buttons show by the address.
   extensions: Extension[];
+  // All of that profile's extensions, which the library lists.
+  installed: InstalledExtension[];
 };
 
 export type ClosedTab = {
