@@ -2370,6 +2370,57 @@ button.folder:hover {
   outline: none;
 }
 
+.site-extensions .site-button {
+  position: relative;
+}
+
+/* A pinned extension's badge, at its tile's bottom right corner. */
+.site-pinned {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--menu);
+}
+
+.pinned-extension {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.pinned-extension:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.pinned-extension img {
+  width: 16px;
+  height: 16px;
+}
+
+/* The pinned extensions' buttons stay shown at the url bar's edge, after the buttons shown on
+   hover, the last one reaching the edge like the site controls. */
+.url .copy-link + .pinned-extension {
+  margin-left: 7px;
+}
+
+.url .pinned-extension:last-of-type {
+  margin-right: -7px;
+}
+
 .site-extensions img {
   width: 20px;
   height: 20px;

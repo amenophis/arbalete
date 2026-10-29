@@ -42,6 +42,29 @@ pub struct Button {
     pub height: i32,
 }
 
+impl Button {
+    /// `<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
+    fn parse(path: &str) -> Option<Self> {
+        let args: Vec<_> = path.split('/').collect();
+        let [view, x, y, width, height] = args[..] else {
+            return None;
+        };
+        let view = match view {
+            "docked" => ButtonView::Docked,
+            "revealed" => ButtonView::Revealed,
+            "toolbar" => ButtonView::Toolbar,
+            _ => return None,
+        };
+        Some(Self {
+            view,
+            x: x.parse().ok()?,
+            y: y.parse().ok()?,
+            width: width.parse().ok()?,
+            height: height.parse().ok()?,
+        })
+    }
+}
+
 /// The app's settings the settings window turns on or off (app/src/settings.rs).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Setting {
@@ -106,6 +129,12 @@ pub enum Command {
     ExtensionOptions(String),
     /// Turns an extension of the displayed Space's profile on or off, from its menu.
     SetExtensionEnabled(String, bool),
+    /// Pins an extension of the displayed Space's profile by the address, or unpins it, from its
+    /// menu.
+    PinExtension(String, bool),
+    /// Opens a pinned extension's popup under its button:
+    /// `extension/popup/<id>/<docked, revealed or toolbar>/<x>/<y>/<width>/<height>`.
+    OpenPinnedExtension(String, Button),
     /// Acts on a download from the sidebar: `download/<cancel, open, show or remove>/<id>`.
     Download(DownloadAction, u32),
     /// Opens the library on the downloads, from the menu.
@@ -430,24 +459,15 @@ impl Command {
             "site/hide" => Some(Self::HideSiteControls),
             "site/store" => Some(Self::ShowStore),
             _ => {
-                if let Some(args) = path.strip_prefix("site/show/") {
-                    let args: Vec<_> = args.split('/').collect();
-                    let [view, x, y, width, height] = args[..] else {
-                        return None;
-                    };
-                    let view = match view {
-                        "docked" => ButtonView::Docked,
-                        "revealed" => ButtonView::Revealed,
-                        "toolbar" => ButtonView::Toolbar,
-                        _ => return None,
-                    };
-                    return Some(Self::ShowSiteControls(Button {
-                        view,
-                        x: x.parse().ok()?,
-                        y: y.parse().ok()?,
-                        width: width.parse().ok()?,
-                        height: height.parse().ok()?,
-                    }));
+                if let Some(button) = path.strip_prefix("site/show/") {
+                    return Button::parse(button).map(Self::ShowSiteControls);
+                }
+                if let Some((id, button)) = path
+                    .strip_prefix("extension/popup/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let button = Button::parse(button)?;
+                    return Some(Self::OpenPinnedExtension(id.to_string(), button));
                 }
                 if let Some(height) = path.strip_prefix("site/height/") {
                     return height.parse().ok().map(Self::SiteControlsHeight);
@@ -788,6 +808,19 @@ mod tests {
             }))
         );
         assert_eq!(Command::parse("site/show/menu/10/4/28/28"), None);
+        assert_eq!(
+            Command::parse("extension/popup/abc/docked/1/2/3/4"),
+            Some(Command::OpenPinnedExtension(
+                "abc".into(),
+                Button {
+                    view: ButtonView::Docked,
+                    x: 1,
+                    y: 2,
+                    width: 3,
+                    height: 4,
+                }
+            ))
+        );
         assert_eq!(Command::parse("site/hide"), Some(Command::HideSiteControls));
         assert_eq!(Command::parse("site/store"), Some(Command::ShowStore));
         assert_eq!(

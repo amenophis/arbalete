@@ -1,6 +1,7 @@
 import { activeTab, domain, NavButtons, SiteControls } from "./App";
 import { send, useAppState } from "./bridge";
 import { Icon } from "./Icon";
+import { PinnedExtensions } from "./Site";
 
 // The bar above the page in toolbar mode (View › Show Toolbar, toggle_toolbar in
 // app/src/shell.rs), like Arc's: back, forward and reload at its left, the selected tab's domain
@@ -28,6 +29,7 @@ export function Toolbar() {
       )}
       {active && (
         <div className="page-toolbar-buttons page-toolbar-end">
+          <PinnedExtensions extensions={state.extensions} view="toolbar" />
           <SiteControls view="toolbar" />
         </div>
       )}

@@ -22,6 +22,7 @@ import { useListMotion } from "./motion";
 import { NewMenu } from "./NewMenu";
 import { Profiles } from "./Profiles";
 import { usePager } from "./pager";
+import { PinnedExtensions } from "./Site";
 import { NewSpace, Spaces } from "./Spaces";
 
 // The revealed sidebar taking the focus makes Chromium focus its first button as if tabbed to,
@@ -101,6 +102,13 @@ export function App() {
           </button>
           {active && <CopyLink />}
           {active && <SiteControls view={location.hash === "#reveal" ? "revealed" : "docked"} />}
+          {/* At the bar's edge, the buttons shown only on hover before them. */}
+          {active && (
+            <PinnedExtensions
+              extensions={state?.extensions}
+              view={location.hash === "#reveal" ? "revealed" : "docked"}
+            />
+          )}
           {active && page?.loading && (
             <progress className="progress" aria-label="Loading" value={page.progress} />
           )}

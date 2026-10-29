@@ -277,6 +277,7 @@ fn worker_started(context: &str, url: &str) {
         }
     });
     update_icons(profile);
+    crate::shell::extensions_changed();
     crate::shell::extension_installed();
 }
 
@@ -347,6 +348,7 @@ fn refresh(profile: ProfileId, dir: &Path) {
     let list = installed(dir);
     INSTALLED.with_borrow_mut(|all| all.insert(profile, (dir.to_path_buf(), list)));
     update_icons(profile);
+    crate::shell::extensions_changed();
 }
 
 /// Lets the UI load a profile's extensions' icons (icon_file).
