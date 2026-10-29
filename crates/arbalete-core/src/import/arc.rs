@@ -4,7 +4,7 @@
 //! that are malformed, are skipped: one odd item must not stop the import of the others.
 
 use super::{Copy, chromium};
-use crate::sidebar::{Color, NodeId, ProfileId, Sidebar};
+use crate::sidebar::{Archived, Color, NodeId, ProfileId, Sidebar, SpaceId, Tab};
 use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -18,6 +18,54 @@ pub fn read(dir: &Path) -> io::Result<Option<String>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// Reads the tabs Arc archived, in its data directory `dir`, `StorableArchiveItems.json`. `None`
+/// when Arc saved none there.
+pub fn read_archive(dir: &Path) -> io::Result<Option<String>> {
+    match fs::read_to_string(dir.join("StorableArchiveItems.json")) {
+        Ok(json) => Ok(Some(json)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Arc counts time in seconds from 2001-01-01, Apple's reference date: that date in milliseconds
+/// since the Unix epoch.
+const APPLE_EPOCH_MILLIS: f64 = 978_307_200_000.0;
+
+/// Adds the tabs Arc archived from the Spaces just imported, `spaces`, by their Arc id (add),
+/// from the content of `StorableArchiveItems.json`: those of other profiles' Spaces, or of a
+/// Little Arc, are left out.
+pub fn add_archive(
+    sidebar: &mut Sidebar,
+    storable_archive: &str,
+    spaces: &HashMap<String, SpaceId>,
+) -> Result<(), serde_json::Error> {
+    let json: Value = serde_json::from_str(storable_archive)?;
+    let archived = pairs(&json["items"]).filter_map(|(_, item)| {
+        let space = *spaces.get(item["source"]["space"]["_0"].as_str()?)?;
+        let tab = &item["sidebarItem"]["data"]["tab"];
+        let url = tab["savedURL"].as_str()?.to_string();
+        let title = text(&tab["savedTitle"]).unwrap_or(&url).to_string();
+        let archived_at = item["archivedAt"].as_f64()? * 1000.0 + APPLE_EPOCH_MILLIS;
+        Some(Archived {
+            tab: Tab {
+                url,
+                title,
+                favicon: None,
+                opener: None,
+                saved_url: None,
+                name: None,
+                muted: false,
+                last_shown: None,
+            },
+            space,
+            archived_at: archived_at as u64,
+        })
+    });
+    sidebar.add_archived(archived.collect());
+    Ok(())
 }
 
 /// The icons of the tabs in `StorableSidebar.json`, by saved url: the one Arc cached for the
@@ -56,13 +104,14 @@ pub fn favicons(dir: &Path, profile: &Path, storable_sidebar: &str) -> HashMap<S
 }
 
 /// Adds the Spaces and the favorites of one Arc profile, the one in `User Data/<directory>`, to
-/// `profile`, from the content of `StorableSidebar.json`.
+/// `profile`, from the content of `StorableSidebar.json`. Returns the Spaces added by their Arc
+/// id, which the archive names them by (add_archive).
 pub fn add(
     sidebar: &mut Sidebar,
     storable_sidebar: &str,
     directory: &str,
     profile: ProfileId,
-) -> Result<(), serde_json::Error> {
+) -> Result<HashMap<String, SpaceId>, serde_json::Error> {
     let json: Value = serde_json::from_str(storable_sidebar)?;
     let containers = json["sidebar"]["containers"].as_array();
     let Some(container) = containers
@@ -70,7 +119,7 @@ pub fn add(
         .flatten()
         .find(|c| c.get("spaces").is_some())
     else {
-        return Ok(());
+        return Ok(HashMap::new());
     };
     let mut import = Import {
         sidebar,
@@ -81,13 +130,16 @@ pub fn add(
         profile,
         imported: HashSet::new(),
     };
-    for (_, space) in pairs(&container["spaces"]) {
-        import.space(space);
+    let mut spaces = HashMap::new();
+    for (arc_id, space) in pairs(&container["spaces"]) {
+        if let (Some(id), Some(arc_id)) = (import.space(space), arc_id.as_str()) {
+            spaces.insert(arc_id.to_string(), id);
+        }
     }
     for (arc_profile, favorites) in pairs(&container["topAppsContainerIDs"]) {
         import.favorites(arc_profile, favorites);
     }
-    Ok(())
+    Ok(spaces)
 }
 
 struct Import<'a> {
@@ -102,7 +154,7 @@ struct Import<'a> {
 
 impl<'a> Import<'a> {
     /// The Spaces of other Arc profiles are left out.
-    fn space(&mut self, space: &'a Value) -> Option<()> {
+    fn space(&mut self, space: &'a Value) -> Option<SpaceId> {
         if profile_directory(&space["profile"])? != self.directory {
             return None;
         }
@@ -124,7 +176,7 @@ impl<'a> Import<'a> {
         let (pinned, today) = (space.pinned, space.today);
         self.children(arc_pinned, pinned);
         self.children(arc_today, today);
-        Some(())
+        Some(id)
     }
 
     fn favorites(&mut self, arc_profile: &Value, container: &'a Value) -> Option<()> {
@@ -420,6 +472,33 @@ mod tests {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/arc");
         assert_eq!(read(&dir).unwrap().as_deref(), Some(SIDEBAR));
         assert_eq!(read(&dir.join("missing")).unwrap(), None);
+    }
+
+    #[test]
+    fn imports_the_tabs_archived_from_the_spaces_imported() {
+        let mut sidebar = Sidebar::default();
+        let profile = sidebar.profiles()[0].id;
+        let spaces = add(&mut sidebar, SIDEBAR, "Profile 1", profile).unwrap();
+        let office = spaces["space-office"];
+        let archive = json!({ "version": 1, "items": [
+            "a", { "archivedAt": 815_002_210.5, "source": { "space": { "_0": "space-office" } },
+                   "sidebarItem": { "data": { "tab": { "savedURL": "https://a.example/", "savedTitle": "A" } } } },
+            "b", { "archivedAt": 1.0, "source": { "space": { "_0": "space-home" } },
+                   "sidebarItem": { "data": { "tab": { "savedURL": "https://b.example/" } } } },
+            "c", { "archivedAt": 2.0, "source": { "littleArc": {} },
+                   "sidebarItem": { "data": { "tab": { "savedURL": "https://c.example/" } } } },
+        ] });
+        add_archive(&mut sidebar, &archive.to_string(), &spaces).unwrap();
+        let archived = sidebar.archive();
+        assert_eq!(archived.len(), 1);
+        assert_eq!(
+            (archived[0].tab.url.as_str(), archived[0].tab.title.as_str()),
+            ("https://a.example/", "A")
+        );
+        assert_eq!(archived[0].space, office);
+        // 2026-10-29 at 23:30:10.5 UTC.
+        assert_eq!(archived[0].archived_at, 1_793_309_410_500);
+        assert!(add_archive(&mut sidebar, "not json", &spaces).is_err());
     }
 
     #[test]

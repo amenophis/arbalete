@@ -8,7 +8,14 @@ import { ManageSpaces } from "./ManageSpaces";
 import { MediaList } from "./Media";
 import { matches } from "./search";
 
-export type Section = "spaces" | "closed" | "history" | "media" | "downloads" | "extensions";
+export type Section =
+  | "spaces"
+  | "closed"
+  | "archive"
+  | "history"
+  | "media"
+  | "downloads"
+  | "extensions";
 
 // The sections the library holds so far, in its rail.
 export const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -21,6 +28,11 @@ export const SECTIONS: { id: Section; label: string; icon: string }[] = [
     id: "closed",
     label: "Recently Closed",
     icon: "M2.8 8a5.2 5.2 0 1 0 1.5-3.7M2.6 2.4v2.4H5M8 5.2V8l2 1.3",
+  },
+  {
+    id: "archive",
+    label: "Archived Tabs",
+    icon: "M2.5 3.5h11v3h-11zM3.5 6.5v6h9v-6M6.5 9h3",
   },
   {
     id: "history",
@@ -82,6 +94,7 @@ export function Library({
     setQuery("");
     // Their page may have changed them.
     if (next === "extensions") send("extension/reload");
+    if (next === "archive") send("archive/list");
   };
   // The Spaces and the extensions fill the window, the page hidden; the other sections rest
   // beside it.
@@ -142,6 +155,7 @@ export function Library({
           />
         )}
         {section === "closed" && <ClosedTabs closed={closed} query={query} onReopen={onBack} />}
+        {section === "archive" && <ArchivedTabs query={query} onRestore={onBack} />}
         {section === "history" && <HistoryList query={query} now={Date.now()} onOpen={onBack} />}
         {section === "media" && <MediaList downloads={downloads} query={query} />}
         {section === "downloads" && (
@@ -190,6 +204,55 @@ function ClosedTabs({
             )}
             <span className="title closed-title">{tab.title || tab.url}</span>
             <span className="when">{ago(tab.closedAt, now)}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// A tab archived (send_archive in app/src/shell.rs).
+type ArchivedTab = {
+  url: string;
+  title: string;
+  favicon: string | null;
+  // Its Space's name, unless the Space is gone.
+  space: string | null;
+  archivedAt: number;
+};
+
+// The tabs archived, the most recent first, the "Today" tabs left unshown longer than their
+// profile allows: a click opens one again in its Space and shows it.
+function ArchivedTabs({ query, onRestore }: { query: string; onRestore: () => void }) {
+  const [archive, setArchive] = useState<ArchivedTab[]>([]);
+  useAppEvent<ArchivedTab[]>("arbalete:archive", setArchive);
+  if (archive.length === 0) return <p className="library-empty">No archived tabs yet</p>;
+  // They are opened again by rank, the most recent first.
+  const found = archive
+    .map((tab, rank) => ({ tab, rank }))
+    .filter(({ tab }) => matches(query, tab.title, tab.url));
+  if (found.length === 0) return <p className="library-empty">No archived tab matches</p>;
+  const now = Date.now();
+  return (
+    <ul className="closed-tabs">
+      {found.map(({ tab, rank }) => (
+        <li key={`${rank}:${tab.url}`}>
+          <button
+            type="button"
+            className="closed-tab"
+            title={tab.space ? `${tab.url}\nin ${tab.space}` : tab.url}
+            onClick={() => {
+              send(`archive/restore/${rank}`);
+              onRestore();
+            }}
+          >
+            {tab.favicon ? (
+              <img className="favicon" src={tab.favicon} alt="" />
+            ) : (
+              <span className="favicon placeholder" />
+            )}
+            <span className="title closed-title">{tab.title || tab.url}</span>
+            <span className="when">{ago(tab.archivedAt, now)}</span>
           </button>
         </li>
       ))}

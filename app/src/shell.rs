@@ -16,7 +16,7 @@ use arbalete_core::import::browsers::{self, Family};
 use arbalete_core::import::{self, Choice, safari};
 use arbalete_core::search::SearchEngine;
 use arbalete_core::sidebar::{
-    Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab,
+    ArchiveAfter, Color, Error, NodeId, NodeKind, ProfileId, Sidebar, Space, SpaceId, Tab,
 };
 use arbalete_core::{favicon, store};
 use cef::wrapper::stream_resource_handler::StreamResourceHandler;
@@ -225,6 +225,8 @@ thread_local! {
     /// the margins around the card.
     static DRAG_REGIONS: RefCell<Vec<DraggableRegion>> = const { RefCell::new(Vec::new()) };
     static STATE: RefCell<UiState> = RefCell::default();
+    /// The tab shown last, which showing another marks as shown until then (Sidebar::touch).
+    static LAST_SHOWN: Cell<Option<NodeId>> = const { Cell::new(None) };
     /// Where the sidebar is saved, once the previous session is restored.
     static SESSION_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// Each profile's history, opened on its first visit.
@@ -1681,6 +1683,76 @@ wrap_load_handler! {
     }
 }
 
+/// How often the "Today" tabs left unshown are archived.
+const ARCHIVE_CHECK_MS: i64 = 60_000;
+
+/// Archives the "Today" tabs left unshown longer than their profile allows, then again every
+/// minute.
+fn check_archive() {
+    let now = now().try_into().unwrap_or_default();
+    let archived = STATE.with_borrow_mut(|state| state.sidebar.archive_due(now));
+    if archived > 0 {
+        update_sidebar(|_| ());
+        send_archive();
+    }
+    post_delayed_task(
+        ThreadId::UI,
+        Some(&mut CheckArchive::new()),
+        ARCHIVE_CHECK_MS,
+    );
+}
+
+wrap_task! {
+    struct CheckArchive {}
+
+    impl Task {
+        fn execute(&self) {
+            check_archive();
+        }
+    }
+}
+
+/// Sends the library the archived tabs, the most recent first, with their Space's name.
+fn send_archive() {
+    let json = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let spaces = sidebar.spaces();
+        let items: Vec<_> = sidebar
+            .archive()
+            .iter()
+            .map(|archived| {
+                let space = spaces.iter().find(|space| space.id == archived.space);
+                let profile = space.map_or(sidebar.displayed().profile, |space| space.profile);
+                json!({
+                    "url": archived.tab.url,
+                    "title": archived.tab.label(),
+                    "favicon": favicon_url(profile, &archived.tab),
+                    "space": space.map(|space| space.title.clone()),
+                    "archivedAt": archived.archived_at,
+                })
+            })
+            .collect();
+        serde_json::Value::from(items)
+    });
+    let event = format!(r#"new CustomEvent("arbalete:archive", {{ detail: {json} }})"#);
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
+}
+
+/// Opens an archived tab again, by its rank, in its Space, and shows it.
+fn restore_archived(rank: usize) {
+    let now = now().try_into().unwrap_or_default();
+    let restored = update_sidebar(|sidebar| {
+        let (space, tab) = sidebar.restore(rank, now)?;
+        sidebar.select(space, tab)?;
+        Ok::<_, Error>(space)
+    });
+    if let Ok(space) = restored {
+        show_space(space);
+    }
+    send_archive();
+}
+
 /// The displayed Space's profile.
 pub fn displayed_profile() -> ProfileId {
     STATE.with_borrow(|state| state.sidebar.displayed().profile)
@@ -1894,10 +1966,15 @@ fn send_settings() {
     let profiles: Vec<_> = STATE.with_borrow(|state| {
         let profiles = state.sidebar.profiles().iter();
         profiles
-            .map(|p| json!({ "id": p.id, "name": p.name, "color": p.color, "searchEngine": p.search_engine, "searchSuggestions": p.search_suggestions }))
+            .map(|p| json!({ "id": p.id, "name": p.name, "color": p.color, "searchEngine": p.search_engine, "searchSuggestions": p.search_suggestions, "archiveAfter": p.archive_after }))
             .collect()
     });
-    let detail = json!({ "settings": settings, "engines": engines, "profiles": profiles });
+    let delays: Vec<_> = ArchiveAfter::ALL
+        .iter()
+        .map(|after| json!({ "id": after, "name": after.name() }))
+        .collect();
+    let detail =
+        json!({ "settings": settings, "engines": engines, "delays": delays, "profiles": profiles });
     dispatch(
         &SETTINGS_VIEW,
         &format!(r#"new CustomEvent("arbalete:settings", {{ detail: {detail} }})"#),
@@ -2917,9 +2994,17 @@ fn selected() -> Option<(ProfileId, String)> {
 /// Shows the selected tab in its profile's content view, which is created the first time, or
 /// leaves the card empty when the displayed Space has none.
 fn show_selected() {
-    if let Some(tab) = STATE.with_borrow(|state| state.sidebar.displayed().selected) {
+    let tab = STATE.with_borrow(|state| state.sidebar.displayed().selected);
+    if let Some(tab) = tab {
         RECENT.with_borrow_mut(|recent| remember(recent, tab));
     }
+    // The tab left and the tab shown both showed until now, for the archive.
+    let now = now().try_into().unwrap_or_default();
+    STATE.with_borrow_mut(|state| {
+        for shown in [LAST_SHOWN.replace(tab), tab].into_iter().flatten() {
+            state.sidebar.touch(shown, now);
+        }
+    });
     let Some((profile, url)) = selected() else {
         hide_content();
         return;
@@ -3250,6 +3335,13 @@ pub fn run(command: Command) {
         (Command::ColorProfile(id, color), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_profile_color(id, color));
         }
+        (Command::SetArchiveAfter(id, after), _) => {
+            if update_sidebar(|sidebar| sidebar.set_archive_after(id, after)).is_ok() {
+                send_settings();
+            }
+        }
+        (Command::SendArchive, _) => send_archive(),
+        (Command::RestoreArchived(rank), _) => restore_archived(rank),
         (Command::SetSearchEngine(id, engine), _) => {
             if update_sidebar(|sidebar| sidebar.set_search_engine(id, engine)).is_ok() {
                 send_settings();
@@ -3505,6 +3597,7 @@ wrap_browser_process_handler! {
             DATA_DIR.set(self.data_dir.clone()).expect("one context");
             SETTINGS.set(settings::load(&self.data_dir.join(settings::FILE_NAME)));
             restore(self.data_dir.join(store::FILE_NAME));
+            check_archive();
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
             window_create_top_level(Some(&mut MainWindowDelegate::new()));
         }
@@ -5043,6 +5136,7 @@ mod tests {
             saved_url: None,
             name: None,
             muted: false,
+            last_shown: None,
         };
         let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(60);
         state.closed.push((tab, profile, at));
