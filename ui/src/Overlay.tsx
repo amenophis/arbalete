@@ -6,7 +6,12 @@ type Results = {
   text: string;
   tabs: { id: number; url: string; title: string; favicon: string | null }[];
   pages: { url: string; title: string }[];
+  // The searches the search engine suggests for the text (suggest in app/src/shell.rs).
+  suggestions?: string[];
 };
+
+// How many of the search engine's suggestions show, below what is typed.
+export const SUGGESTIONS = 4;
 
 type Switching = { tabs: Results["tabs"]; picked: number };
 
@@ -68,7 +73,21 @@ export function Overlay() {
   );
   // Only the answer to what is typed now counts.
   useAppEvent<Results>("arbalete:results", (detail) => {
-    if (detail.text === text) setResults(detail);
+    if (detail.text === text)
+      setResults((before) => ({
+        ...detail,
+        suggestions: before?.text === text ? before.suggestions : undefined,
+      }));
+  });
+  useAppEvent<{ text: string; suggestions: string[] }>("arbalete:suggestions", (detail) => {
+    if (detail.text !== text) return;
+    setResults((before) => ({
+      text,
+      tabs: [],
+      pages: [],
+      ...before,
+      suggestions: detail.suggestions,
+    }));
   });
   const completion = completing ? complete(text, results) : null;
   const value = text + (completion?.suffix ?? "");
@@ -185,8 +204,8 @@ function RowIcon({ row }: { row: Row }) {
   );
 }
 
-// What is typed, opened as an address, completed or not, or searched, then the matching open tabs
-// and history pages.
+// What is typed, opened as an address, completed or not, or searched, then the search engine's
+// suggestions, then the matching open tabs and history pages.
 export function resultRows(
   text: string,
   results: Results | null,
@@ -206,8 +225,20 @@ export function resultRows(
           title: `${typed} — Search ${search.name}`,
           search: true,
         };
+  const suggestions = (results?.suggestions ?? [])
+    .filter((suggestion) => suggestion.toLowerCase() !== typed.toLowerCase())
+    .slice(0, SUGGESTIONS)
+    .map(
+      (suggestion): Row => ({
+        kind: "go",
+        url: search.url + encodeURIComponent(suggestion),
+        title: suggestion,
+        search: true,
+      }),
+    );
   return [
     go,
+    ...suggestions,
     ...(results?.tabs ?? []).map(
       (tab): Row => ({ kind: "tab", ...tab, title: tab.title || tab.url }),
     ),

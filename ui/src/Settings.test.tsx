@@ -18,8 +18,8 @@ const detail: SettingsDetail = {
     { id: "duckduckgo", name: "DuckDuckGo" },
   ],
   profiles: [
-    { id: 1, name: "Default", color: "purple", searchEngine: "google" },
-    { id: 5, name: "Work", color: "blue", searchEngine: "duckduckgo" },
+    { id: 1, name: "Default", color: "purple", searchEngine: "google", searchSuggestions: true },
+    { id: 5, name: "Work", color: "blue", searchEngine: "duckduckgo", searchSuggestions: true },
   ],
 };
 
