@@ -102,6 +102,10 @@ pub enum Command {
     SiteTargets(Vec<ExtensionTarget>),
     /// Removes an extension from the displayed Space's profile, from its menu.
     RemoveExtension(String),
+    /// Opens an extension's options page in a tab, from its menu.
+    ExtensionOptions(String),
+    /// Turns an extension of the displayed Space's profile on or off, from its menu.
+    SetExtensionEnabled(String, bool),
     /// Acts on a download from the sidebar: `download/<cancel, open, show or remove>/<id>`.
     Download(DownloadAction, u32),
     /// Opens the library on the downloads, from the menu.

@@ -1668,8 +1668,10 @@ fn hide_find(browser: Option<&Browser>) {
 
 /// An extension's popup, above the page.
 struct ExtensionPopup {
+    window: Window,
     view: BrowserView,
-    controller: OverlayController,
+    /// Where the site controls' button is on the screen, which the window opens under.
+    button: Rect,
 }
 
 /// The gap between the site controls' button and the panel under it.
@@ -1731,6 +1733,7 @@ fn show_site_controls(button: Button) {
                 "name": extension.name,
                 "icon": extensions::icon_path(profile, extension).map(|path| format!("{UI_ORIGIN}{path}")),
                 "popup": extension.popup.is_some(),
+                "enabled": extension.enabled,
             })
         })
         .collect();
@@ -1784,77 +1787,102 @@ fn hide_site_controls() {
     }
 }
 
-/// Opens an extension's popup in a panel under the site controls' button, in the displayed
-/// Space's profile, instead of the site controls. The panel takes the size its page asks for.
+/// Opens an extension's popup in a small window of its own under the site controls' button, like
+/// Arc's, with a title bar to move or close it, in the displayed Space's profile, instead of the
+/// site controls. The window takes the size its page asks for, and closes when it loses the focus.
 fn open_extension_popup(id: &str) {
     hide_site_controls();
     close_extension_popup();
     let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
-    let (Some(url), Some(window)) = (
+    let (Some(url), Some(main), Some(button)) = (
         extensions::popup_url(profile, id),
-        WINDOW.with_borrow(Clone::clone),
+        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.bounds())),
+        SITE_BUTTON.with_borrow(Clone::clone),
     ) else {
         return;
     };
-    let client = PopupClient::new(profile, url);
-    let popup = browser_view(
-        client,
-        "about:blank",
-        no_width,
-        profile_context(profile).as_mut(),
-    );
-    let controller = window
-        .add_overlay_view(Some(&mut View::from(&popup)), DockingMode::CUSTOM, 1)
-        .expect("extension popup");
-    EXTENSION_POPUP.set(Some(ExtensionPopup {
-        view: popup,
-        controller,
-    }));
-    place_extension_popup(&Size {
-        width: 1,
-        height: 1,
-    });
+    // The main window has no frame: its coordinates are its content's.
+    let button = Rect {
+        x: main.x + button.x,
+        y: main.y + button.y,
+        ..button
+    };
+    window_create_top_level(Some(&mut PopupWindowDelegate::new(profile, url, button)));
 }
 
-/// Puts the extension popup under the site controls' button, `size` large, within the window.
-fn place_extension_popup(size: &Size) {
-    let (Some(button), Some(window)) = (
-        SITE_BUTTON.with_borrow(Clone::clone),
-        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
-    ) else {
-        return;
-    };
+/// Shows the extension popup's window once its page has a size, under the button, with the focus.
+fn show_extension_popup(size: &Size) {
     EXTENSION_POPUP.with_borrow(|popup| {
         let Some(popup) = popup else { return };
-        popup
-            .controller
-            .set_bounds(Some(&under(&button, size, &window)));
-        popup.controller.set_visible(1);
+        // The window's bounds hold its title bar too.
+        let bar = popup.window.bounds().height - popup.view.bounds().height;
+        let button = &popup.button;
+        popup.window.set_bounds(Some(&Rect {
+            x: button.x + button.width / 2 - size.width / 2,
+            y: button.y + button.height + PANEL_GAP,
+            width: size.width,
+            height: size.height + bar,
+        }));
+        popup.window.show();
+        popup.view.request_focus();
     });
 }
 
-/// Shows the extension popup once its page has a size, rounded, with the focus, which it closes
-/// on losing.
-fn show_extension_popup(size: &Size) {
-    place_extension_popup(size);
-    let Some(view) = EXTENSION_POPUP.with_borrow(|popup| Some(popup.as_ref()?.view.clone())) else {
-        return;
-    };
-    #[cfg(target_os = "macos")]
-    if let Some(host) = view.browser().and_then(|browser| browser.host()) {
-        crate::mac::round_command_bar(host.window_handle());
+/// Closes the extension popup's window, if one is open.
+pub fn close_extension_popup() {
+    if let Some(window) = EXTENSION_POPUP.with_borrow(|popup| Some(popup.as_ref()?.window.clone()))
+    {
+        window.close();
     }
-    view.request_focus();
 }
 
-/// Closes the extension popup, if one is open.
-pub fn close_extension_popup() {
-    let Some(popup) = EXTENSION_POPUP.take() else {
-        return;
-    };
-    extensions::popup_closed();
-    // Its browser closes with its view, once out of the window.
-    popup.controller.destroy();
+wrap_window_delegate! {
+    struct PopupWindowDelegate {
+        profile: ProfileId,
+        url: String,
+        button: Rect,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size { width: 1, height: 1 }
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let window = window.expect("window").clone();
+            window.set_to_fill_layout();
+            let client = PopupClient::new(self.profile, self.url.clone());
+            let view = browser_view(client, "about:blank", no_width, profile_context(self.profile).as_mut());
+            window.add_child_view(Some(&mut View::from(&view)));
+            EXTENSION_POPUP.set(Some(ExtensionPopup { window, view, button: self.button.clone() }));
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            EXTENSION_POPUP.set(None);
+            extensions::popup_closed();
+        }
+
+        fn on_window_activation_changed(&self, window: Option<&mut Window>, active: i32) {
+            if active == 0 && let Some(window) = window {
+                window.close();
+            }
+        }
+
+        // Its title bar has the window buttons, like Arc's: close, and minimize.
+        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 0 }
+
+        fn window_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
 }
 
 /// Sends the import assistant the browsers to list, and the profiles to merge them into: none
@@ -2868,6 +2896,16 @@ pub fn run(command: Command) {
             let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
             extensions::uninstall(profile, &id);
         }
+        (Command::ExtensionOptions(id), _) => {
+            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            if let Some(url) = extensions::options_url(profile, &id) {
+                open_tab(&url);
+            }
+        }
+        (Command::SetExtensionEnabled(id, enabled), _) => {
+            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            extensions::set_enabled(profile, &id, enabled);
+        }
         (Command::CloseExtensionPopup, _) => close_extension_popup(),
         (Command::Print, Some(browser)) => {
             if let Some(host) = browser.host() {
@@ -3474,7 +3512,13 @@ pub fn menu_at(x: f64, y: f64) -> bool {
             let extension =
                 id.and_then(|id| extensions::list(profile).into_iter().find(|e| e.id == id));
             if let Some(extension) = extension {
-                crate::mac::pop_up(menu::extension_menu(&extension.id, &extension.name));
+                let menu = menu::extension_menu(
+                    &extension.id,
+                    &extension.name,
+                    extension.options.is_some(),
+                    extension.enabled,
+                );
+                crate::mac::pop_up(menu);
             }
             return true;
         }

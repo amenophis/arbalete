@@ -10,6 +10,8 @@ export type Extension = {
   icon: string | null;
   // Its button opens a popup, rather than telling the extension it was clicked.
   popup: boolean;
+  // Turned off, it does not run: its menu turns it on again.
+  enabled: boolean;
 };
 
 type Detail = { url: string; extensions: Extension[] };
@@ -115,8 +117,8 @@ export function Site() {
             type="button"
             className="site-button"
             aria-label={extension.name}
-            title={extension.name}
-            disabled={!extension.popup}
+            title={extension.enabled ? extension.name : `${extension.name} (off)`}
+            disabled={!extension.popup || !extension.enabled}
             onClick={() => send(`site/extension/${extension.id}`)}
           >
             {extension.icon ? <img src={extension.icon} alt="" /> : extension.name.slice(0, 1)}

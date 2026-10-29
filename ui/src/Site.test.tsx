@@ -16,10 +16,12 @@ function show(url: string) {
     {
       id: "dark",
       name: "Dark Reader",
-      icon: "https://arbalete.ui/extension-icon/1/dark",
+      icon: "arbalete://ui/extension-icon/1/dark",
       popup: true,
+      enabled: true,
     },
-    { id: "quiet", name: "No Popup", icon: null, popup: false },
+    { id: "quiet", name: "No Popup", icon: null, popup: false, enabled: true },
+    { id: "off", name: "Off", icon: null, popup: true, enabled: false },
   ];
   act(() => {
     dispatchEvent(new CustomEvent("arbalete:show", { detail: { url, extensions } }));
@@ -39,6 +41,7 @@ test("acts on the site and opens an extension's popup", () => {
     method: "POST",
   });
   expect(screen.getByRole("button", { name: "No Popup" })).toHaveProperty("disabled", true);
+  expect(screen.getByRole("button", { name: "Off" })).toHaveProperty("disabled", true);
   fireEvent.click(screen.getByRole("button", { name: "Dark Reader" }));
   expect(fetch).toHaveBeenLastCalledWith("/command/site/extension/dark", { method: "POST" });
   fireEvent.click(screen.getByRole("button", { name: "Add Extensions" }));
