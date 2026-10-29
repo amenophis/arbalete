@@ -2,7 +2,7 @@
 
 use arbalete_core::import::Choice;
 use arbalete_core::search::SearchEngine;
-use arbalete_core::sidebar::{Color, NodeId, ProfileId, SpaceId};
+use arbalete_core::sidebar::{ArchiveAfter, Color, NodeId, ProfileId, SpaceId};
 use serde::Deserialize;
 
 /// What a site keeps that its site controls clear (Command::ClearSiteData).
@@ -285,6 +285,14 @@ pub enum Command {
     RenameProfile(ProfileId, String),
     /// Changes a profile's color: `profile/color/<profile id>/<color>`, like `blue`.
     ColorProfile(ProfileId, Color),
+    /// Changes how long a profile's "Today" tabs stay unshown before they are archived:
+    /// `profile/archive/<profile id>/<delay>`, like `twelve-hours` or `never`.
+    SetArchiveAfter(ProfileId, ArchiveAfter),
+    /// Sends the library the archived tabs: `archive/list`.
+    SendArchive,
+    /// Opens an archived tab again, by its rank in the archive, and shows it:
+    /// `archive/restore/<rank>`.
+    RestoreArchived(usize),
     /// Changes what a profile's Command Bar searches with:
     /// `profile/search/<profile id>/<engine>`, like `duckduckgo`.
     SetSearchEngine(ProfileId, SearchEngine),
@@ -479,6 +487,7 @@ impl Command {
             "extension/reload" => Some(Self::ReloadExtensions),
             "history/show" => Some(Self::ShowHistory),
             "downloads/show" => Some(Self::ShowDownloads),
+            "archive/list" => Some(Self::SendArchive),
             _ => {
                 if let Some((action, id)) = path
                     .strip_prefix("extension/")
@@ -587,6 +596,17 @@ impl Command {
                         _ => return None,
                     };
                     return Some(Self::SetSearchSuggestions(id, on));
+                }
+                if let Some((id, after)) = path
+                    .strip_prefix("profile/archive/")
+                    .and_then(|r| r.split_once('/'))
+                {
+                    let id = serde_json::from_str(id).ok()?;
+                    let after = serde_json::from_value(after.into()).ok()?;
+                    return Some(Self::SetArchiveAfter(id, after));
+                }
+                if let Some(rank) = path.strip_prefix("archive/restore/") {
+                    return rank.parse().ok().map(Self::RestoreArchived);
                 }
                 if let Some((id, engine)) = path
                     .strip_prefix("profile/search/")
@@ -838,7 +858,7 @@ fn percent_decode(text: &str) -> Option<String> {
 mod tests {
     use super::{Button, ButtonView, Command, ExtensionTarget, LittleAction, Setting, Target};
     use arbalete_core::search::SearchEngine;
-    use arbalete_core::sidebar::Color;
+    use arbalete_core::sidebar::{ArchiveAfter, Color};
 
     #[test]
     fn parses_known_commands() {
@@ -1436,6 +1456,16 @@ mod tests {
             Some(Command::SetSearchSuggestions(_, false))
         ));
         assert_eq!(Command::parse("profile/suggestions/1/maybe"), None);
+        assert!(matches!(
+            Command::parse("profile/archive/1/week"),
+            Some(Command::SetArchiveAfter(_, ArchiveAfter::Week))
+        ));
+        assert_eq!(Command::parse("profile/archive/1/soon"), None);
+        assert_eq!(Command::parse("archive/list"), Some(Command::SendArchive));
+        assert_eq!(
+            Command::parse("archive/restore/3"),
+            Some(Command::RestoreArchived(3))
+        );
         let Some(Command::SetSearchEngine(id, engine)) =
             Command::parse("profile/search/1/duckduckgo")
         else {

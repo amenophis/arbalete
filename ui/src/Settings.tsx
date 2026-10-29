@@ -7,12 +7,15 @@ import { Icon } from "./Icon";
 export type SettingsDetail = {
   settings: { warnBeforeQuit: boolean; restoreSession: boolean };
   engines: { id: string; name: string }[];
+  // How long "Today" tabs may stay unshown before they are archived, which a profile picks.
+  delays: { id: string; name: string }[];
   profiles: {
     id: number;
     name: string;
     color: Color;
     searchEngine: string;
     searchSuggestions: boolean;
+    archiveAfter: string;
   }[];
 };
 
@@ -222,6 +225,22 @@ function Profiles({ detail }: { detail: SettingsDetail }) {
               }
             />{" "}
             Suggestions
+          </label>
+          <label>
+            Archive tabs after{" "}
+            <select
+              aria-label={`${profile.name} archives tabs after`}
+              value={profile.archiveAfter}
+              onChange={(event) =>
+                send(`profile/archive/${profile.id}/${event.currentTarget.value}`)
+              }
+            >
+              {detail.delays.map((delay) => (
+                <option key={delay.id} value={delay.id}>
+                  {delay.name}
+                </option>
+              ))}
+            </select>
           </label>
         </li>
       ))}

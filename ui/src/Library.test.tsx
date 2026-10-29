@@ -52,6 +52,7 @@ test("a rail of sections opens on the Spaces, and the one picked shows under its
   expect(tabs.map((tab) => tab.textContent)).toEqual([
     "Spaces",
     "Recently Closed",
+    "Archived Tabs",
     "History",
     "Media",
     "Downloads",
@@ -208,4 +209,23 @@ test("the popover says when no tab has been closed", () => {
   fireEvent.mouseEnter(container.firstElementChild as Element);
   act(() => vi.advanceTimersByTime(POPOVER_DELAY_MS));
   expect(screen.getByText("No tab closed yet")).toBeDefined();
+});
+
+test("the archived tabs open again in their Space", () => {
+  renderLibrary();
+  fireEvent.click(section("Archived Tabs"));
+  expect(fetch).toHaveBeenCalledWith("/command/archive/list", { method: "POST" });
+  expect(screen.getByText("No archived tabs yet")).toBeTruthy();
+  const archive = [
+    { url: "https://a.example/", title: "A", favicon: null, space: "Home", archivedAt: Date.now() },
+    { url: "https://b.example/", title: "B", favicon: null, space: null, archivedAt: 0 },
+  ];
+  act(() => {
+    dispatchEvent(new CustomEvent("arbalete:archive", { detail: archive }));
+  });
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search Archived Tabs" }), {
+    target: { value: "b.ex" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^B.*ago$/ }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/archive/restore/1", { method: "POST" });
 });
