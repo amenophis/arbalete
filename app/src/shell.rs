@@ -3936,7 +3936,7 @@ wrap_window_delegate! {
         /// Asks every browser to close; the window closes once they all can.
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             CLOSING.set(true);
-            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW, &FIND_VIEW]
+            let mut views: Vec<_> = [&SIDEBAR, &REVEAL_VIEW, &OVERLAY_VIEW, &IMPORT_VIEW, &FIND_VIEW, &TOOLBAR_VIEW, &SITE_VIEW]
                 .into_iter()
                 .filter_map(|view| view.with_borrow(Clone::clone))
                 .collect();
