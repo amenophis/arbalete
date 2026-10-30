@@ -67,6 +67,97 @@ pub enum Color {
     Gray,
 }
 
+impl Color {
+    /// Its value as `#rrggbb`, which the UI's palette draws too (COLORS in ui/src/bridge.ts).
+    pub fn hex(self) -> &'static str {
+        match self {
+            Color::Purple => "#6e56cf",
+            Color::Blue => "#3e7bfa",
+            Color::Green => "#30a46c",
+            Color::Yellow => "#e5b800",
+            Color::Orange => "#f76b15",
+            Color::Red => "#e5484d",
+            Color::Pink => "#d6409f",
+            Color::Gray => "#8b8d98",
+        }
+    }
+}
+
+/// How a Space colors the window, like Arc's: up to three colors blended into a gradient, shown
+/// over light or dark neutrals at an intensity, with grain over them. Without colors, the window
+/// keeps its neutrals, without grain.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Theme {
+    /// The first one leads, as `#rrggbb`.
+    pub colors: Vec<String>,
+    pub mode: Mode,
+    /// How much the colors show over the neutrals, from 0 to 1.
+    pub intensity: f64,
+    /// How much grain shows, from 0 to 1.
+    pub noise: f64,
+}
+
+/// Whether a theme takes the system's appearance or forces a light or dark one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
+/// A theme holds at most this many colors.
+pub const MAX_THEME_COLORS: usize = 3;
+
+impl Default for Theme {
+    fn default() -> Self {
+        Color::default().into()
+    }
+}
+
+/// A palette color shows faintly, as Spaces showed their color before themes.
+impl From<Color> for Theme {
+    fn from(color: Color) -> Self {
+        Theme {
+            colors: vec![color.hex().to_string()],
+            mode: Mode::Auto,
+            intensity: 0.25,
+            noise: 0.0,
+        }
+    }
+}
+
+impl Theme {
+    /// Whether the UI can paint it: at most three `#rrggbb` colors, and factors from 0 to 1.
+    fn is_valid(&self) -> bool {
+        let hex = |color: &String| {
+            color.len() == 7
+                && color.starts_with('#')
+                && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        };
+        self.colors.len() <= MAX_THEME_COLORS
+            && self.colors.iter().all(hex)
+            && (0.0..=1.0).contains(&self.intensity)
+            && (0.0..=1.0).contains(&self.noise)
+    }
+}
+
+/// A theme, or a palette color, which Spaces saved before themes had in `color`.
+fn theme_or_color<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Theme, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Saved {
+        Color(Color),
+        Theme(Theme),
+    }
+    Ok(match Saved::deserialize(deserializer)? {
+        Saved::Color(color) => color.into(),
+        Saved::Theme(theme) => theme,
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Space {
     pub id: SpaceId,
@@ -74,8 +165,8 @@ pub struct Space {
     /// Shown in the Space switcher instead of the title's initial.
     #[serde(default)]
     pub emoji: Option<String>,
-    #[serde(default)]
-    pub color: Color,
+    #[serde(default, alias = "color", deserialize_with = "theme_or_color")]
+    pub theme: Theme,
     pub profile: ProfileId,
     pub pinned: NodeId,
     pub today: NodeId,
@@ -224,6 +315,8 @@ pub enum Error {
     NotSplittable,
     /// A profile holds at most `MAX_FAVORITES` favorites.
     FavoritesFull,
+    /// A theme holds at most `MAX_THEME_COLORS` `#rrggbb` colors, and factors from 0 to 1.
+    InvalidTheme,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -415,7 +508,7 @@ impl Sidebar {
             id,
             title: title.to_string(),
             emoji: None,
-            color: Color::default(),
+            theme: Theme::default(),
             profile,
             pinned,
             today,
@@ -450,8 +543,11 @@ impl Sidebar {
         Ok(())
     }
 
-    pub fn set_space_color(&mut self, id: SpaceId, color: Color) -> Result<(), Error> {
-        self.space_mut(id)?.color = color;
+    pub fn set_space_theme(&mut self, id: SpaceId, theme: Theme) -> Result<(), Error> {
+        if !theme.is_valid() {
+            return Err(Error::InvalidTheme);
+        }
+        self.space_mut(id)?.theme = theme;
         Ok(())
     }
 
@@ -1943,8 +2039,8 @@ mod tests {
         assert_eq!(created.id, space);
         assert_eq!((created.title.as_str(), created.profile), ("Mail", work));
         assert_eq!(
-            (created.emoji.as_deref(), created.color),
-            (None, Color::Purple)
+            (created.emoji.as_deref(), &created.theme),
+            (None, &Theme::from(Color::Purple))
         );
         assert_eq!(sidebar.spaces().last().unwrap().id, space);
         assert_eq!(sidebar.create_space(" ", work), Err(Error::EmptyTitle));
@@ -1957,18 +2053,50 @@ mod tests {
     }
 
     #[test]
-    fn renames_a_space_and_sets_its_emoji_and_color() {
+    fn renames_a_space_and_sets_its_emoji_and_theme() {
         let mut sidebar = Sidebar::default();
         let id = home(&sidebar).id;
         sidebar.rename_space(id, "Personal").unwrap();
         sidebar.set_space_emoji(id, " 🏡 ").unwrap();
-        sidebar.set_space_color(id, Color::Blue).unwrap();
+        let theme = Theme {
+            colors: vec!["#6daee9".into(), "#f47a78".into(), "#dfe56b".into()],
+            mode: Mode::Light,
+            intensity: 0.8,
+            noise: 0.0,
+        };
+        sidebar.set_space_theme(id, theme.clone()).unwrap();
         assert_eq!(sidebar.rename_space(id, " "), Err(Error::EmptyTitle));
         let space = home(&sidebar);
         assert_eq!(
-            (space.title.as_str(), space.emoji.as_deref(), space.color),
-            ("Personal", Some("🏡"), Color::Blue)
+            (space.title.as_str(), space.emoji.as_deref(), &space.theme),
+            ("Personal", Some("🏡"), &theme)
         );
+        // No color leaves the window's neutrals.
+        let neutral = Theme {
+            colors: Vec::new(),
+            ..theme.clone()
+        };
+        sidebar.set_space_theme(id, neutral.clone()).unwrap();
+        assert_eq!(home(&sidebar).theme, neutral);
+        let four = Theme {
+            colors: vec!["#000000".into(); 4],
+            ..theme.clone()
+        };
+        let named = Theme {
+            colors: vec!["blue".into()],
+            ..theme.clone()
+        };
+        let strong = Theme {
+            intensity: 1.5,
+            ..theme.clone()
+        };
+        for invalid in [four, named, strong] {
+            assert_eq!(
+                sidebar.set_space_theme(id, invalid),
+                Err(Error::InvalidTheme)
+            );
+        }
+        assert_eq!(home(&sidebar).theme, neutral);
         sidebar.set_space_emoji(id, " ").unwrap();
         assert_eq!(home(&sidebar).emoji, None);
         let unknown = SpaceId(999);
@@ -1978,7 +2106,7 @@ mod tests {
             Err(Error::UnknownSpace)
         );
         assert_eq!(
-            sidebar.set_space_color(unknown, Color::Red),
+            sidebar.set_space_theme(unknown, Theme::default()),
             Err(Error::UnknownSpace)
         );
     }
@@ -1988,7 +2116,18 @@ mod tests {
         let json = r#"{ "id": 3, "title": "Home", "profile": 1, "pinned": 4, "today": 5,
             "selected": null }"#;
         let space: Space = serde_json::from_str(json).unwrap();
-        assert_eq!((space.emoji, space.color), (None, Color::Purple));
+        assert_eq!((space.emoji, space.theme), (None, Color::Purple.into()));
+    }
+
+    #[test]
+    fn a_space_saved_with_a_color_takes_it_as_its_theme() {
+        let json = r#"{ "id": 3, "title": "Home", "color": "green", "profile": 1, "pinned": 4,
+            "today": 5, "selected": null }"#;
+        let space: Space = serde_json::from_str(json).unwrap();
+        assert_eq!(space.theme, Color::Green.into());
+        let saved = serde_json::to_value(&space).unwrap();
+        assert_eq!(saved["theme"]["colors"], serde_json::json!(["#30a46c"]));
+        assert_eq!(saved.get("color"), None);
     }
 
     #[test]

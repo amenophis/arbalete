@@ -22,6 +22,27 @@
             "customInfo": {
               "iconType": { "emoji_v2": "🏡" },
               "windowTheme": {
+                "background": {
+                  "single": {
+                    "_0": {
+                      "isVibrant": true,
+                      "style": {
+                        "color": {
+                          "_0": {
+                            "blendedSingleColor": {
+                              "_0": {
+                                "color": { "red": 0.9, "green": 0.3, "blue": 0.32, "alpha": 1, "colorSpace": "extendedSRGB" },
+                                "translucencyStyle": "light",
+                                "modifiers": { "overlay": "grain", "intensityFactor": 1, "noiseFactor": 0.5 }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "contentOverBackgroundAppearance": "light"
+                    }
+                  }
+                },
                 "primaryColorPalette": {
                   "midTone": { "red": 0.9, "green": 0.3, "blue": 0.32, "alpha": 1 }
                 }
@@ -48,6 +69,35 @@
             "customInfo": {
               "iconType": { "emoji_v2": "💼" },
               "windowTheme": {
+                "background": {
+                  "single": {
+                    "_0": {
+                      "isVibrant": true,
+                      "style": {
+                        "color": {
+                          "_0": {
+                            "blendedGradient": {
+                              "_0": {
+                                "baseColors": [
+                                  { "red": 0.25, "green": 0.48, "blue": 0.97, "alpha": 1, "colorSpace": "extendedSRGB" },
+                                  { "red": 1.02, "green": 0.5, "blue": -0.03, "alpha": 1, "colorSpace": "extendedSRGB" }
+                                ],
+                                "overlayColors": [
+                                  { "red": 0, "green": 0, "blue": 0, "alpha": 0, "colorSpace": "extendedSRGB" },
+                                  { "red": 0.2, "green": 0.8, "blue": 0.4, "alpha": 1, "colorSpace": "extendedSRGB" }
+                                ],
+                                "translucencyStyle": "dark",
+                                "modifiers": { "overlay": "grain", "intensityFactor": 0.8, "noiseFactor": 0 },
+                                "wheel": "complimentary"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "contentOverBackgroundAppearance": "dark"
+                    }
+                  }
+                },
                 "primaryColorPalette": {
                   "midTone": { "red": 0.25, "green": 0.48, "blue": 0.97, "alpha": 1 }
                 }

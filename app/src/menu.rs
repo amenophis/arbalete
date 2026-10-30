@@ -258,7 +258,11 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
     vec![
         item("icon", "Change Space Icon…", edit("emoji")),
         item("rename", "Rename Space…", edit("name")),
-        item("color", "Edit Theme Color…", edit("color")),
+        item(
+            "color",
+            "Edit Theme Color…",
+            Action::Run(Command::ShowThemePicker(id)),
+        ),
         Entry::Submenu("Set Profile".to_string(), profiles(sidebar, space)),
         Entry::Separator,
         item(
@@ -641,7 +645,10 @@ mod tests {
         };
         assert_eq!(choose("icon"), Some(edit("emoji")));
         assert_eq!(choose("rename"), Some(edit("name")));
-        assert_eq!(choose("color"), Some(edit("color")));
+        assert_eq!(
+            choose("color"),
+            Some(Action::Run(Command::ShowThemePicker(home.id)))
+        );
         let work_id = serde_json::to_string(&work).unwrap();
         assert_eq!(
             choose(&format!("profile/{work_id}")),

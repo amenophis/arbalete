@@ -2,6 +2,10 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ClosedTab, Space } from "./bridge";
 import { ago, Library, LibraryButton, POPOVER_DELAY_MS } from "./Library";
+import type { Theme } from "./theme";
+
+// A theme of one color, like a Space saved before themes.
+const solid = (color: string): Theme => ({ colors: [color], mode: "auto", intensity: 1, noise: 0 });
 
 const fetch = vi.fn();
 
@@ -16,12 +20,12 @@ afterEach(() => {
 });
 
 const spaces: Space[] = [
-  { id: 13, title: "Home", emoji: "🏠", color: "blue", profile: 1, pinned: [] },
+  { id: 13, title: "Home", emoji: "🏠", theme: solid("#3e7bfa"), profile: 1, pinned: [] },
   {
     id: 14,
     title: "Work",
     emoji: null,
-    color: "green",
+    theme: solid("#30a46c"),
     profile: 1,
     pinned: [{ id: 3, url: "https://mail.test/", title: "Mail", favicon: null }],
   },

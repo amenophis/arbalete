@@ -154,15 +154,14 @@ Windows):
 
 | Data | Source | Conversion |
 |---|---|---|
-| Sidebar: Spaces, Favorites, pinned and today's tabs, folders | `StorableSidebar.json`, `sidebar.containers`: the entry with `items`, `spaces` and `topAppsContainerIDs`, each a flat array alternating keys (ids) and values. Items are linked by `parentID` / `childrenIds` and hold one kind in `data`: `tab` (`savedURL`, `savedTitle`; the item's `title` when renamed), `list` (a folder), `splitView` (its tabs as children), `itemContainer` (a root). A Space's `containerIDs` alternates `pinned` / `unpinned` and their root; its `customInfo` holds `iconType` (`emoji_v2`, or a named `icon`) and `windowTheme`. `topAppsContainerIDs` alternates a profile and its Favorites root. `spaces` is read in its own order; `sidebarSyncState` and `firebaseSyncState` are sync copies | Profiles, Spaces and node tree; split views become separate tabs at first |
+| Sidebar: Spaces, Favorites, pinned and today's tabs, folders | `StorableSidebar.json`, `sidebar.containers`: the entry with `items`, `spaces` and `topAppsContainerIDs`, each a flat array alternating keys (ids) and values. Items are linked by `parentID` / `childrenIds` and hold one kind in `data`: `tab` (`savedURL`, `savedTitle`; the item's `title` when renamed), `list` (a folder), `splitView` (its tabs as children), `itemContainer` (a root). A Space's `containerIDs` alternates `pinned` / `unpinned` and their root; its `customInfo` holds `iconType` (`emoji_v2`, or a named `icon`) and `windowTheme`: under `background.single._0.style.color._0`, one of `basicColor`, `blendedSingleColor` (`color`) or `blendedGradient` (`baseColors`, then `overlayColors` whose first is transparent), each with `translucencyStyle` (`light`, `dark`, `auto`) and `modifiers` (`intensityFactor`, `noiseFactor`, `overlay`: `grain`, `sand`, `denim`, `tweed`); colors are `extendedSRGB` components, a little beyond 0 to 1. A Space without colors has no `windowTheme`. `topAppsContainerIDs` alternates a profile and its Favorites root. `spaces` is read in its own order; `sidebarSyncState` and `firebaseSyncState` are sync copies | Profiles, Spaces and node tree; split views become separate tabs at first |
 | Profiles | Each Space's `profile` is `{"default": true}` or `{"custom": {"_0": {"directoryBasename": …}}}`; names in `User Data/Local State` (`profile.info_cache.<directory>.name`), no colors there | One Arbalete profile per Arc profile |
 | Archive | `StorableArchive.json` | Arbalete archive |
 | Link routing rules | `StorableLinkRouting.json` | Rules; destinations that do not exist in Arbalete fall back to the profile's most recent Space |
 | History, bookmarks | `User Data/<directoryBasename>/History`, `Bookmarks` | Same as any Chromium browser (below) |
 
-The sidebar format was checked against a real Arc file; custom profiles, Space titles, the order of several Spaces
-and `windowTheme` (`primaryColorPalette.midTone`, components from 0 to 1) were absent from it and remain
-to be checked.
+The sidebar format was checked against a real Arc file, `windowTheme` included; custom profiles and the order of
+several Spaces were absent from it and remain to be checked.
 
 ### From system browsers
 
@@ -384,11 +383,13 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   (with Option, a copy of it), and separates them again from a button Option shows on each half:
   until Split View shows both tabs side by side, a split row opens its first tab, and a click on
   either half shows that tab alone.
-- Per-OS finish: macOS vibrancy, Windows Mica, Wayland/X11.
 - Several tabs selected at once, like Arc: ⌘-click adds or removes a tab, ⇧-click selects a range, all
   highlighted. Dragging one of them moves the whole selection, in its order: into the pinned section, into
   the favorites (as far as they have room), into a folder, or to another Space by holding it over that
   Space's icon in the switcher. Closing, archiving or moving from the menu acts on the whole selection too.
+- Per-OS finish: macOS vibrancy, Windows Mica, Wayland/X11. Arc's window shows the desktop through an
+  `NSVisualEffectView` (behind-window blending, its material by the theme's appearance) under its theme's
+  gradient; CEF paints its windowed browsers opaque, so the sidebar cannot show it without rendering off screen.
 
 ### Phase 10 — Linux and Windows
 - CI on Linux and Windows: system libraries CEF needs, loading `libcef` in tests, Windows sandbox bootstrap.
