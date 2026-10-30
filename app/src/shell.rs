@@ -3368,8 +3368,13 @@ fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
         panel.set_background_color(card_color);
     }
     COLORED.set(true);
+    // Only when it changes: showing an overlay again puts it above the others, like the theme
+    // picker, which would lose the focus and close.
     if let Some(card) = CARD.with_borrow(Clone::clone) {
-        card.set_visible((!fills_window()).into());
+        let visible = (!fills_window()).into();
+        if card.is_visible() != visible {
+            card.set_visible(visible);
+        }
     }
 }
 

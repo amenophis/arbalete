@@ -234,8 +234,7 @@ function Pad({
           const { x, y } = at(event);
           move(dragged, x, y);
         }}
-        onPointerUp={() => setDragged(undefined)}
-        onPointerCancel={() => setDragged(undefined)}
+        onLostPointerCapture={() => setDragged(undefined)}
       >
         {colors.length === 0 && <p className="theme-empty">Tap to pick a color for this space</p>}
         {colors.map((color, index) => {
@@ -383,7 +382,7 @@ export function SineSlider({
         set(event);
       }}
       onPointerMove={(event) => dragging && set(event)}
-      onPointerUp={() => setDragging(false)}
+      onLostPointerCapture={() => setDragging(false)}
       onKeyDown={(event) => {
         const step = { ArrowRight: 0.05, ArrowUp: 0.05, ArrowLeft: -0.05, ArrowDown: -0.05 }[
           event.key
@@ -444,7 +443,7 @@ export function Dial({
         turn(event);
       }}
       onPointerMove={(event) => dragging && turn(event)}
-      onPointerUp={() => setDragging(false)}
+      onLostPointerCapture={() => setDragging(false)}
       onWheel={(event) => {
         if (enabled) onChange(Math.min(1, Math.max(0, value - event.deltaY / 500)));
       }}
