@@ -79,9 +79,13 @@ final class AppModel: ObservableObject {
 }
 
 @MainActor var model: AppModel?
+@MainActor weak var mainWindow: NSWindow?
 @MainActor var backdrop: Backdrop?
 @MainActor var sidebar: SidebarHost?
 @MainActor var commandBar: CommandBar?
+@MainActor var findBar: FindBar?
+@MainActor var siteControls: SiteControls?
+@MainActor var themePicker: ThemePickerModel?
 
 /// Puts the interface in the window `handle` is, or is in: the blur behind every view, and the
 /// sidebar above them.
@@ -94,6 +98,7 @@ public func attach(_ handle: UnsafeMutableRawPointer, _ send: Send) {
         else { return }
         let app = AppModel(send: send)
         model = app
+        mainWindow = window
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
@@ -108,6 +113,31 @@ public func attach(_ handle: UnsafeMutableRawPointer, _ send: Send) {
             field.window?.makeFirstResponder(field)
         }
         surfaces["overlay"] = overlay
+        let find = FindBar(app: app)
+        findBar = find
+        let findSurface = Surface(in: window, radius: 10) { FindView(bar: find) }
+        findSurface.takesKeyboard = true
+        findSurface.shown = { [weak find] in
+            guard let field = find?.field else { return }
+            field.window?.makeFirstResponder(field)
+            field.selectText(nil)
+        }
+        surfaces["find"] = findSurface
+        surfaces["toolbar"] = Surface(in: window, radius: 0, material: .titlebar) {
+            PageToolbar(model: app)
+        }
+        let site = SiteControls(app: app)
+        siteControls = site
+        let siteSurface = Surface(in: window, radius: 12) { SiteView(controls: site) }
+        siteSurface.takesKeyboard = true
+        siteSurface.resigned = { app.run("site/hide") }
+        surfaces["site"] = siteSurface
+        let picker = ThemePickerModel(app: app)
+        themePicker = picker
+        let themeSurface = Surface(in: window, radius: 20) { ThemePickerView(picker: picker) }
+        themeSurface.takesKeyboard = true
+        themeSurface.resigned = { app.run("theme/hide") }
+        surfaces["theme"] = themeSurface
     }
 }
 
@@ -123,6 +153,12 @@ public func event(
             model?.handle(String(cString: name), detail)
         case "overlay":
             commandBar?.handle(String(cString: name), detail)
+        case "find":
+            findBar?.handle(String(cString: name), detail)
+        case "site":
+            siteControls?.handle(String(cString: name), detail)
+        case "theme":
+            themePicker?.handle(String(cString: name), detail)
         default:
             break
         }
