@@ -11,20 +11,25 @@ struct SidebarView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            SidebarToolbar(model: model)
-            if !(model.state?.toolbar ?? false) {
-                AddressRow(model: model)
+        if model.libraryShown {
+            LibraryView(model: model)
+        } else {
+            VStack(spacing: 0) {
+                SidebarToolbar(model: model)
+                if !(model.state?.toolbar ?? false) {
+                    AddressRow(model: model)
+                }
+                if let page = model.page, let space = model.space {
+                    SpaceSections(model: model, page: page, space: space)
+                } else {
+                    Spacer()
+                }
+                RecentDownloads(model: model)
+                Footer(model: model)
             }
-            if let page = model.page, let space = model.space {
-                SpaceSections(model: model, page: page, space: space)
-            } else {
-                Spacer()
-            }
-            Footer(model: model)
+            .padding(.horizontal, 6)
+            .foregroundStyle(.primary)
         }
-        .padding(.horizontal, 6)
-        .foregroundStyle(.primary)
     }
 }
 
@@ -628,7 +633,7 @@ struct Footer: View {
     var body: some View {
         HStack(spacing: 0) {
             IconButton(symbol: "books.vertical", label: "Library") {
-                model.run("library/show")
+                model.openLibrary(nil)
             }
             Spacer()
             HStack(spacing: 2) {
