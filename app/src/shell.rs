@@ -1703,6 +1703,12 @@ fn send_little(id: u32) {
     });
     if let Some((bar, detail)) = found {
         let event = format!(r#"new CustomEvent("arbalete:little", {{ detail: {detail} }})"#);
+        #[cfg(target_os = "macos")]
+        {
+            let _ = bar;
+            crate::native::event(&format!("little/{id}"), &event);
+        }
+        #[cfg(not(target_os = "macos"))]
         dispatch_in(&bar, &event);
     }
 }
@@ -4403,7 +4409,7 @@ wrap_window_delegate! {
                     ..Default::default()
                 }))
                 .expect("box layout");
-            let url = format!("{UI_ORIGIN}index.html#little/{}", self.id);
+            let url = web_surface(&format!("#little/{}", self.id));
             let bar = browser_view_sized(UiClient::new(), &url, || 1, LITTLE_BAR_HEIGHT, None);
             window.add_child_view(Some(&mut View::from(&bar)));
             let mut context = profile_context(self.profile);
@@ -4423,9 +4429,17 @@ wrap_window_delegate! {
             }));
             window.center_window(Some(&LITTLE_SIZE));
             window.show();
+            // The native bar, which asks nothing once ready, unlike the web one.
+            #[cfg(target_os = "macos")]
+            {
+                crate::native::little(self.id, Some(window.window_handle()));
+                send_little(self.id);
+            }
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            #[cfg(target_os = "macos")]
+            crate::native::little(self.id, None);
             LITTLE.with_borrow_mut(|littles| littles.retain(|little| little.id != self.id));
         }
 

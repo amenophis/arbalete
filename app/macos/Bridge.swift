@@ -239,6 +239,12 @@ public func event(
             settingsModel?.handle(String(cString: name), detail)
         case "import":
             importModel?.handle(String(cString: name), detail)
+        case let surface where surface.hasPrefix("little/"):
+            if let id = Int(surface.dropFirst("little/".count)), let bar = littles[id],
+                String(cString: name) == "arbalete:little"
+            {
+                bar.page = try? JSONDecoder().decode(LittleDetail.self, from: detail)
+            }
         default:
             break
         }
