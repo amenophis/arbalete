@@ -21,6 +21,8 @@ final class AppModel: ObservableObject {
     @Published var libraryShown = false
     /// The list of profiles shows above the footer.
     @Published var profilesShown = false
+    /// How far a two-finger swipe has moved the displayed Space's page, in points.
+    @Published var swipe: CGFloat = 0
     @Published var section = LibrarySection.spaces
     @Published var query = "" {
         didSet { if section == .history { searchHistory() } }
@@ -80,6 +82,14 @@ final class AppModel: ObservableObject {
             if let found = try? JSONDecoder().decode(Found.self, from: detail), found.text == query {
                 history = found.entries
             }
+        case "arbalete:swipe":
+            struct Gesture: Decodable {
+                var phase: String
+                var dx: Double
+            }
+            if let gesture = try? JSONDecoder().decode(Gesture.self, from: detail) {
+                swiped(gesture.phase, gesture.dx)
+            }
         case "arbalete:rename-profile":
             profilesShown = true
         case "arbalete:library":
@@ -99,6 +109,27 @@ final class AppModel: ObservableObject {
 
     var queryBinding: Binding<String> {
         Binding(get: { self.query }, set: { self.query = $0 })
+    }
+
+    /// A swipe pages between the Spaces, like Arc's: past a third of the sidebar, it shows the
+    /// next or the previous one; before the first, the library.
+    private func swiped(_ phase: String, _ dx: Double) {
+        switch phase {
+        case "begin":
+            swipe = 0
+        case "move":
+            swipe += dx
+        default:
+            let threshold: CGFloat = 80
+            if let state, let index = state.spaces.firstIndex(where: { $0.id == state.space }) {
+                if swipe > threshold {
+                    if index == 0 { openLibrary(nil) } else { run("space/previous") }
+                } else if swipe < -threshold, index < state.spaces.count - 1 {
+                    run("space/next")
+                }
+            }
+            withAnimation(.spring(duration: 0.3)) { swipe = 0 }
+        }
     }
 
     /// Shows the library, on a section or the one it showed last.
