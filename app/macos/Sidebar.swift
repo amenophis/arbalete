@@ -21,6 +21,8 @@ struct SidebarView: View {
                 }
                 if let page = model.page, let space = model.space {
                     SpaceSections(model: model, page: page, space: space)
+                        .offset(x: model.swipe)
+                        .opacity(1 - min(0.6, abs(model.swipe) / 300))
                 } else {
                     Spacer()
                 }
