@@ -1738,7 +1738,7 @@ fn show_settings() {
     #[cfg(target_os = "macos")]
     {
         crate::native::settings(true);
-        return send_settings();
+        send_settings();
     }
     #[cfg(not(target_os = "macos"))]
     match SETTINGS_WINDOW.with_borrow(Clone::clone) {
