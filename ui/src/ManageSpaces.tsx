@@ -105,7 +105,7 @@ function SpaceCard({
     <li
       className="space-card"
       data-id={id}
-      style={{ "--card-color": COLORS[space.color] } as React.CSSProperties}
+      style={{ "--card-color": space.theme.colors[0] ?? COLORS.gray } as React.CSSProperties}
       onClick={(event) => {
         if (!(event.target as Element).closest("button, input, fieldset")) onShow();
       }}

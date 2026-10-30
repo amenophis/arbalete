@@ -67,6 +67,17 @@ try {
     // The commands the sidebar sends, the window's colors among them.
     sent: [],
     colors: () => e2e.sent.filter((url) => url.includes("/window/colors/")).at(-1),
+    // The window's first color, as last sent: /command/window/colors/<card>/<grain>/<colors...>.
+    margins: () => e2e.colors()?.split("/")[6],
+    // The app paints the window as the sidebar paints itself, and the sidebar leads with color.
+    painted: (color) => {
+      const style = document.querySelector(".sidebar").style;
+      return style.getPropertyValue("--space") === color
+        && e2e.margins() === style.getPropertyValue("--stop-1").slice(1);
+    },
+    // Sets a Space's theme, of one color at the intensity of the palette's.
+    color: (space, color) => e2e.send("space/theme/" + space + "/" + encodeURIComponent(
+      JSON.stringify({ colors: [color], mode: "auto", intensity: 0.25, noise: 0 }))),
     // The last command a check caused, past those the sidebar sends after any state update,
     // such as a favicon cached meanwhile.
     lastCommand: () => e2e.sent.filter((url) => !["/menu/targets/", "/window/colors/"].some((part) => url.includes(part))).at(-1),
@@ -94,23 +105,6 @@ try {
     }
     console.log(`ok - ${description}`);
   }
-
-  // The command painting the window with a Space's color (windowColors in ui/src/bridge.ts), from
-  // the sidebar's own colors.
-  const mix = (color, base, share) =>
-    `${[1, 3, 5]
-      .map((i) => {
-        const [from, to] = [color, base].map((hex) => Number.parseInt(hex.slice(i, i + 2), 16));
-        return Math.round((from * share + to * (100 - share)) / 100).toString(16).padStart(2, "0");
-      })
-      .join("")}`;
-  const windowColors = async (color) => {
-    const [end, panel] = await sidebar.eval(`(() => {
-      const style = getComputedStyle(document.documentElement);
-      return ["--window-end", "--panel"].map((name) => style.getPropertyValue(name).trim());
-    })()`);
-    return `/command/window/colors/${mix(color, end, 14)}/${mix(color, panel, 8)}`;
-  };
 
   // The benchmark session pins 5 folders of 10 tabs (crates/arbalete-core/examples/bench-session.rs).
   await check(
@@ -555,11 +549,11 @@ try {
   // A web view reaching under the card gets no real mouse event on macOS, only synthesized ones
   // like these checks': the sidebar's view must keep its own width (SIDEBAR_WIDTH in shell.rs).
   await check(
-    "the sidebar's view is the sidebar's width and paints its gradient",
+    "the sidebar's view is the sidebar's width and paints its gradient across the window",
     ``,
     `(() => {
       const background = getComputedStyle(document.querySelector(".sidebar"), "::before");
-      return innerWidth === 260 && parseFloat(background.width) === 260
+      return innerWidth === 260 && parseFloat(background.width) === outerWidth
         && background.backgroundImage.startsWith("linear-gradient");
     })()`,
   );
@@ -914,12 +908,13 @@ try {
   await check(
     "an empty Space's card and the window around it take the Space's color",
     ``,
-    `e2e.colors() === ${JSON.stringify(await windowColors("#3e7bfa"))}`,
+    `e2e.painted("#3e7bfa")`,
   );
   await check("the page left is hidden, still at its url", ``, `document.visibilityState === "hidden"`, left);
   await check(
-    "clicking the displayed Space's icon opens its editor",
-    `e2e.last().click()`,
+    "the Space's menu opens its editor",
+    `dispatchEvent(new CustomEvent("arbalete:edit-space",
+      { detail: { space: Number(e2e.page().dataset.space), field: "name" } }))`,
     `e2e.spaceField("name")?.value === "Novels"`,
   );
   await check(
@@ -935,13 +930,12 @@ try {
     `e2e.last().textContent === "📚" && e2e.spaceField("emoji").value === "📚"`,
   );
   await check(
-    "picking a color tints the window around the page, behind the sidebar",
-    `document.querySelector('[aria-label="Color of Reading"] [aria-label="orange"]').click()`,
-    `e2e.tint().getPropertyValue("--space") === "#f76b15" && e2e.window().startsWith("linear-gradient")
-      && e2e.window() !== e2e.background && e2e.tint().backgroundColor === "rgba(0, 0, 0, 0)"
-      && e2e.colors() === ${JSON.stringify(await windowColors("#f76b15"))}`,
+    "a new theme tints the window around the page, behind the sidebar",
+    `e2e.color(e2e.page().dataset.space, "#f76b15")`,
+    `e2e.window().startsWith("linear-gradient") && e2e.window() !== e2e.background
+      && e2e.tint().backgroundColor === "rgba(0, 0, 0, 0)" && e2e.painted("#f76b15")`,
   );
-  await checkSession("the session saves the new Space, its name, emoji and color", (saved) => {
+  await checkSession("the session saves the new Space, its name, emoji and theme", (saved) => {
     const space = saved.spaces.at(-1);
     return (
       saved.spaces.length === spaceCount + 1 &&
@@ -949,7 +943,7 @@ try {
       space.profile === otherProfileSpace.profile &&
       space.title === "Reading" &&
       space.emoji === "📚" &&
-      space.color === "orange"
+      space.theme.colors[0] === "#f76b15"
     );
   });
   // The sidebar stays visible to DevTools with focus emulation: the floating one shows instead.
@@ -969,11 +963,11 @@ try {
   );
   await check("the floating sidebar is hidden once docked", ``, `document.visibilityState === "hidden"`, reveal);
   await check(
-    "switching Space tints the window with that Space's color, the panel gone",
+    "switching Space tints the window with that Space's theme, the panel gone",
     `e2e.spaceIcons()[0].click()`,
     `e2e.spaceIcons()[0].getAttribute("aria-current") === "true" && e2e.tint().getPropertyValue("--space") === "#6e56cf"
       && document.querySelector(".pages").style.transform === "translateX(0%)"
-      && e2e.colors() === ${JSON.stringify(await windowColors("#6e56cf"))}`,
+      && e2e.painted("#6e56cf")`,
   );
 
   // The tab list scrolls with a real wheel event, sent through DevTools, without switching Space.
@@ -1020,26 +1014,24 @@ try {
     addEventListener("arbalete:state", (event) => { e2e.state = event.detail; e2e.spaces = event.detail.spaces.map((space) => space.id) });
     e2e.send("ready")`);
   await check(
-    "a Space next to the displayed one gets a color of its own",
-    `e2e.send("space/color/" + e2e.spaces[2] + "/green")`,
-    `e2e.state.spaces[2].color === "green"`,
+    "a Space next to the displayed one gets a theme of its own",
+    `e2e.color(e2e.spaces[2], "#30a46c")`,
+    `e2e.state.spaces[2].theme.colors[0] === "#30a46c"`,
   );
-  // The window's margins, the first part of its colors, blend from one Space's to the next one's.
-  const green = await windowColors("#30a46c");
-  const margins = (colors) => colors.split("/").at(-2);
-  await sidebar.eval(`e2e.margins = () => e2e.colors().split("/").at(-2); e2e.rest = e2e.margins()`);
+  // The window's colors blend from one Space's to the next one's.
+  await sidebar.eval(`e2e.rest = e2e.margins()`);
   await check(
     "a slow swipe moves the pages with the fingers and blends the Spaces' tints and the window's",
     `e2e.swipe(-10, 15, 50, true)`,
     `e2e.offset() < -100 && e2e.offset() > -200
       && e2e.tint().getPropertyValue("--space") !== "#30a46c"
-      && e2e.margins() !== e2e.rest && e2e.margins() !== "${margins(green)}"`,
+      && e2e.margins() !== e2e.rest && !e2e.painted("#30a46c")`,
   );
   await check(
     "lifting past half way displays the next Space, the window settling on its color",
     `e2e.swipe(-10, 15, 50)`,
     `e2e.settled(2) && e2e.tint().getPropertyValue("--space") === "#30a46c"
-      && e2e.colors() === ${JSON.stringify(green)}`,
+      && e2e.painted("#30a46c")`,
   );
   await check(
     "a short slow swipe goes back to the displayed Space",

@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { followDocking, revealOnHover } from "./bridge";
+import { followAppearance, followDocking, followWindowWidth, revealOnHover } from "./bridge";
 import { Find } from "./Find";
 import { Import } from "./Import";
 import { Little } from "./Little";
@@ -9,6 +9,7 @@ import { trackMenuTargets } from "./menuTargets";
 import { Overlay } from "./Overlay";
 import { Settings } from "./Settings";
 import { Site } from "./Site";
+import { ThemePicker } from "./ThemePicker";
 import { Toolbar } from "./Toolbar";
 import "./index.css";
 
@@ -18,9 +19,12 @@ if (!root) throw new Error("index.html has no #root element");
 // The same page serves the sidebar, the sidebar revealed above the page with #reveal, the
 // overlay above the page with #overlay, the find bar above the page with #find, the import
 // assistant above the page with #import, the settings window with #settings and the bar above
-// the page in toolbar mode with #toolbar, the site controls' panel with #site, and a Little Arbalete window's bar with #little/<id>.
+// the page in toolbar mode with #toolbar, the site controls' panel with #site, a Space's theme picker with #theme, and a Little Arbalete window's bar with #little/<id>.
+followAppearance(document.documentElement);
 if (location.hash === "#reveal") revealOnHover(document.documentElement);
 if (location.hash === "") followDocking(document.documentElement);
+if (location.hash === "" || location.hash === "#reveal")
+  followWindowWidth(document.documentElement);
 const pages = {
   "#overlay": <Overlay />,
   "#find": <Find />,
@@ -28,6 +32,7 @@ const pages = {
   "#settings": <Settings />,
   "#toolbar": <Toolbar />,
   "#site": <Site />,
+  "#theme": <ThemePicker />,
 };
 if (location.hash === "#reveal") trackMenuTargets(root, "revealed");
 if (location.hash === "") trackMenuTargets(root, "docked");

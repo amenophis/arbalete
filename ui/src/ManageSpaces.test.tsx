@@ -2,6 +2,10 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Space } from "./bridge";
 import { ManageSpaces, RENAME_CLICK_MS, spaceMoveCommand } from "./ManageSpaces";
+import type { Theme } from "./theme";
+
+// A theme of one color, like a Space saved before themes.
+const solid = (color: string): Theme => ({ colors: [color], mode: "auto", intensity: 1, noise: 0 });
 
 const fetch = vi.fn();
 
@@ -16,12 +20,12 @@ afterEach(() => {
 });
 
 const spaces: Space[] = [
-  { id: 13, title: "Home", emoji: "🏠", color: "blue", profile: 1, pinned: [] },
+  { id: 13, title: "Home", emoji: "🏠", theme: solid("#3e7bfa"), profile: 1, pinned: [] },
   {
     id: 14,
     title: "Work",
     emoji: null,
-    color: "green",
+    theme: solid("#30a46c"),
     profile: 7,
     pinned: [
       { id: 3, url: "https://mail.test/", title: "Mail", favicon: "https://ui.test/mail.png" },
@@ -29,7 +33,7 @@ const spaces: Space[] = [
       { id: 5, url: "https://untitled.test/", title: "", favicon: null },
     ],
   },
-  { id: 15, title: "Play", emoji: null, color: "red", profile: 1, pinned: [] },
+  { id: 15, title: "Play", emoji: null, theme: solid("#e5484d"), profile: 1, pinned: [] },
 ];
 
 const profiles = [
@@ -115,8 +119,8 @@ test("the profile pill, the options and the edit button act on their Space, not 
   const edit = screen.getByRole("button", { name: "Edit Work" });
   fireEvent.click(edit);
   expect(edit.getAttribute("aria-expanded")).toBe("true");
-  fireEvent.click(screen.getByRole("button", { name: "red" }));
-  expect(fetch).toHaveBeenLastCalledWith("/command/space/color/14/red", { method: "POST" });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Theme…" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/theme/show/14", { method: "POST" });
   expect(screen.getByRole("textbox", { name: "Space emoji" })).toBeDefined();
   fireEvent.click(edit);
   expect(screen.queryByRole("textbox", { name: "Space emoji" })).toBeNull();

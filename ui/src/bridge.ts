@@ -1,6 +1,7 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import type { InstalledExtension } from "./ExtensionsList";
 import type { Extension } from "./Site";
+import type { Paint, Theme } from "./theme";
 
 // The app serves the UI and answers these requests itself (app/src/command.rs).
 export function send(command: string) {
@@ -54,7 +55,7 @@ export type Space = {
   id: number;
   title: string;
   emoji: string | null;
-  color: Color;
+  theme: Theme;
   profile: number;
   // What the library shows of its pinned tabs: tabs, and folders without their tabs.
   pinned: Glance[];
@@ -96,57 +97,26 @@ export function mix(color: string, base: string, share: number): string {
 // pages, the blend of theirs.
 export type Tint = { color: string; strength: number };
 
-// The command painting the window around the sidebar and the card, and an empty Space's card
-// (WindowColors in app/src/command.rs): the end of the sidebar's gradient tinted as the sidebar
-// tints it (index.css), and the panel's color tinted by the displayed Space's `card` color.
-export function windowColors(tint: Tint, card: string, end: string, panel: string): string {
-  const margins = mix(tint.color, end, 14 * tint.strength).slice(1);
-  return `window/colors/${margins}/${mix(card, panel, 8).slice(1)}`;
+// The command painting the window around the sidebar and the card as the sidebar paints itself,
+// and an empty Space's card a little tinted by the displayed Space's leading color, `lead`
+// (WindowColors in app/src/command.rs).
+export function windowColors(paint: Paint, lead: string | undefined): string {
+  const panel = paint.dark ? "#1e1a28" : "#f8f6fb";
+  const card = (lead ? mix(lead, panel, 8) : panel).slice(1);
+  const stops = paint.stops.map((stop) => stop.slice(1)).join("/");
+  return `window/colors/${card}/${Number(paint.grain.toFixed(3))}/${stops}`;
 }
 
-// Paints the window with the colors last given, sending them only when they change, and again
-// when the appearance changes the colors they derive from, read from index.css.
+// Paints the window, sending its colors only when they change.
 export class WindowPainter {
-  private colors?: [Tint, string];
-  private base?: [string, string];
   private sent = "";
-  private readonly repaint = () => {
-    this.base = undefined;
-    this.send();
-  };
 
-  start() {
-    window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", this.repaint);
-  }
-
-  stop() {
-    window
-      .matchMedia?.("(prefers-color-scheme: dark)")
-      .removeEventListener?.("change", this.repaint);
-  }
-
-  paint(tint: Tint, card: string) {
-    this.colors = [tint, card];
-    this.send();
-  }
-
-  private send() {
-    if (!this.colors) return;
-    this.base ??= baseColors();
-    // Without the stylesheet, as in tests, there is nothing to paint with.
-    if (!this.base) return;
-    const command = windowColors(...this.colors, ...this.base);
+  paint(paint: Paint, lead: string | undefined) {
+    const command = windowColors(paint, lead);
     if (command === this.sent) return;
     this.sent = command;
     send(command);
   }
-}
-
-function baseColors(): [string, string] | undefined {
-  const style = getComputedStyle(document.documentElement);
-  const end = style.getPropertyValue("--window-end").trim();
-  const panel = style.getPropertyValue("--panel").trim();
-  return end && panel ? [end, panel] : undefined;
 }
 
 export type Page = {
@@ -274,4 +244,23 @@ export function followDocking(root: HTMLElement) {
     root.toggleAttribute("data-undocked", !docked);
     root.toggleAttribute("data-stale-hover", true);
   });
+}
+
+// Keeps the window's width, which the sidebar's gradient spans like the window's, in
+// --window-width.
+export function followWindowWidth(root: HTMLElement) {
+  addEventListener("arbalete:window-width", (event) => {
+    root.style.setProperty("--window-width", `${(event as CustomEvent<number>).detail}px`);
+  });
+}
+
+// Keeps the system's appearance, light or dark, in the root's data-appearance, which picks the
+// colors (index.css).
+export function followAppearance(root: HTMLElement) {
+  const scheme = window.matchMedia?.("(prefers-color-scheme: dark)");
+  const follow = () => {
+    root.dataset.appearance = scheme?.matches ? "dark" : "light";
+  };
+  follow();
+  scheme?.addEventListener?.("change", follow);
 }

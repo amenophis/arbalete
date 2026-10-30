@@ -3,6 +3,10 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App, COPIED_MS, DOUBLE_CLICK_MS, domain } from "./App";
 import { COLORS, type Item, type Page, type Space, type Tab, windowColors } from "./bridge";
 import { FULL_HINT_MS, favoriteColumns, MAX_FAVORITES } from "./drag";
+import { paint, type Theme } from "./theme";
+
+// A theme of one color, like a Space saved before themes.
+const solid = (color: string): Theme => ({ colors: [color], mode: "auto", intensity: 1, noise: 0 });
 
 const fetch = vi.fn();
 
@@ -52,10 +56,10 @@ const favorites: Tab[] = [
 ];
 
 const spaces: Space[] = [
-  { id: 13, title: "Home", emoji: null, color: "blue", profile: 1, pinned: [] },
-  { id: 14, title: "work", emoji: null, color: "green", profile: 1, pinned: [] },
-  { id: 15, title: "Travel", emoji: null, color: "red", profile: 1, pinned: [] },
-  { id: 16, title: "Books", emoji: null, color: "gray", profile: 1, pinned: [] },
+  { id: 13, title: "Home", emoji: null, theme: solid("#3e7bfa"), profile: 1, pinned: [] },
+  { id: 14, title: "work", emoji: null, theme: solid("#30a46c"), profile: 1, pinned: [] },
+  { id: 15, title: "Travel", emoji: null, theme: solid("#e5484d"), profile: 1, pinned: [] },
+  { id: 16, title: "Books", emoji: null, theme: solid("#8b8d98"), profile: 1, pinned: [] },
 ];
 
 // The first Space shows the tabs above, the others none. The app sends the pages of the displayed
@@ -669,7 +673,8 @@ test("a swipe past the last Space shows the page creating one, without telling t
   expect(document.querySelectorAll(".space-page:not([inert])")).toHaveLength(0);
   expect(document.activeElement).toBe(nameOfNew());
   expect(screen.getByRole("navigation").style.getPropertyValue("--tinted")).toBe("0");
-  expect(fetch).not.toHaveBeenCalled();
+  // Only the window's colors follow the pages.
+  expect(commands().filter((url) => !url.includes("/window/colors/"))).toEqual([]);
 });
 
 // Touches and moves without lifting, the pointer `y` points from the top.
@@ -762,7 +767,7 @@ test("swiping back from the new Space's page leaves the Spaces as they were", as
   expect(position()).toBe("translateX(-300%)");
   expect(newSpace()?.hasAttribute("inert")).toBe(true);
   expect(shown()).toBeDefined();
-  expect(fetch).not.toHaveBeenCalled();
+  expect(commands().filter((url) => !url.includes("/window/colors/"))).toEqual([]);
   expect((nameOfNew() as HTMLInputElement).value).toBe("");
 });
 
@@ -794,7 +799,14 @@ test("creating a Space shows its page where the new Space's was", async () => {
   expect(fetch).toHaveBeenLastCalledWith("/command/space/create/purple//Reading", {
     method: "POST",
   });
-  spaces.push({ id: 17, title: "Reading", emoji: null, color: "purple", profile: 1, pinned: [] });
+  spaces.push({
+    id: 17,
+    title: "Reading",
+    emoji: null,
+    theme: solid("#6e56cf"),
+    profile: 1,
+    pinned: [],
+  });
   try {
     receive({}, 3, favorites, 17);
     await frame();
@@ -957,44 +969,33 @@ test("Spaces reordered from the library leave it in view, the displayed Space un
   }
 });
 
-test("asks the app to paint the window with the displayed Space's color, blending on the way", async () => {
-  const root = document.documentElement.style;
-  root.setProperty("--window-end", "#1b0e1f");
-  root.setProperty("--panel", "#1e1a28");
-  const scheme = { addEventListener: vi.fn(), removeEventListener: vi.fn() };
+test("asks the app to paint the window with the displayed Space's theme, blending on the way", async () => {
+  const scheme = { matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() };
   vi.stubGlobal("matchMedia", () => scheme);
   try {
     render(<App />);
     receive({});
-    const blue = { color: COLORS.blue, strength: 1 };
-    const green = { color: COLORS.green, strength: 1 };
-    expect(commands()).toContain(
-      `/command/${windowColors(blue, COLORS.blue, "#1b0e1f", "#1e1a28")}`,
-    );
+    const [blue, green] = [paint(solid(COLORS.blue), false), paint(solid(COLORS.green), false)];
+    expect(commands()).toContain(`/command/${windowColors(blue, COLORS.blue)}`);
     receive({}, 3, favorites, 14);
-    // The window's color blends on the way, an empty Space's card keeps the displayed Space's.
-    expect(commands()).toContain(
-      `/command/${windowColors(blue, COLORS.green, "#1b0e1f", "#1e1a28")}`,
-    );
+    // The window's colors blend on the way, an empty Space's card keeps the displayed Space's.
+    expect(commands()).toContain(`/command/${windowColors(blue, COLORS.green)}`);
     await act(async () => {
       for (let i = 0; i < 60; i++) await new Promise(requestAnimationFrame);
     });
     const blends = commands().filter((url) => url.includes("/window/colors/"));
     expect(blends.length).toBeGreaterThan(3);
-    expect(fetch).toHaveBeenLastCalledWith(
-      `/command/${windowColors(green, COLORS.green, "#1b0e1f", "#1e1a28")}`,
-      { method: "POST" },
-    );
-    // A change of appearance changes the colors they derive from.
-    root.setProperty("--window-end", "#e7e2f1");
+    expect(fetch).toHaveBeenLastCalledWith(`/command/${windowColors(green, COLORS.green)}`, {
+      method: "POST",
+    });
+    // The neutrals follow a change of appearance.
+    scheme.matches = true;
     act(() => scheme.addEventListener.mock.lastCall?.[1]());
     expect(fetch).toHaveBeenLastCalledWith(
-      `/command/${windowColors(green, COLORS.green, "#e7e2f1", "#1e1a28")}`,
+      `/command/${windowColors(paint(solid(COLORS.green), true), COLORS.green)}`,
       { method: "POST" },
     );
   } finally {
-    root.removeProperty("--window-end");
-    root.removeProperty("--panel");
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", fetch);
   }

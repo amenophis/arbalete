@@ -19,6 +19,10 @@ import {
   tint,
   velocity,
 } from "./pager";
+import type { Theme } from "./theme";
+
+// A theme of one color, like a Space saved before themes.
+const solid = (color: string): Theme => ({ colors: [color], mode: "auto", intensity: 1, noise: 0 });
 
 test("the pages follow the fingers, slower than they move", () => {
   expect(follow(1, -100, 200)).toBeCloseTo(1 + (100 * GAIN) / 200);
@@ -133,8 +137,8 @@ test("the spring starts at the release speed", () => {
 });
 
 const spaces: Space[] = [
-  { id: 1, title: "Home", emoji: null, color: "blue", profile: 1, pinned: [] },
-  { id: 2, title: "Work", emoji: null, color: "red", profile: 1, pinned: [] },
+  { id: 1, title: "Home", emoji: null, theme: solid("#3e7bfa"), profile: 1, pinned: [] },
+  { id: 2, title: "Work", emoji: null, theme: solid("#e5484d"), profile: 1, pinned: [] },
 ];
 
 test("the tint blends the colors of the two Spaces in view", () => {
