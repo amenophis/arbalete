@@ -34,9 +34,6 @@ const DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
 /// The page's corner radius, in points.
 const CARD_RADIUS: f64 = 8.0;
 
-/// The Command Bar's corner radius, in points.
-const COMMAND_BAR_RADIUS: f64 = 12.0;
-
 /// Core Graphics' color, which only passes through here: no need for its bindings.
 #[repr(C)]
 struct CGColor {
@@ -1085,30 +1082,6 @@ pub fn copy(url: &str) {
 /// its content view, whose layer holds what the window's compositor draws.
 pub fn round_card(view: *mut c_void) {
     round(view, CARD_RADIUS);
-}
-
-/// Rounds the corners of the Command Bar's window and outlines it, like the card's, above the
-/// page with the system's shadow, which follows the rounded corners once they are drawn.
-pub fn round_command_bar(view: *mut c_void) {
-    round(view, COMMAND_BAR_RADIUS);
-    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
-    if let Some(window) = unsafe { view.cast::<NSView>().as_ref() }.and_then(NSView::window) {
-        window.setHasShadow(true);
-        window.invalidateShadow();
-    }
-}
-
-/// The theme picker's corner radius, in points.
-const THEME_PICKER_RADIUS: f64 = 20.0;
-
-/// Rounds the corners of the theme picker's window and outlines it, like the Command Bar's.
-pub fn round_theme_picker(view: *mut c_void) {
-    round(view, THEME_PICKER_RADIUS);
-    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
-    if let Some(window) = unsafe { view.cast::<NSView>().as_ref() }.and_then(NSView::window) {
-        window.setHasShadow(true);
-        window.invalidateShadow();
-    }
 }
 
 /// Makes a window invisible and lets clicks through it, while a sheet it holds, like Chromium's

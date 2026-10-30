@@ -33,7 +33,7 @@ struct Space: Decodable, Identifiable {
 }
 
 /// How a Space colors the window (Theme in crates/arbalete-core/src/sidebar.rs).
-struct Theme: Decodable, Equatable {
+struct Theme: Codable, Equatable {
     var colors: [String]
     var mode: String
     var intensity: Double

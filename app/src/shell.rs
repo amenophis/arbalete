@@ -818,10 +818,17 @@ fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) 
 /// sidebar stands for in every mode.
 #[cfg(target_os = "macos")]
 fn native_surface(view: &'static LocalKey<RefCell<Option<BrowserView>>>) -> Option<&'static str> {
-    [(&SIDEBAR, "sidebar"), (&OVERLAY_VIEW, "overlay")]
-        .into_iter()
-        .find(|(native, _)| std::ptr::eq(view, *native))
-        .map(|(_, surface)| surface)
+    [
+        (&SIDEBAR, "sidebar"),
+        (&OVERLAY_VIEW, "overlay"),
+        (&FIND_VIEW, "find"),
+        (&SITE_VIEW, "site"),
+        (&THEME_VIEW, "theme"),
+        (&TOOLBAR_VIEW, "toolbar"),
+    ]
+    .into_iter()
+    .find(|(native, _)| std::ptr::eq(view, *native))
+    .map(|(_, surface)| surface)
 }
 
 /// Dispatches an event in a view's page, like `dispatch`.
@@ -893,8 +900,33 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
 /// on macOS, over the web one, which stays out of sight.
 fn round_overlay() {
     #[cfg(target_os = "macos")]
-    if let Some(overlay) = OVERLAY.with_borrow(Clone::clone) {
-        mirror(&OVERLAY_VIEW, &overlay);
+    sync_native_surfaces();
+}
+
+/// Shows the native surfaces where the app shows their web counterparts, after every command
+/// and layout: the overlays above the page and the bar at the card's top in toolbar mode.
+#[cfg(target_os = "macos")]
+fn sync_native_surfaces() {
+    for (view, overlay) in [
+        (&OVERLAY_VIEW, &OVERLAY),
+        (&FIND_VIEW, &FIND),
+        (&SITE_VIEW, &SITE),
+        (&THEME_VIEW, &THEME),
+    ] {
+        if let Some(overlay) = overlay.with_borrow(Clone::clone) {
+            mirror(view, &overlay);
+        }
+    }
+    let card =
+        CARD.with_borrow(|card| card.as_ref().map(|card| (card.is_visible(), card.bounds())));
+    if let Some((visible, card)) = card {
+        let shown =
+            visible == 1 && SETTINGS.get().show_toolbar && SLIDE.with_borrow(Option::is_none);
+        let bar = Rect {
+            height: PAGE_TOOLBAR_HEIGHT,
+            ..card
+        };
+        crate::native::surface("toolbar", shown, &bar);
     }
 }
 
@@ -1503,6 +1535,8 @@ fn show_import() {
     controller.set_visible(1);
     // A page still loading asks for them once it listens (Command::ImportReady).
     send_sources();
+    // On macOS, the native surface takes the keyboard instead.
+    #[cfg(not(target_os = "macos"))]
     if let Some(view) = controller.contents_view() {
         view.request_focus();
     }
@@ -2098,15 +2132,7 @@ fn show_find() {
     let Some(window) = WINDOW.with_borrow(Clone::clone) else {
         return;
     };
-    if FIND.with_borrow(Option::is_none) {
-        let url = format!("{UI_ORIGIN}index.html#find");
-        let view = browser_view(UiClient::new(), &url, no_width, None);
-        let controller = window
-            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
-            .expect("find");
-        FIND_VIEW.set(Some(view));
-        FIND.set(Some(controller));
-    }
+    make_find(&window);
     place_find();
     let Some(controller) = FIND.with_borrow(Clone::clone) else {
         return;
@@ -2117,8 +2143,24 @@ fn show_find() {
         &FIND_VIEW,
         &format!(r#"new CustomEvent("arbalete:show", {{ detail: {text} }})"#),
     );
+    // On macOS, the native surface takes the keyboard instead.
+    #[cfg(not(target_os = "macos"))]
     if let Some(view) = controller.contents_view() {
         view.request_focus();
+    }
+}
+
+/// Makes the find bar's overlay, once. On macOS, it is made with the window: made later, it would
+/// take the keyboard from the native find bar.
+fn make_find(window: &Window) {
+    if FIND.with_borrow(Option::is_none) {
+        let view = browser_view(UiClient::new(), &web_surface("#find"), no_width, None);
+        let controller = window
+            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
+            .expect("find");
+        controller.set_visible(0);
+        FIND_VIEW.set(Some(view));
+        FIND.set(Some(controller));
     }
 }
 
@@ -2237,10 +2279,8 @@ fn show_site_controls(button: Button) {
         return;
     };
     controller.set_visible(1);
-    #[cfg(target_os = "macos")]
-    if let Some(host) = SITE_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host()) {
-        crate::mac::round_command_bar(host.window_handle());
-    }
+    // On macOS, the native surface takes the keyboard instead.
+    #[cfg(not(target_os = "macos"))]
     if let Some(view) = controller.contents_view() {
         view.request_focus();
     }
@@ -2269,10 +2309,8 @@ fn show_theme_picker(id: SpaceId) {
     );
     controller.set_visible(1);
     place_theme_picker();
-    #[cfg(target_os = "macos")]
-    if let Some(host) = THEME_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host()) {
-        crate::mac::round_theme_picker(host.window_handle());
-    }
+    // On macOS, the native surface takes the keyboard instead.
+    #[cfg(not(target_os = "macos"))]
     if let Some(view) = controller.contents_view() {
         view.request_focus();
     }
@@ -2301,6 +2339,15 @@ fn place_theme_picker() {
 
 /// Where a button of a UI view is, in the window.
 fn button_in_window(button: Button) -> Option<Rect> {
+    // The native interface gives it in the window already.
+    if cfg!(target_os = "macos") {
+        return Some(Rect {
+            x: button.x,
+            y: button.y,
+            width: button.width,
+            height: button.height,
+        });
+    }
     let source = match button.view {
         ButtonView::Docked => &SIDEBAR,
         ButtonView::Revealed => &REVEAL_VIEW,
@@ -3581,6 +3628,12 @@ pub fn post(command: Command) {
 
 /// Runs a command from the UI or a menu, on the UI thread.
 pub fn run(command: Command) {
+    run_command(command);
+    #[cfg(target_os = "macos")]
+    sync_native_surfaces();
+}
+
+fn run_command(command: Command) {
     let browser = content().and_then(|view| view.browser());
     match (command, browser) {
         (Command::Ready, _) => {
@@ -4025,6 +4078,8 @@ wrap_window_delegate! {
             update_drag_regions();
             send_window_width();
             place_theme_picker();
+            #[cfg(target_os = "macos")]
+            sync_native_surfaces();
         }
     }
 
@@ -4065,7 +4120,7 @@ wrap_window_delegate! {
                 .expect("box layout");
             // Any width: the layout stretches it across the card. A zero one would make its size
             // "empty", which CEF ignores, with its height.
-            let toolbar = browser_view_sized(UiClient::new(), &format!("{UI_ORIGIN}index.html#toolbar"), || 1, PAGE_TOOLBAR_HEIGHT, None);
+            let toolbar = browser_view_sized(UiClient::new(), &web_surface("#toolbar"), || 1, PAGE_TOOLBAR_HEIGHT, None);
             toolbar.set_visible(SETTINGS.get().show_toolbar.into());
             let mut view = View::from(&toolbar);
             card.add_child_view(Some(&mut view));
@@ -4094,20 +4149,22 @@ wrap_window_delegate! {
             OVERLAY_VIEW.set(Some(overlay));
             OVERLAY.set(Some(controller));
             // Made with the window, so that its page listens by the first time it shows.
-            let site = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#site"), no_width, None);
+            let site = browser_view(UiClient::new(), &web_surface("#site"), no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&site)), DockingMode::CUSTOM, 1)
                 .expect("site controls");
             controller.set_visible(0);
             SITE_VIEW.set(Some(site));
             SITE.set(Some(controller));
-            let theme = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#theme"), no_width, None);
+            let theme = browser_view(UiClient::new(), &web_surface("#theme"), no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&theme)), DockingMode::CUSTOM, 1)
                 .expect("theme picker");
             controller.set_visible(0);
             THEME_VIEW.set(Some(theme));
             THEME.set(Some(controller));
+            #[cfg(target_os = "macos")]
+            make_find(&window);
             window.show();
             #[cfg(target_os = "macos")]
             {
