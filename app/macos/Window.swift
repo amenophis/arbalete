@@ -37,68 +37,77 @@ struct BackdropTint: View {
     }
 }
 
-/// The sidebar's place in the window: docked, it shows the backdrop through; floating above the
-/// page, it blurs the page under it and casts a shadow.
+/// The sidebar's place in the window: docked, in it, it shows the backdrop through; floating above
+/// the page, which is a window of its own, it is a child window, which blurs the page under it.
 @MainActor
 final class SidebarHost {
-    private let content: NSView
+    private let window: NSWindow
+    private let panel = ChildPanel(view: NSView())
     private let container = NSView()
     private let effect = NSVisualEffectView()
-    private let host: NSHostingView<SidebarView>
     /// While the sidebar hides, its edge of the window shows it again on hover.
     private let edge = Tracking()
     private var watch: AnyCancellable?
+    private var revealed = false
 
-    init(content: NSView, model: AppModel) {
-        self.content = content
-        host = NSHostingView(rootView: SidebarView(model: model))
+    init(window: NSWindow, model: AppModel) {
+        self.window = window
+        container.wantsLayer = true
         effect.material = .sidebar
-        effect.blendingMode = .withinWindow
+        effect.blendingMode = .behindWindow
         effect.state = .active
         effect.autoresizingMask = [.width, .height]
+        let host = NSHostingView(rootView: SidebarView(model: model))
         host.autoresizingMask = [.width, .height]
-        container.wantsLayer = true
+        let leave = Tracking()
+        leave.autoresizingMask = [.width, .height]
+        container.addSubview(leave)
         container.addSubview(effect)
         container.addSubview(host)
-        container.isHidden = true
-        content.addSubview(container)
+        leave.exited = { [weak self] in
+            if self?.revealed == true { model.run("sidebar/conceal") }
+        }
         edge.entered = { model.run("sidebar/reveal") }
         edge.isHidden = true
-        content.addSubview(edge)
+        edge.autoresizingMask = [.height]
+        window.contentView?.addSubview(edge)
         watch = model.$state.sink { [container] _ in
             container.appearance = NSAppearance(
                 named: isDark(model.space?.theme) ? .darkAqua : .aqua)
         }
-        let leave = Tracking()
-        leave.autoresizingMask = [.width, .height]
-        leave.exited = { [weak self] in
-            if self?.revealed == true { model.run("sidebar/conceal") }
-        }
-        container.addSubview(leave, positioned: .below, relativeTo: effect)
     }
-
-    private var revealed = false
 
     /// Shows the sidebar at `frame`, from the window's top left corner, or hides it.
     func place(_ frame: NSRect?, floating: Bool, revealed: Bool) {
         self.revealed = revealed
-        let bounds = content.bounds
-        edge.frame = NSRect(x: 0, y: 0, width: 8, height: bounds.height)
-        edge.autoresizingMask = [.height]
-        edge.isHidden = frame != nil
-        guard let frame else {
-            container.isHidden = true
-            return
+        if let content = window.contentView {
+            edge.frame = NSRect(x: 0, y: 0, width: 8, height: content.bounds.height)
         }
-        let y = content.isFlipped ? frame.minY : bounds.height - frame.maxY
-        container.frame = NSRect(x: frame.minX, y: y, width: frame.width, height: frame.height)
-        container.autoresizingMask = floating ? [] : [.height]
-        effect.frame = container.bounds
-        host.frame = container.bounds
+        edge.isHidden = frame != nil
         effect.isHidden = !floating
         container.layer?.cornerRadius = floating ? 10 : 0
         container.layer?.masksToBounds = floating
-        container.isHidden = false
+        container.isHidden = frame == nil
+        guard let frame, let content = window.contentView else {
+            panel.place(in: window, nil)
+            return
+        }
+        if floating {
+            panel.hasShadow = true
+            panel.place(in: window, frame)
+            if container.superview != panel.contentView {
+                panel.contentView?.addSubview(container)
+            }
+            container.frame = panel.contentView?.bounds ?? .zero
+            panel.invalidateShadow()
+        } else {
+            panel.place(in: window, nil)
+            if container.superview != content {
+                content.addSubview(container, positioned: .below, relativeTo: edge)
+            }
+            let y = content.isFlipped ? frame.minY : content.bounds.height - frame.maxY
+            container.frame = NSRect(x: frame.minX, y: y, width: frame.width, height: frame.height)
+        }
         container.subviews.forEach { $0.frame = container.bounds }
     }
 }

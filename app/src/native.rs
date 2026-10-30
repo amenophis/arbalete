@@ -8,6 +8,14 @@ use std::ffi::{CStr, CString, c_char, c_void};
 unsafe extern "C" {
     fn arbalete_ui_attach(handle: *mut c_void, send: extern "C" fn(*const c_char));
     fn arbalete_ui_event(surface: *const c_char, name: *const c_char, detail: *const c_char);
+    fn arbalete_ui_surface(
+        name: *const c_char,
+        shown: bool,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    );
     fn arbalete_ui_place_sidebar(
         visible: bool,
         x: f64,
@@ -69,6 +77,23 @@ pub fn place(frame: Option<&Rect>, floating: bool, revealed: bool) {
             frame.height.into(),
             floating,
             revealed,
+        );
+    }
+}
+
+/// Shows a surface of the interface, like "overlay", at `frame` in the window's points from its
+/// top left corner, or hides it.
+pub fn surface(name: &str, shown: bool, frame: &Rect) {
+    let Ok(name) = CString::new(name) else { return };
+    // SAFETY: the string outlives the call.
+    unsafe {
+        arbalete_ui_surface(
+            name.as_ptr(),
+            shown,
+            frame.x.into(),
+            frame.y.into(),
+            frame.width.into(),
+            frame.height.into(),
         );
     }
 }
