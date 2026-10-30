@@ -46,6 +46,12 @@ final class SidebarHost {
     private let panel = ChildPanel(view: NSView())
     private let container = NSView()
     private let effect = NSVisualEffectView()
+    /// The toolbar's gap between its buttons, which moves the window.
+    private let drag = WindowDrag()
+    /// Barely there, so that clicks on the docked sidebar's transparent parts reach it, rather
+    /// than the main window under it: below the toolbar, and the toolbar past the window's
+    /// buttons, which keep theirs.
+    private let catchers = [NSView(), NSView()]
     /// While the sidebar hides, its edge of the window shows it again on hover.
     private let edge = Tracking()
     private var watch: AnyCancellable?
@@ -63,8 +69,14 @@ final class SidebarHost {
         let leave = Tracking()
         leave.autoresizingMask = [.width, .height]
         container.addSubview(leave)
+        for catcher in catchers {
+            catcher.wantsLayer = true
+            catcher.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.004).cgColor
+            container.addSubview(catcher)
+        }
         container.addSubview(effect)
         container.addSubview(host)
+        container.addSubview(drag)
         leave.exited = { [weak self] in
             if self?.revealed == true { model.run("sidebar/conceal") }
         }
@@ -96,6 +108,11 @@ final class SidebarHost {
         container.frame = panel.contentView?.bounds ?? .zero
         container.autoresizingMask = [.width, .height]
         container.subviews.forEach { $0.frame = container.bounds }
+        let bounds = container.bounds
+        catchers[0].frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - 40))
+        catchers[1].frame = NSRect(x: 76, y: bounds.height - 40, width: max(0, bounds.width - 76), height: 40)
+        // Past the window's buttons and the sidebar's toggle, before the navigation buttons.
+        drag.frame = NSRect(x: 108, y: bounds.height - 40, width: max(0, bounds.width - 208), height: 40)
         panel.invalidateShadow()
     }
 }
@@ -116,4 +133,33 @@ final class Tracking: NSView {
 
     override func mouseEntered(with event: NSEvent) { entered() }
     override func mouseExited(with event: NSEvent) { exited() }
+}
+
+/// Moves the main window when dragged, like a title bar: the sidebar is a window of its own,
+/// and AppKit drags a window only by its own events.
+final class WindowDrag: NSView {
+    /// Where the pointer and the window were as the drag began, on the screen.
+    private var start: (pointer: NSPoint, origin: NSPoint)?
+
+    override func mouseDown(with event: NSEvent) {
+        guard let main = window?.parent else { return }
+        if event.clickCount == 2 {
+            main.performZoom(nil)
+        } else {
+            start = (NSEvent.mouseLocation, main.frame.origin)
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start, let main = window?.parent else { return }
+        let pointer = NSEvent.mouseLocation
+        main.setFrameOrigin(
+            NSPoint(
+                x: start.origin.x + pointer.x - start.pointer.x,
+                y: start.origin.y + pointer.y - start.pointer.y))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        start = nil
+    }
 }
