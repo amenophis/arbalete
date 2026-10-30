@@ -20,8 +20,8 @@ use objc2_app_kit::{
     NSUpArrowFunctionKey, NSView, NSWindow, NSWindowButton, NSWorkspace,
 };
 use objc2_foundation::{
-    NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSNumber, NSRect, NSRectEdge, NSSize,
-    NSString, NSURL, ns_string,
+    NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSNumber, NSProcessInfo, NSRect,
+    NSRectEdge, NSSize, NSString, NSURL, ns_string,
 };
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
@@ -1239,4 +1239,40 @@ pub fn shift(view: *mut c_void, x: f64) {
 /// The user asked the system for less motion.
 pub fn reduce_motion() -> bool {
     NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+}
+
+/// How hard macOS presses for memory, as the kernel tells it: 1 normal, 2 warning, 4 critical.
+pub fn memory_pressure() -> crate::shell::MemoryPressure {
+    use crate::shell::MemoryPressure;
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            old: *mut c_void,
+            old_size: *mut usize,
+            new: *mut c_void,
+            new_size: usize,
+        ) -> std::ffi::c_int;
+    }
+    let mut level: i32 = 0;
+    let mut size = size_of::<i32>();
+    // SAFETY: the name is a C string, and `level` an integer as large as `size` says.
+    let read = unsafe {
+        sysctlbyname(
+            c"kern.memorystatus_vm_pressure_level".as_ptr(),
+            (&raw mut level).cast(),
+            &raw mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    match level {
+        2 if read == 0 => MemoryPressure::Warning,
+        4 if read == 0 => MemoryPressure::Critical,
+        _ => MemoryPressure::Normal,
+    }
+}
+
+/// Whether Low Power Mode is on, saving the battery.
+pub fn low_power() -> bool {
+    NSProcessInfo::processInfo().isLowPowerModeEnabled()
 }

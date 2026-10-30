@@ -3027,10 +3027,35 @@ struct Live {
     capturing: bool,
 }
 
-/// How long a page stays hidden before it is frozen, then unloaded: its tab opens it again at its
-/// url when shown.
-const FREEZE_AFTER_MS: i64 = 5 * 60_000;
-const UNLOAD_AFTER_MS: i64 = 60 * 60_000;
+/// How hard the system presses for memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemoryPressure {
+    Normal,
+    Warning,
+    Critical,
+}
+
+/// How long a page stays hidden before it is frozen, then unloaded, in milliseconds: its tab opens
+/// it again at its url when shown. Sooner when the system runs low on memory, every hidden page
+/// unloading at once when it is critical; and frozen sooner on battery saving, which stops their
+/// work.
+fn suspend_delays(pressure: MemoryPressure, low_power: bool) -> (i64, i64) {
+    const MINUTE: i64 = 60_000;
+    match pressure {
+        MemoryPressure::Critical => (0, 0),
+        MemoryPressure::Warning => (MINUTE, 5 * MINUTE),
+        MemoryPressure::Normal if low_power => (MINUTE, 60 * MINUTE),
+        MemoryPressure::Normal => (5 * MINUTE, 60 * MINUTE),
+    }
+}
+
+/// The suspension delays as the system stands now.
+fn current_suspend_delays() -> (i64, i64) {
+    #[cfg(target_os = "macos")]
+    return suspend_delays(crate::mac::memory_pressure(), crate::mac::low_power());
+    #[cfg(not(target_os = "macos"))]
+    suspend_delays(MemoryPressure::Normal, false)
+}
 
 /// Asks each page hidden long enough, but not frozen yet or due to unload, whether it plays media
 /// (page_playing): a page playing goes on. A frozen page, which plays nothing and answers nothing,
@@ -3042,6 +3067,7 @@ fn suspend_hidden_pages() {
         return;
     }
     let now = now();
+    let (freeze_after, unload_after) = current_suspend_delays();
     let (ask, unload): (Vec<_>, Vec<_>) = PAGES.with_borrow(|pages| {
         pages
             .iter()
@@ -3052,8 +3078,8 @@ fn suspend_hidden_pages() {
             })
             .filter_map(|(tab, live)| {
                 let hidden = now - live.hidden_since?;
-                let due = hidden >= UNLOAD_AFTER_MS;
-                (due || (hidden >= FREEZE_AFTER_MS && !live.frozen))
+                let due = hidden >= unload_after;
+                (due || (hidden >= freeze_after && !live.frozen))
                     .then(|| (*tab, live.view.clone(), live.frozen && due))
             })
             .partition(|(_, _, unload)| !unload)
@@ -3121,7 +3147,7 @@ pub fn page_playing(page: i32, playing: bool) {
     let Some((tab, Some(hidden_since), host)) = found.filter(|_| !playing) else {
         return;
     };
-    if now() - hidden_since >= UNLOAD_AFTER_MS {
+    if now() - hidden_since >= current_suspend_delays().1 {
         close_page(tab);
     } else {
         set_frozen(host.as_ref(), true);
@@ -5146,9 +5172,10 @@ fn ui_file(path: &str) -> Option<(&'static str, &'static [u8])> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH, RECENT_TABS,
-        Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file, lerp_rect, margin_regions,
-        origin, remember, site, slide_duration, step, toggled, ui_file, ui_path,
+        CARD_MARGIN, DraggableRegion, EDGE_WIDTH, FLOAT_INSET, LIBRARY, LIBRARY_WIDTH,
+        MemoryPressure, RECENT_TABS, Rect, SIDEBAR_WIDTH, SidebarMode, Size, UiState, favicon_file,
+        lerp_rect, margin_regions, origin, remember, site, slide_duration, step, suspend_delays,
+        toggled, ui_file, ui_path,
     };
     use arbalete_core::sidebar::NodeId;
 
@@ -5643,5 +5670,23 @@ mod tests {
             ui_path("arbalete://ui/command/open/a%23b"),
             "command/open/a%23b"
         );
+    }
+
+    #[test]
+    fn pages_suspend_sooner_on_low_memory_or_battery_saving() {
+        let minute = 60_000;
+        assert_eq!(
+            suspend_delays(MemoryPressure::Normal, false),
+            (5 * minute, 60 * minute)
+        );
+        assert_eq!(
+            suspend_delays(MemoryPressure::Normal, true),
+            (minute, 60 * minute)
+        );
+        assert_eq!(
+            suspend_delays(MemoryPressure::Warning, true),
+            (minute, 5 * minute)
+        );
+        assert_eq!(suspend_delays(MemoryPressure::Critical, false), (0, 0));
     }
 }
