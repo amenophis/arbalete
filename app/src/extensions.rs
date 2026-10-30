@@ -619,6 +619,9 @@ pub fn page_closed(page: i32) {
     drop(registration);
 }
 
+/// The id of the message asking a page whether it plays media (crate::shell::page_playing).
+pub const PLAYING: i32 = 2;
+
 /// The id of the message asking a page's session for its own target, apart from the
 /// bridge's, which start above it.
 const CONTENT_INFO: i32 = 1;
@@ -1222,8 +1225,12 @@ wrap_dev_tools_message_observer! {
 
     impl DevToolsMessageObserver {
         fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
-            if let Some(message) = parse(message).filter(|m| m["id"] == CONTENT_INFO && m["sessionId"].is_null()) {
+            let Some(message) = parse(message).filter(|m| m["sessionId"].is_null()) else { return 0 };
+            if message["id"] == CONTENT_INFO {
                 content_info(self.profile, self.page, &message);
+            } else if message["id"] == PLAYING {
+                let playing = message["result"]["result"]["value"].as_bool().unwrap_or(false);
+                crate::shell::page_playing(self.page, playing);
             }
             0
         }
