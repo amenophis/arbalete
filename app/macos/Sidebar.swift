@@ -218,12 +218,24 @@ struct SpaceSections: View {
                 VStack(alignment: .leading, spacing: 1) {
                     SpaceHeader(model: model, page: page, space: space)
                     if !page.collapsed {
-                        ItemRows(model: model, items: page.pinned, selected: page.selected)
+                        ItemRows(
+                            model: model, items: page.pinned, parent: page.roots.pinned,
+                            selected: page.selected)
+                        // Dropped on, the divider puts the node last among the pinned tabs.
                         DividerRow(model: model, clearable: !page.today.isEmpty)
+                            .dropDestination(for: String.self) { ids, _ in
+                                drop(ids) { model.move($0, to: page.roots.pinned, page.pinned.count) }
+                            }
                     }
+                    // Dropped on, New Tab puts the node first among today's tabs.
                     NewTabRow(model: model)
+                        .dropDestination(for: String.self) { ids, _ in
+                            drop(ids) { model.move($0, to: page.roots.today, 0) }
+                        }
                     if !page.collapsed {
-                        ItemRows(model: model, items: page.today, selected: page.selected)
+                        ItemRows(
+                            model: model, items: page.today, parent: page.roots.today,
+                            selected: page.selected)
                     }
                 }
                 .padding(.bottom, 8)
@@ -242,7 +254,11 @@ struct Favorites: View {
         let count = page.favorites.count
         if count == 0 {
             if page.favoritesHint {
+                // Dropped on, the hint makes the node the first favorite.
                 FavoritesHint(model: model, space: page.space)
+                    .dropDestination(for: String.self) { ids, _ in
+                        drop(ids) { model.move($0, to: page.roots.favorites, 0) }
+                    }
             }
         } else {
             let rows = max(1, (count + 3) / 4)
@@ -251,8 +267,12 @@ struct Favorites: View {
                 columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns),
                 spacing: 6
             ) {
-                ForEach(page.favorites) { tab in
+                ForEach(Array(page.favorites.enumerated()), id: \.element.id) { index, tab in
                     FavoriteTile(model: model, tab: tab, active: tab.id == page.selected)
+                        .draggable(String(tab.id))
+                        .dropDestination(for: String.self) { ids, _ in
+                            drop(ids) { model.move($0, to: page.roots.favorites, index) }
+                        }
                 }
             }
             .padding(.bottom, 8)
@@ -429,27 +449,46 @@ struct NewTabRow: View {
 struct ItemRows: View {
     @ObservedObject var model: AppModel
     let items: [Item]
+    /// Their container: a section's root, or a folder.
+    let parent: Int
     let selected: Int?
     var depth = 0
 
     var body: some View {
-        ForEach(items) { item in
-            switch item {
-            case .tab(let tab):
-                TabRow(model: model, tab: tab, active: tab.id == selected)
-                    .padding(.leading, CGFloat(depth) * 14)
-            case .folder(let id, let title, let expanded, let children):
-                FolderRow(model: model, id: id, title: title, expanded: expanded)
-                    .padding(.leading, CGFloat(depth) * 14)
-                if expanded {
-                    ItemRows(model: model, items: children, selected: selected, depth: depth + 1)
+        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+            Group {
+                switch item {
+                case .tab(let tab):
+                    TabRow(model: model, tab: tab, active: tab.id == selected)
+                case .folder(let id, let title, let expanded, let children):
+                    // Dropped on, a folder takes the node in, after its tabs.
+                    FolderRow(model: model, id: id, title: title, expanded: expanded)
+                        .dropDestination(for: String.self) { ids, _ in
+                            drop(ids) { model.move($0, to: id, children.count) }
+                        }
+                case .split(_, let tabs):
+                    SplitRow(model: model, tabs: tabs, selected: selected)
                 }
-            case .split(_, let tabs):
-                SplitRow(model: model, tabs: tabs, selected: selected)
-                    .padding(.leading, CGFloat(depth) * 14)
+            }
+            .padding(.leading, CGFloat(depth) * 14)
+            .draggable(String(item.id))
+            .dropDestination(for: String.self) { ids, _ in
+                drop(ids) { model.move($0, to: parent, index) }
+            }
+            if case .folder(let id, _, true, let children) = item {
+                ItemRows(
+                    model: model, items: children, parent: id, selected: selected,
+                    depth: depth + 1)
             }
         }
     }
+}
+
+/// Runs `move` with the id a drag carries, if it carries one.
+func drop(_ ids: [String], _ move: (Int) -> Void) -> Bool {
+    guard let id = ids.first.flatMap({ Int($0) }) else { return false }
+    move(id)
+    return true
 }
 
 /// A tab's row: a click selects it, its × closes it; on the selected row, closing may only
