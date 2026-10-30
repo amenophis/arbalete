@@ -5,6 +5,8 @@ mod extensions;
 mod mac;
 mod menu;
 mod motion;
+#[cfg(target_os = "macos")]
+mod native;
 mod scheme;
 mod settings;
 mod shell;
