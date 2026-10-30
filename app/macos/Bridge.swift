@@ -132,6 +132,36 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Where a node is in the displayed Space's page: its parent and its index among the
+    /// parent's children.
+    func place(of id: Int) -> (parent: Int, index: Int)? {
+        guard let page else { return nil }
+        if let index = page.favorites.firstIndex(where: { $0.id == id }) {
+            return (page.roots.favorites, index)
+        }
+        func find(_ items: [Item], _ parent: Int) -> (Int, Int)? {
+            for (index, item) in items.enumerated() {
+                if item.id == id { return (parent, index) }
+                if case .folder(let folder, _, _, let children) = item,
+                    let found = find(children, folder)
+                {
+                    return found
+                }
+            }
+            return nil
+        }
+        return find(page.pinned, page.roots.pinned) ?? find(page.today, page.roots.today)
+    }
+
+    /// Moves a dragged node before the child `index` of `parent`, or after its last one: the app
+    /// counts the index once the node has left its place.
+    func move(_ id: Int, to parent: Int, _ index: Int) {
+        guard id != parent, let from = place(of: id) else { return }
+        let to = from.parent == parent && from.index < index ? index - 1 : index
+        if from.parent == parent && to == from.index { return }
+        run("move/\(id)/\(parent)/\(to)")
+    }
+
     /// Shows the library, on a section or the one it showed last.
     func openLibrary(_ section: LibrarySection?) {
         libraryShown = true
