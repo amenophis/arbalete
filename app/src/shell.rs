@@ -594,6 +594,8 @@ fn send_state() {
         send_site_controls(&url);
     }
     let json = STATE.with_borrow(UiState::to_json);
+    #[cfg(target_os = "macos")]
+    crate::native::state(&json.to_string());
     let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
@@ -4142,6 +4144,11 @@ wrap_window_delegate! {
             THEME_VIEW.set(Some(theme));
             THEME.set(Some(controller));
             window.show();
+            #[cfg(target_os = "macos")]
+            {
+                crate::native::attach(window.window_handle(), SIDEBAR_WIDTH);
+                send_state();
+            }
             WINDOW.set(Some(window));
             place_card();
             // Only the selected tab loads: the others wait until they are selected.
