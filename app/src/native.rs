@@ -16,6 +16,8 @@ unsafe extern "C" {
         width: f64,
         height: f64,
     );
+    fn arbalete_ui_settings(shown: bool);
+    fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_place_sidebar(
         visible: bool,
         x: f64,
@@ -96,6 +98,18 @@ pub fn surface(name: &str, shown: bool, frame: &Rect) {
             frame.height.into(),
         );
     }
+}
+
+/// Opens the settings window, or closes it.
+pub fn settings(shown: bool) {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_settings(shown) };
+}
+
+/// The settings window has the keyboard: ⌘W closes it rather than a tab.
+pub fn settings_focused() -> bool {
+    // SAFETY: no arguments.
+    unsafe { arbalete_ui_settings_focused() }
 }
 
 /// Runs a command the interface sends, on the main thread, which is CEF's UI thread on macOS.

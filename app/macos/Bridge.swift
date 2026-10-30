@@ -151,6 +151,7 @@ final class AppModel: ObservableObject {
 @MainActor var findBar: FindBar?
 @MainActor var siteControls: SiteControls?
 @MainActor var themePicker: ThemePickerModel?
+@MainActor var importModel: ImportModel?
 
 /// Puts the interface in the window `handle` is, or is in: the blur behind every view, and the
 /// sidebar above them.
@@ -203,6 +204,12 @@ public func attach(_ handle: UnsafeMutableRawPointer, _ send: Send) {
         themeSurface.takesKeyboard = true
         themeSurface.resigned = { app.run("theme/hide") }
         surfaces["theme"] = themeSurface
+        settingsModel = SettingsModel(app: app)
+        let importer = ImportModel(app: app)
+        importModel = importer
+        let importSurface = Surface(in: window, radius: 16) { ImportView(model: importer) }
+        importSurface.takesKeyboard = true
+        surfaces["import"] = importSurface
     }
 }
 
@@ -224,6 +231,10 @@ public func event(
             siteControls?.handle(String(cString: name), detail)
         case "theme":
             themePicker?.handle(String(cString: name), detail)
+        case "settings":
+            settingsModel?.handle(String(cString: name), detail)
+        case "import":
+            importModel?.handle(String(cString: name), detail)
         default:
             break
         }

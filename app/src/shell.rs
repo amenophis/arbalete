@@ -115,10 +115,12 @@ const LITTLE_BAR_HEIGHT: i32 = 40;
 const PAGE_TOOLBAR_HEIGHT: i32 = 36;
 
 /// The height of the settings window's title row, which holds the window buttons
-/// (ui/src/index.css).
+/// (ui/src/index.css). Not on macOS, whose settings window is native.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 const SETTINGS_TITLE_HEIGHT: f32 = 32.0;
 
 /// The settings window's size, like Arc's (ui/src/Settings.tsx).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 const SETTINGS_SIZE: Size = Size {
     width: 600,
     height: 520,
@@ -829,6 +831,8 @@ fn native_surface(view: &'static LocalKey<RefCell<Option<BrowserView>>>) -> Opti
         (&SITE_VIEW, "site"),
         (&THEME_VIEW, "theme"),
         (&TOOLBAR_VIEW, "toolbar"),
+        (&SETTINGS_VIEW, "settings"),
+        (&IMPORT_VIEW, "import"),
     ]
     .into_iter()
     .find(|(native, _)| std::ptr::eq(view, *native))
@@ -916,6 +920,7 @@ fn sync_native_surfaces() {
         (&FIND_VIEW, &FIND),
         (&SITE_VIEW, &SITE),
         (&THEME_VIEW, &THEME),
+        (&IMPORT_VIEW, &IMPORT),
     ] {
         if let Some(overlay) = overlay.with_borrow(Clone::clone) {
             mirror(view, &overlay);
@@ -1513,15 +1518,7 @@ fn show_import() {
         return;
     }
     SOURCES.set(browsers::detect(&crate::user_home()));
-    if IMPORT.with_borrow(Option::is_none) {
-        let url = format!("{UI_ORIGIN}index.html#import");
-        let view = browser_view(UiClient::new(), &url, no_width, None);
-        let controller = window
-            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
-            .expect("import");
-        IMPORT_VIEW.set(Some(view));
-        IMPORT.set(Some(controller));
-    }
+    make_import(&window);
     let Some(controller) = IMPORT.with_borrow(Clone::clone) else {
         return;
     };
@@ -1539,6 +1536,9 @@ fn show_import() {
     controller.set_visible(1);
     // A page still loading asks for them once it listens (Command::ImportReady).
     send_sources();
+    // At launch too, out of any command.
+    #[cfg(target_os = "macos")]
+    sync_native_surfaces();
     // On macOS, the native surface takes the keyboard instead.
     #[cfg(not(target_os = "macos"))]
     if let Some(view) = controller.contents_view() {
@@ -1739,6 +1739,12 @@ fn profile_context(profile: ProfileId) -> Option<RequestContext> {
 /// Shows the settings in a window of their own, like Arc's, brought to the front when it is
 /// already open. Its page asks for the settings once it listens (Command::SettingsReady).
 fn show_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        crate::native::settings(true);
+        send_settings();
+    }
+    #[cfg(not(target_os = "macos"))]
     match SETTINGS_WINDOW.with_borrow(Clone::clone) {
         Some(window) => window.activate(),
         None => {
@@ -2077,6 +2083,8 @@ wrap_task! {
 
 /// Closes the settings window, if it is open.
 fn close_settings() {
+    #[cfg(target_os = "macos")]
+    crate::native::settings(false);
     if let Some(window) = SETTINGS_WINDOW.with_borrow(Clone::clone) {
         window.close();
     }
@@ -2084,6 +2092,10 @@ fn close_settings() {
 
 /// The settings window has the keyboard: ⌘W closes it rather than a tab.
 fn settings_focused() -> bool {
+    #[cfg(target_os = "macos")]
+    if crate::native::settings_focused() {
+        return true;
+    }
     SETTINGS_WINDOW.with_borrow(|window| window.as_ref().is_some_and(|w| w.is_active() == 1))
 }
 
@@ -2649,10 +2661,26 @@ fn send_sources() {
     dispatch(&IMPORT_VIEW, &event);
 }
 
+/// Makes the import assistant's overlay, once: with the window on macOS, like the find bar's.
+fn make_import(window: &Window) {
+    if IMPORT.with_borrow(Option::is_none) {
+        let view = browser_view(UiClient::new(), &web_surface("#import"), no_width, None);
+        let controller = window
+            .add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
+            .expect("import");
+        controller.set_visible(0);
+        IMPORT_VIEW.set(Some(view));
+        IMPORT.set(Some(controller));
+    }
+}
+
 fn hide_import() {
     if let Some(controller) = IMPORT.with_borrow(Clone::clone) {
         controller.set_visible(0);
     }
+    // Once the import is done too, out of any command.
+    #[cfg(target_os = "macos")]
+    sync_native_surfaces();
 }
 
 /// Closes the import assistant. Closed on the first launch, it leaves the session as it would
@@ -4279,7 +4307,10 @@ wrap_window_delegate! {
             THEME_VIEW.set(Some(theme));
             THEME.set(Some(controller));
             #[cfg(target_os = "macos")]
-            make_find(&window);
+            {
+                make_find(&window);
+                make_import(&window);
+            }
             window.show();
             #[cfg(target_os = "macos")]
             {
