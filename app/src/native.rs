@@ -17,6 +17,7 @@ unsafe extern "C" {
         height: f64,
     );
     fn arbalete_ui_settings(shown: bool);
+    fn arbalete_ui_little(id: u32, handle: *mut c_void);
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_place_sidebar(
         visible: bool,
@@ -98,6 +99,13 @@ pub fn surface(name: &str, shown: bool, frame: &Rect) {
             frame.height.into(),
         );
     }
+}
+
+/// Gives a Little Arbalete window, `id`, its native bar, or forgets it once closed, without a
+/// handle.
+pub fn little(id: u32, handle: Option<*mut c_void>) {
+    // SAFETY: CEF gives a live NSWindow or NSView, which the window keeps alive.
+    unsafe { arbalete_ui_little(id, handle.unwrap_or(std::ptr::null_mut())) };
 }
 
 /// Opens the settings window, or closes it.
