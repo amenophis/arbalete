@@ -14,6 +14,15 @@ final class AppModel: ObservableObject {
     @Published var state: AppState?
     /// The folder or the tab whose name is being edited.
     @Published var renaming: Int?
+    @Published var downloads: [Download] = []
+    @Published var archive: [ArchivedTab] = []
+    @Published var history: [Visit] = []
+    /// The sidebar shows the library, on a section, under what its field searches.
+    @Published var libraryShown = false
+    @Published var section = LibrarySection.spaces
+    @Published var query = "" {
+        didSet { if section == .history { searchHistory() } }
+    }
     let send: Send
 
     init(send: @escaping Send) {
@@ -57,9 +66,65 @@ final class AppModel: ObservableObject {
             paintWindow()
         case "arbalete:rename":
             renaming = try? JSONDecoder().decode(Int.self, from: detail)
+        case "arbalete:downloads":
+            downloads = (try? JSONDecoder().decode([Download].self, from: detail)) ?? downloads
+        case "arbalete:archive":
+            archive = (try? JSONDecoder().decode([ArchivedTab].self, from: detail)) ?? archive
+        case "arbalete:history":
+            struct Found: Decodable {
+                var text: String
+                var entries: [Visit]
+            }
+            if let found = try? JSONDecoder().decode(Found.self, from: detail), found.text == query {
+                history = found.entries
+            }
+        case "arbalete:library":
+            openLibrary(.spaces)
+        case "arbalete:open-library":
+            openLibrary(nil)
+        case "arbalete:show-downloads":
+            openLibrary(.downloads)
+        case "arbalete:show-history":
+            openLibrary(.history)
+        case "arbalete:show-extensions":
+            openLibrary(.extensions)
         default:
             break
         }
+    }
+
+    var queryBinding: Binding<String> {
+        Binding(get: { self.query }, set: { self.query = $0 })
+    }
+
+    /// Shows the library, on a section or the one it showed last.
+    func openLibrary(_ section: LibrarySection?) {
+        libraryShown = true
+        run("library/show")
+        pick(section ?? self.section)
+    }
+
+    func pick(_ section: LibrarySection) {
+        self.section = section
+        query = ""
+        run(section.wide ? "library/wide" : "library/narrow")
+        // Their page may have changed them.
+        switch section {
+        case .extensions: run("extension/reload")
+        case .archive: run("archive/list")
+        case .history: searchHistory()
+        default: break
+        }
+    }
+
+    /// Back to the displayed Space, the card resting beside the sidebar again.
+    func closeLibrary() {
+        libraryShown = false
+        run("card/offset/0")
+    }
+
+    private func searchHistory() {
+        run("history/search/200/\(percentEncoded(query))")
     }
 
     /// Tells the app the card's color, which an empty Space shows, a little tinted by the
