@@ -2692,3 +2692,43 @@ button.folder:hover {
   background: #f5a6232e;
   color: #f5a623;
 }
+
+/* A tab whose page sleeps, frozen or unloaded to save memory. */
+.tab-row[data-asleep] .tab :is(.favicon, .title) {
+  opacity: 0.55;
+}
+
+.site-awake {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 2px;
+}
+
+.settings-awake h2 {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.settings-awake ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-awake li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.settings-awake-remove {
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}

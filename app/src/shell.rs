@@ -24,8 +24,8 @@ use cef::*;
 use serde::Serialize;
 use serde_json::json;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, LocalKey};
@@ -179,7 +179,9 @@ thread_local! {
     /// The browsers Chromium opened by itself (StrayClient), until an install closes them.
     static STRAYS: RefCell<Vec<Browser>> = const { RefCell::new(Vec::new()) };
     /// The app's settings, loaded when the context is initialized.
-    static SETTINGS: Cell<Settings> = Cell::new(Settings::default());
+    static SETTINGS: RefCell<Settings> = RefCell::new(Settings::default());
+    /// The tabs whose page is frozen or was unloaded, which the sidebar dims.
+    static ASLEEP: RefCell<HashSet<NodeId>> = RefCell::default();
     /// The find bar, at the card's top right corner; created the first time it is shown.
     static FIND_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
@@ -364,7 +366,7 @@ impl UiState {
             .expect("a known Space");
         json!({
             "page": self.page,
-            "toolbar": SETTINGS.get().show_toolbar,
+            "toolbar": app_settings().show_toolbar,
             "space": displayed,
             "spaces": spaces.iter().map(|s| json!({
                 "id": s.id,
@@ -537,6 +539,7 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "title": tab.label(),
         "favicon": favicon_url(profile, tab),
         "muted": tab.muted,
+        "asleep": ASLEEP.with_borrow(|asleep| asleep.contains(&id)),
     })
 }
 
@@ -615,18 +618,19 @@ fn send_state() {
 /// Shows the bar above the page, with the navigation buttons and the address, which the sidebar
 /// then leaves out; or hides it. Kept across sessions.
 fn toggle_toolbar() {
-    let mut settings = SETTINGS.get();
-    settings.show_toolbar = !settings.show_toolbar;
-    SETTINGS.set(settings);
+    let shown = SETTINGS.with_borrow_mut(|settings| {
+        settings.show_toolbar = !settings.show_toolbar;
+        settings.show_toolbar
+    });
     save_settings();
     if let Some(toolbar) = TOOLBAR_VIEW.with_borrow(Clone::clone) {
-        toolbar.set_visible(settings.show_toolbar.into());
+        toolbar.set_visible(shown.into());
     }
     if let Some(card) = card_panel() {
         card.layout();
     }
     #[cfg(target_os = "macos")]
-    crate::mac::toolbar_shown(settings.show_toolbar);
+    crate::mac::toolbar_shown(shown);
     send_state();
 }
 
@@ -839,7 +843,7 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         // The sidebar shows its url bar while docked, unless the bar above the page holds it.
         let over_url_bar = tab.is_some()
             && SIDEBAR_MODE.get() == SidebarMode::Shown
-            && !SETTINGS.get().show_toolbar;
+            && !app_settings().show_toolbar;
         OVER_URL_BAR.set(over_url_bar);
         place_overlay(OVERLAY_ROW);
         let (url, favicon) = tab.unzip();
@@ -1372,7 +1376,7 @@ fn restore(path: PathBuf) {
     };
     SESSION_FILE.set(Some(path));
     // Without restoring the session, every Space starts without "Today" tabs.
-    if !SETTINGS.get().restore_session {
+    if !app_settings().restore_session {
         STATE.with_borrow_mut(|state| {
             let spaces: Vec<_> = state.sidebar.spaces().iter().map(|s| s.id).collect();
             for space in spaces {
@@ -1977,7 +1981,7 @@ fn settings_focused() -> bool {
 
 /// Sends the settings window the app's settings, the search engines and each profile's.
 fn send_settings() {
-    let settings = SETTINGS.get();
+    let settings = app_settings();
     let engines: Vec<_> = SearchEngine::ALL
         .iter()
         .map(|engine| json!({ "id": engine, "name": engine.name() }))
@@ -2002,19 +2006,47 @@ fn send_settings() {
 
 /// Turns an app setting on or off and saves it.
 fn set_setting(setting: Setting, on: bool) {
-    let mut settings = SETTINGS.get();
+    let mut settings = app_settings();
     match setting {
         Setting::WarnBeforeQuit => settings.warn_before_quit = on,
         Setting::RestoreSession => settings.restore_session = on,
+        Setting::SuspendTabs => settings.suspend_tabs = on,
     }
     SETTINGS.set(settings);
     save_settings();
     send_settings();
+    if !on && setting == Setting::SuspendTabs {
+        wake_frozen(|_| true);
+    }
+}
+
+/// Keeps a site's pages from being suspended, waking those frozen, or lets them be suspended again.
+fn keep_awake(site: String, on: bool) {
+    SETTINGS.with_borrow_mut(|settings| {
+        settings.awake_sites.retain(|awake| *awake != site);
+        if on {
+            settings.awake_sites.push(site.clone());
+            settings.awake_sites.sort();
+        }
+    });
+    save_settings();
+    send_settings();
+    if on {
+        wake_frozen(|url| self::site(url) == site);
+    }
+    if let Some(url) = selected_url() {
+        send_site_controls(&url);
+    }
+}
+
+/// The app's settings, as they stand.
+fn app_settings() -> Settings {
+    SETTINGS.with_borrow(Clone::clone)
 }
 
 fn save_settings() {
     let path = DATA_DIR.get().expect("set").join(settings::FILE_NAME);
-    if let Err(error) = settings::save(&SETTINGS.get(), &path) {
+    if let Err(error) = settings::save(&app_settings(), &path) {
         eprintln!("cannot save the settings: {error}");
     }
 }
@@ -2229,7 +2261,9 @@ fn send_site_controls(url: &str) {
             json
         })
         .collect();
-    let detail = json!({ "url": url, "extensions": extensions });
+    let settings = app_settings();
+    let awake = settings.awake_sites.iter().any(|awake| awake == site(url));
+    let detail = json!({ "url": url, "site": site(url), "awake": awake, "suspends": settings.suspend_tabs, "extensions": extensions });
     dispatch(
         &SITE_VIEW,
         &format!(r#"new CustomEvent("arbalete:show", {{ detail: {detail} }})"#),
@@ -2989,6 +3023,8 @@ struct Live {
     hidden_since: Option<i64>,
     /// Frozen by Chromium: its scripts and timers stop until it shows again.
     frozen: bool,
+    /// It uses the camera, the microphone or the screen.
+    capturing: bool,
 }
 
 /// How long a page stays hidden before it is frozen, then unloaded: its tab opens it again at its
@@ -2998,12 +3034,22 @@ const UNLOAD_AFTER_MS: i64 = 60 * 60_000;
 
 /// Asks each page hidden long enough, but not frozen yet or due to unload, whether it plays media
 /// (page_playing): a page playing goes on. A frozen page, which plays nothing and answers nothing,
-/// unloads once due.
+/// unloads once due. A page capturing, or of a site kept awake, is never suspended, nor is any
+/// when the settings say so.
 fn suspend_hidden_pages() {
+    let settings = app_settings();
+    if !settings.suspend_tabs {
+        return;
+    }
     let now = now();
     let (ask, unload): (Vec<_>, Vec<_>) = PAGES.with_borrow(|pages| {
         pages
             .iter()
+            .filter(|(tab, live)| {
+                !live.capturing
+                    && tab_url(**tab)
+                        .is_none_or(|url| !settings.awake_sites.iter().any(|s| s == site(&url)))
+            })
             .filter_map(|(tab, live)| {
                 let hidden = now - live.hidden_since?;
                 let due = hidden >= UNLOAD_AFTER_MS;
@@ -3014,8 +3060,12 @@ fn suspend_hidden_pages() {
     });
     for (tab, _, _) in unload {
         close_page(tab);
+        fall_asleep(tab);
     }
-    let expression = r#"[...document.querySelectorAll("video, audio")].some((media) => !media.paused && !media.ended)"#;
+    // A player tells the system what it plays through the Media Session API, even without an
+    // element in the page, like a Web Audio player.
+    let expression = r#"navigator.mediaSession?.playbackState === "playing"
+        || [...document.querySelectorAll("video, audio")].some((media) => !media.paused && !media.ended)"#;
     let params = serde_json::json!({ "expression": expression, "returnByValue": true });
     let message = serde_json::json!({ "id": extensions::PLAYING, "method": "Runtime.evaluate", "params": params });
     for (_, view, _) in ask {
@@ -3023,6 +3073,40 @@ fn suspend_hidden_pages() {
             host.send_dev_tools_message(Some(message.to_string().as_bytes()));
         }
     }
+}
+
+/// A tab's url, if it is still a tab.
+fn tab_url(tab: NodeId) -> Option<String> {
+    STATE.with_borrow(|state| match &state.sidebar.node(tab)?.kind {
+        NodeKind::Tab(tab) => Some(tab.url.clone()),
+        _ => None,
+    })
+}
+
+/// Dims a tab whose page was frozen or unloaded in the sidebar.
+fn fall_asleep(tab: NodeId) {
+    if ASLEEP.with_borrow_mut(|asleep| asleep.insert(tab)) {
+        send_state();
+    }
+}
+
+/// Makes the frozen pages whose url `wake` picks run again.
+fn wake_frozen(wake: impl Fn(&str) -> bool) {
+    let woken: Vec<_> = PAGES.with_borrow_mut(|pages| {
+        pages
+            .iter_mut()
+            .filter(|(tab, live)| live.frozen && tab_url(**tab).is_some_and(|url| wake(&url)))
+            .map(|(tab, live)| {
+                live.frozen = false;
+                (*tab, live.view.browser().and_then(|browser| browser.host()))
+            })
+            .collect()
+    });
+    for (tab, host) in woken {
+        set_frozen(host.as_ref(), false);
+        ASLEEP.with_borrow_mut(|asleep| asleep.remove(&tab));
+    }
+    send_state();
 }
 
 /// Freezes or unloads a hidden page that plays no media, as long as it has been hidden; the page
@@ -3038,14 +3122,16 @@ pub fn page_playing(page: i32, playing: bool) {
         return;
     };
     if now() - hidden_since >= UNLOAD_AFTER_MS {
-        return close_page(tab);
+        close_page(tab);
+    } else {
+        set_frozen(host.as_ref(), true);
+        PAGES.with_borrow_mut(|pages| {
+            if let Some(live) = pages.get_mut(&tab) {
+                live.frozen = true;
+            }
+        });
     }
-    set_frozen(host.as_ref(), true);
-    PAGES.with_borrow_mut(|pages| {
-        if let Some(live) = pages.get_mut(&tab) {
-            live.frozen = true;
-        }
-    });
+    fall_asleep(tab);
 }
 
 /// Freezes a page through Chromium's DevTools, or makes it run again.
@@ -3146,6 +3232,7 @@ fn show_selected() {
                         view: view.clone(),
                         hidden_since: None,
                         frozen: false,
+                        capturing: false,
                     },
                 )
             });
@@ -3195,6 +3282,7 @@ fn show_content(tab: NodeId, view: &BrowserView) {
         live.hidden_since = None;
         Some(std::mem::take(&mut live.frozen))
     });
+    ASLEEP.with_borrow_mut(|asleep| asleep.remove(&tab));
     if frozen == Some(true) {
         set_frozen(
             view.browser().and_then(|browser| browser.host()).as_ref(),
@@ -3585,6 +3673,7 @@ pub fn run(command: Command) {
         (Command::HideSettings, _) => close_settings(),
         (Command::SettingsReady, _) => send_settings(),
         (Command::SetSetting(setting, on), _) => set_setting(setting, on),
+        (Command::KeepAwake(site, on), _) => keep_awake(site, on),
         (
             Command::CreateSpace {
                 title,
@@ -3764,7 +3853,7 @@ pub fn close() {
 /// quitting.
 #[cfg(target_os = "macos")]
 pub fn quit() {
-    if SETTINGS.get().warn_before_quit && !crate::mac::confirm("Quit Arbalete?", "", "Quit") {
+    if app_settings().warn_before_quit && !crate::mac::confirm("Quit Arbalete?", "", "Quit") {
         return;
     }
     close();
@@ -3885,13 +3974,13 @@ wrap_window_delegate! {
             // Any width: the layout stretches it across the card. A zero one would make its size
             // "empty", which CEF ignores, with its height.
             let toolbar = browser_view_sized(UiClient::new(), &format!("{UI_ORIGIN}index.html#toolbar"), || 1, PAGE_TOOLBAR_HEIGHT, None);
-            toolbar.set_visible(SETTINGS.get().show_toolbar.into());
+            toolbar.set_visible(app_settings().show_toolbar.into());
             let mut view = View::from(&toolbar);
             card.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
             TOOLBAR_VIEW.set(Some(toolbar));
             #[cfg(target_os = "macos")]
-            crate::mac::toolbar_shown(SETTINGS.get().show_toolbar);
+            crate::mac::toolbar_shown(app_settings().show_toolbar);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&card)), DockingMode::CUSTOM, 1)
                 .expect("card");
@@ -4329,7 +4418,7 @@ pub fn menu_at(x: f64, y: f64) -> bool {
     // The bar above the page, in toolbar mode, shows its pinned extensions' menus.
     if let Some(toolbar) = TOOLBAR_VIEW
         .with_borrow(Clone::clone)
-        .filter(|_| SETTINGS.get().show_toolbar)
+        .filter(|_| app_settings().show_toolbar)
     {
         // It lies in the card, an overlay of its own: its bounds are the card's.
         let card = CARD.with_borrow(|card| card.as_ref().map(OverlayController::bounds));
@@ -4660,6 +4749,16 @@ wrap_display_handler! {
             // Not cloned: a clone of the list CEF lends lists no string.
             let source = icon_urls.and_then(|urls| std::mem::take(urls).into_iter().next());
             change_favicon(self.profile, tab, source, browser.host());
+        }
+
+        /// A page capturing is never suspended.
+        fn on_media_access_change(&self, browser: Option<&mut Browser>, has_video_access: i32, has_audio_access: i32) {
+            let Some(tab) = browser.and_then(|browser| page_tab(browser)) else { return };
+            PAGES.with_borrow_mut(|pages| {
+                if let Some(live) = pages.get_mut(&tab) {
+                    live.capturing = has_video_access == 1 || has_audio_access == 1;
+                }
+            });
         }
 
         fn on_loading_progress_change(&self, browser: Option<&mut Browser>, progress: f64) {
@@ -5421,7 +5520,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "color": "purple", "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "color": "blue", "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);

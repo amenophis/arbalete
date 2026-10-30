@@ -5,7 +5,13 @@ import { Icon } from "./Icon";
 // Sent by the app when the window opens and after every change (send_settings in
 // app/src/shell.rs).
 export type SettingsDetail = {
-  settings: { warnBeforeQuit: boolean; restoreSession: boolean };
+  settings: {
+    warnBeforeQuit: boolean;
+    restoreSession: boolean;
+    suspendTabs: boolean;
+    // The sites never suspended, by host, which the site controls add.
+    awakeSites: string[];
+  };
   engines: { id: string; name: string }[];
   // How long "Today" tabs may stay unshown before they are archived, which a profile picks.
   delays: { id: string; name: string }[];
@@ -186,6 +192,41 @@ function General({ settings }: { settings: SettingsDetail["settings"] }) {
           </small>
         </span>
       </label>
+      <label className="settings-row">
+        <input
+          type="checkbox"
+          checked={settings.suspendTabs}
+          onChange={(event) => toggle("suspend-tabs", event.currentTarget.checked)}
+        />
+        <span>
+          Save memory with tabs left aside
+          <small>
+            A tab hidden for 5 minutes is paused, then unloaded after an hour. Tabs playing media,
+            using the camera or the microphone, and the sites kept awake never are.
+          </small>
+        </span>
+      </label>
+      {settings.suspendTabs && settings.awakeSites.length > 0 && (
+        <section className="settings-awake" aria-label="Sites kept awake">
+          <h2>Sites kept awake</h2>
+          <ul>
+            {settings.awakeSites.map((site) => (
+              <li key={site}>
+                <span>{site}</span>
+                <button
+                  type="button"
+                  className="settings-awake-remove"
+                  aria-label={`Let ${site} sleep`}
+                  title="Let it sleep"
+                  onClick={() => send(`awake/off/${encodeURIComponent(site)}`)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </>
   );
 }

@@ -179,6 +179,9 @@ export type Tab = {
   favicon: string | null;
   // Sidebar rows only: the tab plays no sound.
   muted?: boolean;
+  // Its page was frozen or unloaded, hidden for long, to save memory (suspend_hidden_pages in
+  // app/src/shell.rs): the row is dimmed.
+  asleep?: boolean;
 };
 
 export function useAppState(): State | undefined {

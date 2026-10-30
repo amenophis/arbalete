@@ -7,7 +7,7 @@ use std::{fs, io, path::Path};
 /// The settings' file name in the data directory.
 pub const FILE_NAME: &str = "settings.json";
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     /// ⌘Q asks before quitting.
@@ -18,6 +18,10 @@ pub struct Settings {
     /// A bar above the page holds the navigation buttons and the address, which the sidebar no
     /// longer shows (View › Show Toolbar).
     pub show_toolbar: bool,
+    /// The pages hidden for long are frozen, then unloaded, to save memory and energy.
+    pub suspend_tabs: bool,
+    /// The sites never suspended, by host (and port), like `mail.google.com`.
+    pub awake_sites: Vec<String>,
 }
 
 impl Default for Settings {
@@ -26,6 +30,8 @@ impl Default for Settings {
             warn_before_quit: false,
             restore_session: true,
             show_toolbar: false,
+            suspend_tabs: true,
+            awake_sites: Vec::new(),
         }
     }
 }
@@ -60,11 +66,13 @@ mod tests {
             warn_before_quit: true,
             restore_session: false,
             show_toolbar: true,
+            suspend_tabs: false,
+            awake_sites: vec!["mail.google.com".into()],
         };
         save(&settings, &path).unwrap();
         assert_eq!(load(&path), settings);
         fs::write(&path, r#"{ "warnBeforeQuit": true }"#).unwrap();
-        assert!(load(&path).restore_session);
+        assert!(load(&path).restore_session && load(&path).suspend_tabs);
         fs::write(&path, "not json").unwrap();
         assert_eq!(load(&path), Settings::default());
         fs::remove_dir_all(dir).unwrap();

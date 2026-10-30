@@ -12,7 +12,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const detail: SettingsDetail = {
-  settings: { warnBeforeQuit: false, restoreSession: true },
+  settings: {
+    warnBeforeQuit: false,
+    restoreSession: true,
+    suspendTabs: true,
+    awakeSites: ["mail.google.com"],
+  },
   engines: [
     { id: "google", name: "Google" },
     { id: "duckduckgo", name: "DuckDuckGo" },
@@ -78,6 +83,16 @@ test("General turns the app's settings on or off", () => {
   });
   fireEvent.click(restore);
   expect(fetch).toHaveBeenLastCalledWith("/command/settings/restore-session/false", {
+    method: "POST",
+  });
+});
+
+test("General suspends tabs left aside, but for the sites kept awake", () => {
+  open();
+  fireEvent.click(screen.getByRole("button", { name: "Let mail.google.com sleep" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/awake/off/mail.google.com", { method: "POST" });
+  fireEvent.click(screen.getByRole("checkbox", { name: /Save memory with tabs left aside/ }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/settings/suspend-tabs/false", {
     method: "POST",
   });
 });

@@ -70,6 +70,7 @@ impl Button {
 pub enum Setting {
     WarnBeforeQuit,
     RestoreSession,
+    SuspendTabs,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -305,7 +306,10 @@ pub enum Command {
     HideSettings,
     /// The settings window is listening: send it the settings, `settings/ready`.
     SettingsReady,
-    /// Turns a setting on or off: `settings/<warn-before-quit or restore-session>/<true or false>`.
+    /// Keeps a site's pages from being suspended, or no longer: `awake/<on or off>/<host>`.
+    KeepAwake(String, bool),
+    /// Turns a setting on or off: `settings/<warn-before-quit, restore-session or
+    /// suspend-tabs>/<true or false>`.
     SetSetting(Setting, bool),
     /// Shows a Space in the sidebar, and its selected tab in the content view: `space/<space id>`.
     ShowSpace(SpaceId),
@@ -616,6 +620,16 @@ impl Command {
                     let engine = serde_json::from_value(engine.into()).ok()?;
                     return Some(Self::SetSearchEngine(id, engine));
                 }
+                if let Some((on, site)) =
+                    path.strip_prefix("awake/").and_then(|r| r.split_once('/'))
+                {
+                    let on = match on {
+                        "on" => true,
+                        "off" => false,
+                        _ => return None,
+                    };
+                    return percent_decode(site).map(|site| Self::KeepAwake(site, on));
+                }
                 if let Some((setting, on)) = path
                     .strip_prefix("settings/")
                     .and_then(|r| r.split_once('/'))
@@ -623,6 +637,7 @@ impl Command {
                     let setting = match setting {
                         "warn-before-quit" => Setting::WarnBeforeQuit,
                         "restore-session" => Setting::RestoreSession,
+                        "suspend-tabs" => Setting::SuspendTabs,
                         _ => return None,
                     };
                     return on.parse().ok().map(|on| Self::SetSetting(setting, on));
@@ -1448,6 +1463,18 @@ mod tests {
         assert_eq!(
             Command::parse("settings/restore-session/false"),
             Some(Command::SetSetting(Setting::RestoreSession, false))
+        );
+        assert_eq!(
+            Command::parse("settings/suspend-tabs/false"),
+            Some(Command::SetSetting(Setting::SuspendTabs, false))
+        );
+        assert_eq!(
+            Command::parse("awake/on/mail.google.com"),
+            Some(Command::KeepAwake("mail.google.com".into(), true))
+        );
+        assert_eq!(
+            Command::parse("awake/off/localhost%3A8080"),
+            Some(Command::KeepAwake("localhost:8080".into(), false))
         );
         assert_eq!(Command::parse("settings/unknown/true"), None);
         assert_eq!(Command::parse("settings/restore-session/yes"), None);

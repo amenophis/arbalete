@@ -14,6 +14,10 @@ export type Extension = {
 
 type Detail = {
   url: string;
+  // The url's host, and whether its tabs are kept awake while tabs are suspended (`suspends`).
+  site: string;
+  awake: boolean;
+  suspends: boolean;
   // Turned off, an extension does not run: its menu turns it on again. Pinned, its button shows
   // by the address too.
   extensions: (Extension & { enabled: boolean; pinned: boolean })[];
@@ -185,6 +189,20 @@ export function Site() {
           <Icon d="M8 3.5v9M3.5 8h9" size={18} />
         </button>
       </div>
+      {site.suspends && (
+        <label className="site-awake">
+          <input
+            type="checkbox"
+            checked={site.awake}
+            onChange={(event) =>
+              send(
+                `awake/${event.currentTarget.checked ? "on" : "off"}/${encodeURIComponent(site.site)}`,
+              )
+            }
+          />
+          Keep this site awake
+        </label>
+      )}
       <div className="site-footer">
         <Icon
           d={
