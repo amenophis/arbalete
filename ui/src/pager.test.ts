@@ -6,6 +6,7 @@ import {
   bounds,
   FLICK_SPEED,
   FLICK_WINDOW_MS,
+  favoritesShift,
   follow,
   GAIN,
   LIBRARY_SHIFT,
@@ -150,4 +151,17 @@ test("the library and the page after the last Space are untinted, the Spaces' ti
   expect(tint(spaces, 2)?.strength).toBe(0);
   expect(tint(spaces, 2.2)?.strength).toBe(0);
   expect(tint(spaces, 1.75)).toEqual({ color: "#e5484d", strength: 0.25 });
+});
+
+test("the favorites stand still between Spaces of a profile, and move on the way to another's", () => {
+  const spaces = [1, 1, 2].map((profile, id) => ({ id, profile }) as Space);
+  // Halfway between the first two Spaces, of the same profile: one grid shows, where it stood.
+  expect(favoritesShift(spaces, 0, 0.5)).toEqual({ shift: 0.5, shown: false });
+  expect(favoritesShift(spaces, 1, 0.5)).toEqual({ shift: -0.5, shown: true });
+  // Halfway to the third Space, of another profile: both grids move with their pages.
+  expect(favoritesShift(spaces, 1, 1.5)).toEqual({ shift: 0, shown: true });
+  expect(favoritesShift(spaces, 0, 1.5)).toEqual({ shift: 1, shown: false });
+  expect(favoritesShift(spaces, 2, 1.5)).toEqual({ shift: 0, shown: true });
+  // On the way to the library, the first Space's grid goes with its page.
+  expect(favoritesShift(spaces, 0, -0.5)).toEqual({ shift: 0, shown: true });
 });

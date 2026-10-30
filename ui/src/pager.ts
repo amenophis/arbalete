@@ -113,6 +113,23 @@ export function tint(spaces: Space[], position: number): Tint | undefined {
   };
 }
 
+// How far, in pages, a Space's favorites move within its page so that they stand still: between
+// Spaces of the same profile, whose favorites are the same, only the tabs slide. They move with
+// their page on the way to a Space of another profile, or to a page that is no Space's. Of the
+// Spaces of a profile side by side, only the page nearest the position shows them (`shown`).
+export function favoritesShift(
+  spaces: Space[],
+  index: number,
+  position: number,
+): { shift: number; shown: boolean } {
+  const profile = spaces[index]?.profile;
+  let [first, last] = [index, index];
+  while (spaces[first - 1] && spaces[first - 1].profile === profile) first--;
+  while (spaces[last + 1] && spaces[last + 1].profile === profile) last++;
+  const still = Math.min(last, Math.max(first, position));
+  return { shift: still - index, shown: Math.round(still) === index };
+}
+
 // A trackpad swipe, from touch to lift, sent by the app as `arbalete:swipe` events (Gesture in
 // app/src/swipe.rs): `dx` is how far the content would scroll, in points.
 // `y` is where the pointer is, in points from the window's top.
@@ -272,9 +289,17 @@ class Pager {
     this.sidebar?.toggleAttribute("data-library", this.page === -1);
     // Only the first Space's page fades, and a reordering may make another page first.
     const first = String(this.spaces[0]?.id);
+    const width = this.track?.offsetWidth ?? 0;
     for (const page of this.track?.querySelectorAll<HTMLElement>("[data-space]") ?? []) {
       const fade = page.dataset.space === first ? libraryFade(this.position) : 1;
       page.style.opacity = fade < 1 ? String(fade) : "";
+      const index = this.spaces.findIndex((space) => String(space.id) === page.dataset.space);
+      const favorites = page.querySelector<HTMLElement>(".favorites");
+      if (favorites && index >= 0) {
+        const { shift, shown } = favoritesShift(this.spaces, index, this.position);
+        favorites.style.transform = shift ? `translateX(${shift * width}px)` : "";
+        favorites.style.visibility = shown ? "" : "hidden";
+      }
     }
     if (this.bubble) {
       const reach = Math.min(1, this.pull / ARM_PULL);
