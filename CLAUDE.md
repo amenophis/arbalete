@@ -1,6 +1,7 @@
 # Arbalete
 
-Cross-platform browser inspired by Arc: Rust + React/TypeScript on Chromium (CEF). Plan: [docs/PLAN.md](docs/PLAN.md).
+Browser inspired by Arc: Rust on Chromium (CEF), with a native SwiftUI interface on macOS (`app/macos`) and a
+React/TypeScript one (`ui/`) for the other platforms. Plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## Mandatory rules
 

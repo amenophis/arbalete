@@ -1,7 +1,7 @@
 # Arbalete
 
 A cross-platform browser inspired by Arc: vertical sidebar, Spaces, profiles and link routing.
-Built with Rust and React on Chromium.
+Built with Rust on Chromium, with a native SwiftUI interface on macOS.
 
 > **Status:** early development. Nothing is usable yet.
 
@@ -20,7 +20,8 @@ See [docs/PLAN.md](docs/PLAN.md) for the full plan.
 
 ## Development
 
-The tools (Rust, Node.js, pnpm, CMake, Ninja) are pinned in [.config/mise.toml](.config/mise.toml).
+The tools (Rust, Node.js, pnpm, CMake, Ninja) are pinned in [.config/mise.toml](.config/mise.toml). On macOS,
+the native interface also needs Swift, from the Xcode Command Line Tools (`xcode-select --install`).
 With [mise](https://mise.jdx.dev/) installed:
 
 ```sh
