@@ -2,8 +2,8 @@
 
 Goal: a browser that brings back the ideas that made Arc popular (vertical sidebar, Spaces, profiles, link
 routing…), **cross-platform (macOS, Linux, Windows)**, starting with macOS.
-Stack: **Rust + React/TypeScript on Chromium, through CEF in Alloy style** (see
-[decision 0001](decisions/0001-web-engine.md)).
+Stack: **Rust on Chromium, through CEF in Alloy style** (see [decision 0001](decisions/0001-web-engine.md)), with a
+**native SwiftUI interface on macOS** and a React/TypeScript one for the other platforms, for now.
 
 Arbalete is an independent project, not affiliated with The Browser Company. Arc is mentioned only to describe
 the features we take inspiration from and to import user data.
@@ -31,12 +31,20 @@ the features we take inspiration from and to import user data.
 
 ## 2. Technical choices
 
-### Rust + React/TypeScript
+### Rust, and a native interface on macOS
 
 - **Rust**: all the logic — model, persistence, profiles, auto-archive, link routing, history, imports,
   extensions, content view management.
-- **React/TypeScript**: sidebar, Command Bar, settings. It displays state and sends commands to Rust.
-  Shared types generated from Rust (`specta`).
+- **SwiftUI, on macOS** (`app/macos`): sidebar, library, Command Bar, panels above the page, settings. CEF paints
+  its windowed browsers opaque, so a web sidebar cannot show the desktop through the window like Arc's; a native
+  one blurs it (`NSVisualEffectView`). It gets the same state and events as the web interface and sends the same
+  commands (`app/src/native.rs`), through a C interface. The page is a child window of the main one, and Chromium
+  keeps every click from views inside its windows: the sidebar and the panels are child windows too, which the
+  app shows where it shows the web overlays they stand for (`sync_native_surfaces` in `app/src/shell.rs`).
+  `app/build.rs` compiles it with the Command Line Tools' `swiftc`, which cannot expand SwiftUI's macros: views
+  spell their `State` out.
+- **React/TypeScript**, elsewhere: the same surfaces, as web views. It displays state and sends commands to Rust.
+  Linux and Windows come later; how they get a translucent interface is still open.
 - **Tabs**: each tab is a content view of the window, placed to the right of the UI view.
 
 ### The web engine
@@ -108,8 +116,9 @@ Start with the minimum and split when the code calls for it (doctrine, rule 10):
 
 ```text
 app/                           desktop app: windows, commands, engine module
+app/macos/                     native macOS interface (SwiftUI)
 crates/arbalete-core/         model (profiles, Spaces, node tree, Favorites) and pure logic, no engine
-ui/                            React + TypeScript (Vite)
+ui/                            React + TypeScript (Vite), the interface on the other platforms
 ```
 
 `arbalete-core` is separate from the start for one reason only: the logic must be testable without launching
@@ -380,7 +389,8 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   either half shows that tab alone.
 - Per-OS finish: macOS vibrancy, Windows Mica, Wayland/X11. Arc's window shows the desktop through an
   `NSVisualEffectView` (behind-window blending, its material by the theme's appearance) under its theme's
-  gradient; CEF paints its windowed browsers opaque, so the sidebar cannot show it without rendering off screen.
+  gradient; so does Arbalete's on macOS, through its native interface, as CEF paints its windowed browsers
+  opaque. Linux and Windows would need their own native interface, or the web one rendered off screen.
 
 ### Phase 10 — Linux and Windows
 - CI on Linux and Windows: system libraries CEF needs, loading `libcef` in tests, Windows sandbox bootstrap.
