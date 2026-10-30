@@ -1699,8 +1699,8 @@ wrap_load_handler! {
 /// How often the "Today" tabs left unshown are archived.
 const ARCHIVE_CHECK_MS: i64 = 60_000;
 
-/// Archives the "Today" tabs left unshown longer than their profile allows, then again every
-/// minute.
+/// Archives the "Today" tabs left unshown longer than their profile allows, and suspends the
+/// pages hidden for long, then again every minute.
 fn check_archive() {
     let now = now().try_into().unwrap_or_default();
     let archived = STATE.with_borrow_mut(|state| state.sidebar.archive_due(now));
@@ -1708,6 +1708,7 @@ fn check_archive() {
         update_sidebar(|_| ());
         send_archive();
     }
+    suspend_hidden_pages();
     post_delayed_task(
         ThreadId::UI,
         Some(&mut CheckArchive::new()),
@@ -2984,6 +2985,76 @@ fn reopen_tab(rank: usize) {
 struct Live {
     profile: ProfileId,
     view: BrowserView,
+    /// Since when it is hidden, in milliseconds since the epoch.
+    hidden_since: Option<i64>,
+    /// Frozen by Chromium: its scripts and timers stop until it shows again.
+    frozen: bool,
+}
+
+/// How long a page stays hidden before it is frozen, then unloaded: its tab opens it again at its
+/// url when shown.
+const FREEZE_AFTER_MS: i64 = 5 * 60_000;
+const UNLOAD_AFTER_MS: i64 = 60 * 60_000;
+
+/// Asks each page hidden long enough, but not frozen yet or due to unload, whether it plays media
+/// (page_playing): a page playing goes on. A frozen page, which plays nothing and answers nothing,
+/// unloads once due.
+fn suspend_hidden_pages() {
+    let now = now();
+    let (ask, unload): (Vec<_>, Vec<_>) = PAGES.with_borrow(|pages| {
+        pages
+            .iter()
+            .filter_map(|(tab, live)| {
+                let hidden = now - live.hidden_since?;
+                let due = hidden >= UNLOAD_AFTER_MS;
+                (due || (hidden >= FREEZE_AFTER_MS && !live.frozen))
+                    .then(|| (*tab, live.view.clone(), live.frozen && due))
+            })
+            .partition(|(_, _, unload)| !unload)
+    });
+    for (tab, _, _) in unload {
+        close_page(tab);
+    }
+    let expression = r#"[...document.querySelectorAll("video, audio")].some((media) => !media.paused && !media.ended)"#;
+    let params = serde_json::json!({ "expression": expression, "returnByValue": true });
+    let message = serde_json::json!({ "id": extensions::PLAYING, "method": "Runtime.evaluate", "params": params });
+    for (_, view, _) in ask {
+        if let Some(host) = view.browser().and_then(|browser| browser.host()) {
+            host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+        }
+    }
+}
+
+/// Freezes or unloads a hidden page that plays no media, as long as it has been hidden; the page
+/// shown again meanwhile stays.
+pub fn page_playing(page: i32, playing: bool) {
+    let found = PAGES.with_borrow(|pages| {
+        pages.iter().find_map(|(tab, live)| {
+            let browser = live.view.browser()?;
+            (browser.identifier() == page).then(|| (*tab, live.hidden_since, browser.host()))
+        })
+    });
+    let Some((tab, Some(hidden_since), host)) = found.filter(|_| !playing) else {
+        return;
+    };
+    if now() - hidden_since >= UNLOAD_AFTER_MS {
+        return close_page(tab);
+    }
+    set_frozen(host.as_ref(), true);
+    PAGES.with_borrow_mut(|pages| {
+        if let Some(live) = pages.get_mut(&tab) {
+            live.frozen = true;
+        }
+    });
+}
+
+/// Freezes a page through Chromium's DevTools, or makes it run again.
+fn set_frozen(host: Option<&BrowserHost>, frozen: bool) {
+    let state = if frozen { "frozen" } else { "active" };
+    let message = serde_json::json!({ "id": 0, "method": "Page.setWebLifecycleState", "params": { "state": state } });
+    if let Some(host) = host {
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+    }
 }
 
 /// Loads a url in the shown page.
@@ -3073,6 +3144,8 @@ fn show_selected() {
                     Live {
                         profile,
                         view: view.clone(),
+                        hidden_since: None,
+                        frozen: false,
                     },
                 )
             });
@@ -3117,6 +3190,17 @@ fn show_content(tab: NodeId, view: &BrowserView) {
     }
     hide_content();
     SHOWN.set(Some(tab));
+    let frozen = PAGES.with_borrow_mut(|pages| {
+        let live = pages.get_mut(&tab)?;
+        live.hidden_since = None;
+        Some(std::mem::take(&mut live.frozen))
+    });
+    if frozen == Some(true) {
+        set_frozen(
+            view.browser().and_then(|browser| browser.host()).as_ref(),
+            false,
+        );
+    }
     view.set_visible(1);
     if let Some(panel) = card_panel() {
         panel.layout();
@@ -3153,7 +3237,13 @@ fn hide_content() {
     if let Some(shown) = content() {
         shown.set_visible(0);
     }
-    SHOWN.set(None);
+    if let Some(tab) = SHOWN.take() {
+        PAGES.with_borrow_mut(|pages| {
+            if let Some(live) = pages.get_mut(&tab) {
+                live.hidden_since = Some(now());
+            }
+        });
+    }
 }
 
 /// Closes the pages of the tabs closed, archived or moved to another profile's Space, whose web
