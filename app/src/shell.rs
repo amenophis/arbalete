@@ -591,8 +591,6 @@ fn send_state() {
         send_site_controls(&url);
     }
     let json = STATE.with_borrow(UiState::to_json);
-    #[cfg(target_os = "macos")]
-    crate::native::state(&json.to_string());
     let event = format!(r#"new CustomEvent("arbalete:state", {{ detail: {json} }})"#);
     dispatch(&SIDEBAR, &event);
     dispatch(&REVEAL_VIEW, &event);
@@ -803,9 +801,21 @@ fn download_command(action: DownloadAction, id: u32) {
 
 /// Dispatches a DOM event, given as JavaScript, in one of the UI's views.
 fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) {
+    #[cfg(target_os = "macos")]
+    if let Some(surface) = native_surface(view) {
+        crate::native::event(surface, event);
+    }
     if let Some(view) = view.with_borrow(Clone::clone) {
         dispatch_in(&view, event);
     }
+}
+
+/// The native interface's surface that stands for a web view, which gets its events. The
+/// revealed sidebar's events also go to the docked one's (shown_sidebar), which the native
+/// sidebar stands for in every mode.
+#[cfg(target_os = "macos")]
+fn native_surface(view: &'static LocalKey<RefCell<Option<BrowserView>>>) -> Option<&'static str> {
+    std::ptr::eq(view, &SIDEBAR).then_some("sidebar")
 }
 
 /// Dispatches an event in a view's page, like `dispatch`.
@@ -1045,7 +1055,10 @@ fn set_sidebar(mode: SidebarMode) {
     #[cfg(not(target_os = "macos"))]
     let duration = 0;
     let docked = mode == SidebarMode::Shown;
-    if docked && let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
+    if docked
+        && !cfg!(target_os = "macos")
+        && let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone)
+    {
         sidebar.set_visible(1);
     }
     if docked != (before == SidebarMode::Shown) {
@@ -1078,7 +1091,7 @@ fn set_sidebar(mode: SidebarMode) {
     }
     if floating(mode) && !floating(before) {
         reveal.set_bounds(Some(&mode.layout(&size).reveal));
-        reveal.set_visible(1);
+        reveal.set_visible((!cfg!(target_os = "macos")).into());
     }
     let from = Layout {
         card: card.bounds(),
@@ -1153,6 +1166,8 @@ fn step_slide() {
     if docking && let Some(reveal) = REVEAL.with_borrow(Clone::clone) {
         reveal.set_bounds(Some(&lerp_rect(&from.reveal, &to.reveal, eased)));
         #[cfg(target_os = "macos")]
+        place_native_sidebar();
+        #[cfg(target_os = "macos")]
         if let Some(view) = reveal_window() {
             crate::mac::float(view, 1.0 - eased);
         }
@@ -1186,7 +1201,7 @@ fn settle_sidebar() {
     let mode = SIDEBAR_MODE.get();
     let docked = mode == SidebarMode::Shown;
     if let Some(sidebar) = SIDEBAR.with_borrow(Clone::clone) {
-        sidebar.set_visible(docked.into());
+        sidebar.set_visible((docked && !cfg!(target_os = "macos")).into());
     }
     place_card();
     place_reveal();
@@ -1213,6 +1228,9 @@ fn reveal_window() -> Option<*mut std::ffi::c_void> {
 
 /// The sidebar the window shows: the docked one, or the one above the page.
 fn shown_sidebar() -> &'static LocalKey<RefCell<Option<BrowserView>>> {
+    if cfg!(target_os = "macos") {
+        return &SIDEBAR;
+    }
     match SIDEBAR_MODE.get() {
         SidebarMode::Revealed | SidebarMode::Floating => &REVEAL_VIEW,
         SidebarMode::Shown | SidebarMode::Hidden => &SIDEBAR,
@@ -1358,7 +1376,37 @@ fn place_reveal() {
     let size = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size()));
     let Some(size) = size else { return };
     reveal.set_bounds(Some(&mode.layout(&size).reveal));
-    reveal.set_visible((mode != SidebarMode::Shown).into());
+    reveal.set_visible((mode != SidebarMode::Shown && !cfg!(target_os = "macos")).into());
+    #[cfg(target_os = "macos")]
+    place_native_sidebar();
+}
+
+/// Puts the native sidebar where the web one would be: docked at the window's left edge, or
+/// floating above the page; in neither while hidden.
+#[cfg(target_os = "macos")]
+fn place_native_sidebar() {
+    let (Some(size), Some(reveal)) = (
+        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+        REVEAL.with_borrow(Clone::clone),
+    ) else {
+        return;
+    };
+    let mode = SIDEBAR_MODE.get();
+    let frame = match mode {
+        SidebarMode::Shown => Some(Rect {
+            x: 0,
+            y: 0,
+            width: docked_width(),
+            height: size.height,
+        }),
+        SidebarMode::Hidden => None,
+        SidebarMode::Revealed | SidebarMode::Floating => Some(reveal.bounds()),
+    };
+    crate::native::place(
+        frame.as_ref(),
+        mode != SidebarMode::Shown,
+        mode == SidebarMode::Revealed,
+    );
 }
 
 /// Loads the sidebar saved by the previous session; a file that cannot be read is replaced on the
@@ -3356,12 +3404,12 @@ wrap_task! {
 /// sidebar's first colors on, so that it never flashes another color.
 fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
-        // macOS draws the gradient under the window's views, which leave it showing: transparent,
-        // but not 0, which CEF takes for its theme's color.
+        // The native interface tints the window itself, over the blurred desktop, which shows
+        // through: transparent, but not 0, which CEF takes for its theme's color.
         #[cfg(target_os = "macos")]
         {
+            let _ = (grain, colors);
             window.set_background_color(0x0000_0001);
-            crate::mac::paint_window(window.window_handle(), colors, grain);
         }
         #[cfg(not(target_os = "macos"))]
         window.set_background_color(colors[0]);
@@ -3967,6 +4015,8 @@ wrap_window_delegate! {
                 }))
                 .expect("box layout");
             let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), docked_width, None);
+            // On macOS, the native sidebar stands in for it (app/macos).
+            sidebar.set_visible((!cfg!(target_os = "macos")).into());
             let mut view = View::from(&sidebar);
             window.add_child_view(Some(&mut view));
             layout.set_flex_for_view(Some(&mut view), 0);
@@ -4031,8 +4081,9 @@ wrap_window_delegate! {
             window.show();
             #[cfg(target_os = "macos")]
             {
-                crate::native::attach(window.window_handle(), SIDEBAR_WIDTH);
-                send_state();
+                crate::native::attach(window.window_handle());
+                // The native interface blurs the desktop through the window's transparent parts.
+                window.set_background_color(0x0000_0001);
             }
             WINDOW.set(Some(window));
             place_card();
@@ -4716,7 +4767,7 @@ wrap_find_handler! {
             if final_update == 1 && is_shown(browser) {
                 dispatch(
                     &FIND_VIEW,
-                    &format!(r#"new CustomEvent("arbalete:found", {{ detail: {{ count: {count}, active: {active_match_ordinal} }} }})"#),
+                    &format!(r#"new CustomEvent("arbalete:found", {{ detail: {{ "count": {count}, "active": {active_match_ordinal} }} }})"#),
                 );
             }
         }
@@ -5135,6 +5186,15 @@ wrap_task! {
 fn ui_path(url: &str) -> &str {
     let path = &url[UI_ORIGIN.len()..];
     path.split('#').next().unwrap_or(path)
+}
+
+/// The file behind a url of the UI: a tab's cached icon, a media file or an extension's icon.
+pub(crate) fn ui_file_path(url: &str) -> Option<PathBuf> {
+    let path = ui_path(url.strip_prefix(UI_ORIGIN).map(|_| url)?);
+    favicon_file(path)
+        .or_else(|| media_file(path).map(|(file, _)| file))
+        .or_else(|| extensions::icon_file(path).map(|(file, _)| file))
+        .filter(|file| file.is_file())
 }
 
 /// The cached icon a UI path names (favicon_url), which may be missing.

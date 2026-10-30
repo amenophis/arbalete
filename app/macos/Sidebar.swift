@@ -1,239 +1,754 @@
-// The native sidebar: the displayed Space's tabs over the desktop, blurred through the window and
-// tinted by the Space's theme, like Arc's. The app (app/src/native.rs) attaches it to its window,
-// sends it the state the web UI gets (UiState::to_json in app/src/shell.rs), and runs the
-// commands it sends back, the same as the web UI's (app/src/command.rs).
+// The sidebar (ui/src/App.tsx): the toolbar, the address, the displayed Space's favorites, pinned
+// and today's tabs, and the footer that switches Spaces.
+//
+// Views keep their own state in State values spelled out, without the @State macro, which only
+// Xcode can expand, not the Command Line Tools.
 
 import AppKit
 import SwiftUI
 
-/// Runs a command, given as its path, like `select/12`.
-public typealias Send = @convention(c) (UnsafePointer<CChar>) -> Void
-
-/// The part of the app's state the sidebar shows.
-struct State: Decodable {
-    var space = 0
-    var spaces: [Space] = []
-    var pages: [Page] = []
-}
-
-struct Space: Decodable, Identifiable {
-    var id: Int
-    var title: String
-    var theme: Theme
-}
-
-/// How a Space colors the window (Theme in crates/arbalete-core/src/sidebar.rs).
-struct Theme: Decodable {
-    var colors: [String]
-    var mode: String
-    var intensity: Double
-}
-
-/// A Space's tabs.
-struct Page: Decodable {
-    var space: Int
-    var selected: Int?
-    var pinned: [Item]
-    var today: [Item]
-}
-
-/// A tab, a folder of items, or tabs split side by side.
-struct Item: Decodable, Identifiable {
-    var id: Int
-    var title: String?
-    var children: [Item]?
-    var split: [Item]?
-}
-
-@MainActor
-final class Model: ObservableObject {
-    @Published var state = State()
-    let send: Send
-
-    init(send: @escaping Send) {
-        self.send = send
-    }
-
-    func run(_ path: String) {
-        path.withCString { send($0) }
-    }
-
-    var page: Page? {
-        state.pages.first { $0.space == state.space }
-    }
-
-    var theme: Theme? {
-        state.spaces.first { $0.id == state.space }?.theme
-    }
-}
-
-@MainActor private var model: Model?
-@MainActor private var blur: NSVisualEffectView?
-
-/// Puts the sidebar, `width` points wide, at the left of the window `handle` is, or is in.
-@_cdecl("arbalete_sidebar_attach")
-public func attach(_ handle: UnsafeMutableRawPointer, _ width: Double, _ send: Send) {
-    MainActor.assumeIsolated {
-        let object = Unmanaged<AnyObject>.fromOpaque(handle).takeUnretainedValue()
-        let window = (object as? NSWindow) ?? (object as? NSView)?.window
-        guard let window, let content = window.contentView else { return }
-        // The blur shows under the window's buttons too.
-        window.titlebarAppearsTransparent = true
-        let sidebar = Model(send: send)
-        // Through the window, what is behind it, blurred.
-        let effect = NSVisualEffectView(
-            frame: NSRect(x: 0, y: 0, width: width, height: content.bounds.height))
-        effect.material = .sidebar
-        effect.blendingMode = .behindWindow
-        effect.state = .followsWindowActiveState
-        effect.autoresizingMask = [.height, .maxXMargin]
-        let host = NSHostingView(rootView: SidebarView(model: sidebar))
-        host.frame = effect.bounds
-        host.autoresizingMask = [.width, .height]
-        effect.addSubview(host)
-        content.addSubview(effect)
-        model = sidebar
-        blur = effect
-    }
-}
-
-/// The app's state, as JSON.
-@_cdecl("arbalete_sidebar_state")
-public func update(_ json: UnsafePointer<CChar>) {
-    MainActor.assumeIsolated {
-        guard let model,
-            let state = try? JSONDecoder().decode(State.self, from: Data(String(cString: json).utf8))
-        else { return }
-        model.state = state
-        blur?.appearance = NSAppearance(named: isDark(model.theme) ? .darkAqua : .aqua)
-    }
-}
-
-/// Whether a theme shows light text: as its mode forces, or as its colors are, and as the system
-/// is without colors (isDark in ui/src/theme.ts).
-@MainActor func isDark(_ theme: Theme?) -> Bool {
-    guard let theme else { return systemDark() }
-    if theme.mode != "auto" { return theme.mode == "dark" }
-    if theme.colors.isEmpty { return systemDark() }
-    let total = theme.colors.reduce(0) { $0 + luminance($1) }
-    return total / Double(theme.colors.count) < 0.4
-}
-
-@MainActor func systemDark() -> Bool {
-    NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-}
-
-/// A #rrggbb color's red, green and blue, from 0 to 1.
-func channels(_ hex: String) -> [Double] {
-    let value = UInt32(hex.dropFirst(), radix: 16) ?? 0
-    return [16, 8, 0].map { Double((value >> $0) & 0xff) / 255 }
-}
-
-func luminance(_ hex: String) -> Double {
-    let linear = channels(hex).map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
-    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-}
-
-func color(_ hex: String) -> Color {
-    let rgb = channels(hex)
-    return Color(red: rgb[0], green: rgb[1], blue: rgb[2])
-}
-
 struct SidebarView: View {
-    @ObservedObject var model: Model
+    @ObservedObject var model: AppModel
 
     var body: some View {
-        let page = model.page
-        VStack(alignment: .leading, spacing: 0) {
-            // Room for the window's buttons.
-            Spacer().frame(height: 44)
+        VStack(spacing: 0) {
+            SidebarToolbar(model: model)
+            if !(model.state?.toolbar ?? false) {
+                AddressRow(model: model)
+            }
+            if let page = model.page, let space = model.space {
+                SpaceSections(model: model, page: page, space: space)
+            } else {
+                Spacer()
+            }
+            Footer(model: model)
+        }
+        .padding(.horizontal, 6)
+        .foregroundStyle(.primary)
+    }
+}
+
+/// The window's buttons' room, the sidebar's toggle, and the page's navigation buttons.
+struct SidebarToolbar: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 2) {
+            IconButton(symbol: "sidebar.left", label: "Toggle sidebar") {
+                model.run("sidebar/toggle")
+            }
+            Spacer()
+            if !(model.state?.toolbar ?? false) {
+                NavButtons(model: model)
+            }
+        }
+        .padding(.leading, 63)
+        .frame(height: 40)
+    }
+}
+
+/// The page's back, forward and reload buttons.
+struct NavButtons: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        let page = model.state?.page
+        IconButton(symbol: "chevron.left", label: "Back") { model.run("back") }
+            .disabled(!(page?.canGoBack ?? false))
+        IconButton(symbol: "chevron.right", label: "Forward") { model.run("forward") }
+            .disabled(!(page?.canGoForward ?? false))
+        IconButton(symbol: "arrow.clockwise", label: "Reload") { model.run("reload") }
+    }
+}
+
+/// A borderless button showing an SF Symbol, highlighted on hover.
+struct IconButton: View {
+    let symbol: String
+    let label: String
+    var size: CGFloat = 28
+    let action: () -> Void
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .frame(width: size, height: size)
+                .background(
+                    RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(hovered ? 0.1 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(hovered ? 1 : 0.75)
+        .onHover { hovered = $0 }
+        .help(label)
+        .accessibilityLabel(label)
+    }
+}
+
+/// The selected tab's host: a click edits the address in the Command Bar, as ⌘L does.
+struct AddressRow: View {
+    @ObservedObject var model: AppModel
+    private let _copied = State<Bool>(initialValue: false)
+    private var copied: Bool {
+        get { _copied.wrappedValue }
+        nonmutating set { _copied.wrappedValue = newValue }
+    }
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        let tab = model.activeTab
+        HStack(spacing: 2) {
+            Button {
+                model.run("overlay/edit")
+            } label: {
+                Text(tab.map { domain($0.url) } ?? "")
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 10)
+                    .frame(height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(tab?.url ?? "")
+            if tab != nil {
+                if copied {
+                    Text("Copied").font(.caption).padding(.horizontal, 6)
+                } else if hovered {
+                    IconButton(symbol: "link", label: "Copy link", size: 26) {
+                        model.run("link/copy")
+                        copied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+                    }
+                }
+                SiteControlsButton(model: model)
+                ForEach(model.state?.extensions ?? []) { ext in
+                    PinnedExtension(model: model, extension: ext)
+                }
+            }
+        }
+        .padding(.trailing, 4)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.primary.opacity(0.07)))
+        .overlay(alignment: .bottom) {
+            if let page = model.state?.page, page.loading {
+                ProgressView(value: page.progress)
+                    .progressViewStyle(.linear)
+                    .controlSize(.mini)
+                    .padding(.horizontal, 10)
+            }
+        }
+        .onHover { hovered = $0 }
+        .padding(.bottom, 8)
+    }
+}
+
+/// What the address row shows of a page's address: its host, without "www.", or the whole
+/// address without a host, like about:blank.
+func domain(_ url: String) -> String {
+    guard let host = URL(string: url)?.host, !host.isEmpty else { return url }
+    return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+}
+
+/// Opens the selected tab's site controls in a panel under the button, which the app places by
+/// the button's frame in the window.
+struct SiteControlsButton: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        GeometryReader { geometry in
+            IconButton(symbol: "slider.horizontal.3", label: "Site controls", size: 26) {
+                let frame = geometry.frame(in: .global)
+                let rect = [frame.minX, frame.minY, frame.width, frame.height]
+                    .map { String(Int($0.rounded())) }.joined(separator: "/")
+                model.run("site/show/docked/\(rect)")
+            }
+        }
+        .frame(width: 26, height: 26)
+    }
+}
+
+/// An extension's button by the address, which opens its popup or tells it it was clicked.
+struct PinnedExtension: View {
+    @ObservedObject var model: AppModel
+    let `extension`: Extension
+
+    var body: some View {
+        GeometryReader { geometry in
+            Button {
+                let frame = geometry.frame(in: .global)
+                let rect = [frame.minX, frame.minY, frame.width, frame.height]
+                    .map { String(Int($0.rounded())) }.joined(separator: "/")
+                model.run("extension/popup/\(`extension`.id)/docked/\(rect)")
+            } label: {
+                Favicon(url: `extension`.icon, size: 16)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(`extension`.name)
+        }
+        .frame(width: 26, height: 26)
+    }
+}
+
+/// A Space's page: its profile's favorites, then its header, pinned tabs and today's tabs.
+struct SpaceSections: View {
+    @ObservedObject var model: AppModel
+    let page: SpacePage
+    let space: Space
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Favorites(model: model, page: page)
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(page?.pinned ?? []) { item in
-                        Row(item: item, selected: page?.selected, model: model)
+                VStack(alignment: .leading, spacing: 1) {
+                    SpaceHeader(model: model, page: page, space: space)
+                    if !page.collapsed {
+                        ItemRows(model: model, items: page.pinned, selected: page.selected)
+                        DividerRow(model: model, clearable: !page.today.isEmpty)
                     }
-                    if !(page?.pinned.isEmpty ?? true) {
-                        Divider().padding(.vertical, 6)
+                    NewTabRow(model: model)
+                    if !page.collapsed {
+                        ItemRows(model: model, items: page.today, selected: page.selected)
                     }
+                }
+                .padding(.bottom, 8)
+            }
+            .scrollIndicators(.never)
+        }
+    }
+}
+
+/// The profile's favorites, in a grid of up to four columns.
+struct Favorites: View {
+    @ObservedObject var model: AppModel
+    let page: SpacePage
+
+    var body: some View {
+        let count = page.favorites.count
+        if count == 0 {
+            if page.favoritesHint {
+                FavoritesHint(model: model, space: page.space)
+            }
+        } else {
+            let rows = max(1, (count + 3) / 4)
+            let columns = max(1, (count + rows - 1) / rows)
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns),
+                spacing: 6
+            ) {
+                ForEach(page.favorites) { tab in
+                    FavoriteTile(model: model, tab: tab, active: tab.id == page.selected)
+                }
+            }
+            .padding(.bottom, 8)
+        }
+    }
+}
+
+struct FavoriteTile: View {
+    @ObservedObject var model: AppModel
+    let tab: Tab
+    let active: Bool
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        Button {
+            model.run("select/\(tab.id)")
+        } label: {
+            Favicon(url: tab.favicon, size: 20)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(.primary.opacity(active ? 0.22 : hovered ? 0.14 : 0.08)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(tab.label)
+        .onHover { hovered = $0 }
+        .rightClick { model.run("menu/node/\(tab.id)") }
+    }
+}
+
+/// The empty favorites' invitation to drag tabs there; its × hides it for the profile until it
+/// has favorites again.
+struct FavoritesHint: View {
+    @ObservedObject var model: AppModel
+    let space: Int
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "star").font(.system(size: 15))
+            Text("Drag tabs here to keep them close").font(.system(size: 12, weight: .semibold))
+            Text("Favorites stay one click away in every Space of this profile")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.15)))
+        .overlay(alignment: .topTrailing) {
+            IconButton(symbol: "xmark", label: "Hide this hint", size: 20) {
+                model.run("favorites/hide-hint/\(space)")
+            }
+            .padding(4)
+        }
+        .padding(.bottom, 8)
+    }
+}
+
+/// A click collapses or expands the Space; its "…" opens its menu.
+struct SpaceHeader: View {
+    @ObservedObject var model: AppModel
+    let page: SpacePage
+    let space: Space
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                model.run("space/toggle/\(page.space)")
+            } label: {
+                HStack(spacing: 8) {
+                    Group {
+                        if hovered {
+                            Image(systemName: "chevron.right")
+                                .rotationEffect(.degrees(page.collapsed ? 0 : 90))
+                                .font(.system(size: 10, weight: .semibold))
+                        } else if let emoji = space.emoji {
+                            Text(emoji).font(.system(size: 13))
+                        } else {
+                            Circle().fill(.primary).frame(width: 6, height: 6)
+                        }
+                    }
+                    .frame(width: 16)
+                    Text(space.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if hovered {
+                IconButton(symbol: "ellipsis", label: "Space options", size: 24) {
+                    model.run("menu/space/\(page.space)")
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .foregroundStyle(.secondary)
+        .onHover { hovered = $0 }
+        .rightClick { model.run("menu/space/\(page.space)") }
+    }
+}
+
+/// Between the pinned tabs and today's: hovered, it offers to close today's tabs.
+struct DividerRow: View {
+    @ObservedObject var model: AppModel
+    let clearable: Bool
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(.primary.opacity(0.12)).frame(height: 1)
+            if clearable && hovered {
+                Button("↓ Clear") { model.run("today/clear") }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .help("Close today's tabs")
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 20)
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+    }
+}
+
+struct NewTabRow: View {
+    @ObservedObject var model: AppModel
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        Button {
+            model.run("overlay/show")
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus").frame(width: 16)
+                Text("New Tab")
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(hovered ? 0.08 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// Tabs, folders and split rows, as deep as folders go.
+struct ItemRows: View {
+    @ObservedObject var model: AppModel
+    let items: [Item]
+    let selected: Int?
+    var depth = 0
+
+    var body: some View {
+        ForEach(items) { item in
+            switch item {
+            case .tab(let tab):
+                TabRow(model: model, tab: tab, active: tab.id == selected)
+                    .padding(.leading, CGFloat(depth) * 14)
+            case .folder(let id, let title, let expanded, let children):
+                FolderRow(model: model, id: id, title: title, expanded: expanded)
+                    .padding(.leading, CGFloat(depth) * 14)
+                if expanded {
+                    ItemRows(model: model, items: children, selected: selected, depth: depth + 1)
+                }
+            case .split(_, let tabs):
+                SplitRow(model: model, tabs: tabs, selected: selected)
+                    .padding(.leading, CGFloat(depth) * 14)
+            }
+        }
+    }
+}
+
+/// A tab's row: a click selects it, its × closes it; on the selected row, closing may only
+/// deselect a pinned tab. Its menu's Rename Tab edits its name in place.
+struct TabRow: View {
+    @ObservedObject var model: AppModel
+    let tab: Tab
+    let active: Bool
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Favicon(url: tab.favicon, size: 16)
+            if model.renaming == tab.id {
+                NameField(model: model, id: tab.id, title: tab.label, blank: true)
+            } else {
+                Text(tab.label).lineLimit(1)
+                if tab.muted == true {
+                    Image(systemName: "speaker.slash").font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if hovered || active {
                     Button {
-                        model.run("overlay/show")
+                        model.run("close/\(tab.id)")
                     } label: {
-                        Label("New Tab", systemImage: "plus")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 10)
-                            .frame(height: 32)
+                        Image(systemName: active ? "minus" : "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(width: 22, height: 22)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6).fill(.primary.opacity(0.08)))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    ForEach(page?.today ?? []) { item in
-                        Row(item: item, selected: page?.selected, model: model)
-                    }
+                    .opacity(hovered ? 1 : 0)
+                    .help("Close \(tab.label)")
                 }
             }
-            HStack(spacing: 10) {
-                ForEach(model.state.spaces) { space in
-                    Circle()
-                        .fill(space.id == model.state.space ? Color.primary : Color.secondary)
-                        .frame(width: 6, height: 6)
-                        .padding(4)
-                        .contentShape(Rectangle())
-                        .onTapGesture { model.run("space/\(space.id)") }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
         }
-        .padding(.horizontal, 8)
-        .background(Tint(theme: model.theme))
+        .padding(.leading, 10)
+        .padding(.trailing, 5)
+        .frame(height: 34)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.primary.opacity(active ? 0.15 : hovered ? 0.07 : 0))
+                .shadow(color: .black.opacity(active ? 0.08 : 0), radius: 1, y: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { model.run("select/\(tab.id)") }
+        .onHover { hovered = $0 }
+        .rightClick { model.run("menu/node/\(tab.id)") }
     }
 }
 
-/// The theme's colors over the blur, the stronger the more intense.
-struct Tint: View {
-    let theme: Theme?
+/// A click collapses or expands the folder, a double click edits its title.
+struct FolderRow: View {
+    @ObservedObject var model: AppModel
+    let id: Int
+    let title: String
+    let expanded: Bool
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
 
     var body: some View {
-        if let theme, !theme.colors.isEmpty {
-            LinearGradient(
-                colors: theme.colors.map(color),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .opacity(0.2 + 0.6 * theme.intensity)
+        HStack(spacing: 8) {
+            Image(systemName: expanded ? "folder" : "folder.fill")
+                .font(.system(size: 13))
+                .frame(width: 16)
+            if model.renaming == id {
+                NameField(model: model, id: id, title: title, blank: false)
+            } else {
+                Text(title).lineLimit(1)
+                Spacer(minLength: 0)
+            }
         }
+        .padding(.horizontal, 10)
+        .frame(height: 34)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(hovered ? 0.07 : 0)))
+        .contentShape(Rectangle())
+        .gesture(
+            TapGesture(count: 2).onEnded { model.renaming = id }
+                .exclusively(before: TapGesture().onEnded { model.run("toggle/\(id)") }))
+        .onHover { hovered = $0 }
+        .rightClick { model.run("menu/node/\(id)") }
     }
 }
 
-struct Row: View {
-    let item: Item
+/// A row's name being edited. Enter and leaving the field save it, Escape keeps the old one. A
+/// blank folder name keeps the old one; a blank tab name gives the tab its page's title back.
+struct NameField: View {
+    @ObservedObject var model: AppModel
+    let id: Int
+    let title: String
+    let blank: Bool
+    private let _text = State<String>(initialValue: "")
+    private var text: String {
+        get { _text.wrappedValue }
+        nonmutating set { _text.wrappedValue = newValue }
+    }
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: _text.projectedValue)
+            .textFieldStyle(.plain)
+            .focused($focused)
+            .onAppear {
+                text = title
+                focused = true
+            }
+            .onSubmit { focused = false }
+            .onExitCommand {
+                text = title
+                focused = false
+            }
+            .onChange(of: focused) { _, now in
+                guard !now else { return }
+                let value = text.trimmingCharacters(in: .whitespaces)
+                if (!value.isEmpty || blank) && value != title {
+                    model.run("rename/\(id)/\(percentEncoded(value))")
+                }
+                model.renaming = nil
+            }
+    }
+}
+
+/// Two tabs in one row: a click on either shows that tab.
+struct SplitRow: View {
+    @ObservedObject var model: AppModel
+    let tabs: [Tab]
     let selected: Int?
-    let model: Model
 
     var body: some View {
-        if let children = item.children {
-            Label(item.title ?? "", systemImage: "folder")
-                .padding(.horizontal, 10)
-                .frame(height: 32)
-            ForEach(children) { child in
-                Row(item: child, selected: selected, model: model).padding(.leading, 14)
-            }
-        } else if let split = item.split {
-            ForEach(split) { tab in
-                Row(item: tab, selected: selected, model: model)
-            }
-        } else {
-            Text(item.title ?? "")
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .frame(height: 32)
+        HStack(spacing: 4) {
+            ForEach(tabs) { tab in
+                HStack(spacing: 6) {
+                    Favicon(url: tab.favicon, size: 14)
+                    Text(tab.label).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 30)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.primary.opacity(item.id == selected ? 0.12 : 0))
-                )
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(.primary.opacity(tab.id == selected ? 0.15 : 0.06)))
                 .contentShape(Rectangle())
-                .onTapGesture { model.run("select/\(item.id)") }
+                .onTapGesture { model.run("select/\(tab.id)") }
+                .rightClick { model.run("menu/node/\(tab.id)") }
+                .help(tab.label)
+            }
         }
+        .padding(.horizontal, 2)
+        .frame(height: 34)
     }
+}
+
+/// A tab's icon, or a placeholder without one.
+struct Favicon: View {
+    let url: String?
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let image = uiImage(url) {
+                Image(nsImage: image).resizable().interpolation(.high)
+            } else {
+                RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.15))
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+/// The library button, one icon per Space, and the "+" that creates a Space.
+struct Footer: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            IconButton(symbol: "books.vertical", label: "Library") {
+                model.run("library/show")
+            }
+            Spacer()
+            HStack(spacing: 2) {
+                ForEach(model.state?.spaces ?? []) { space in
+                    SpaceIcon(model: model, space: space, displayed: space.id == model.state?.space)
+                }
+            }
+            Spacer()
+            Menu {
+                Button("New Space…") { newSpace(model) }
+                Button("New Folder") { model.run("folder/new") }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                Divider()
+                Button("New Tab") { model.run("overlay/show") }
+                    .keyboardShortcut("t", modifiers: .command)
+            } label: {
+                Image(systemName: "plus").font(.system(size: 13, weight: .medium))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .frame(width: 28, height: 28)
+            .help("New")
+        }
+        .frame(height: 40)
+    }
+}
+
+/// A Space's emoji, or a dot without one: a click displays the Space, or edits its theme when
+/// it is the displayed one.
+struct SpaceIcon: View {
+    @ObservedObject var model: AppModel
+    let space: Space
+    let displayed: Bool
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        Button {
+            model.run(displayed ? "theme/show/\(space.id)" : "space/\(space.id)")
+        } label: {
+            Group {
+                if let emoji = space.emoji {
+                    Text(emoji).font(.system(size: 13)).opacity(displayed ? 1 : 0.5)
+                } else {
+                    Circle()
+                        .fill(.primary.opacity(displayed ? 0.9 : 0.35))
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .frame(width: 24, height: 24)
+            .background(
+                RoundedRectangle(cornerRadius: 6).fill(.primary.opacity(hovered ? 0.1 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(space.title)
+        .onHover { hovered = $0 }
+        .rightClick { model.run("menu/space/\(space.id)") }
+    }
+}
+
+extension View {
+    /// Runs `action` on a right click, which SwiftUI views otherwise leave to a context menu.
+    func rightClick(_ action: @escaping () -> Void) -> some View {
+        overlay(RightClick(action: action))
+    }
+}
+
+/// Catches right clicks only, letting every other event through to the views under it.
+struct RightClick: NSViewRepresentable {
+    let action: () -> Void
+
+    func makeNSView(context: Context) -> Catcher {
+        let view = Catcher()
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ view: Catcher, context: Context) {
+        view.action = action
+    }
+
+    final class Catcher: NSView {
+        var action: () -> Void = {}
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let type = NSApp.currentEvent?.type
+            let right =
+                type == .rightMouseDown
+                || (type == .leftMouseDown && NSApp.currentEvent?.modifierFlags.contains(.control) == true)
+            return right ? super.hitTest(point) : nil
+        }
+
+        override func rightMouseDown(with event: NSEvent) { action() }
+        override func mouseDown(with event: NSEvent) { action() }
+    }
+}
+
+/// Asks for a new Space's name, then creates it.
+@MainActor func newSpace(_ model: AppModel) {
+    let alert = NSAlert()
+    alert.messageText = "New Space"
+    alert.addButton(withTitle: "Create")
+    alert.addButton(withTitle: "Cancel")
+    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+    field.placeholderString = "Name"
+    alert.accessoryView = field
+    alert.window.initialFirstResponder = field
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    let title = field.stringValue.trimmingCharacters(in: .whitespaces)
+    guard !title.isEmpty else { return }
+    model.run("space/create/purple//\(percentEncoded(title))")
+}
+
+/// A value as a command's path holds it.
+func percentEncoded(_ value: String) -> String {
+    value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
 }
