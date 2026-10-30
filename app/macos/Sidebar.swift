@@ -649,6 +649,8 @@ struct Footer: View {
                 Divider()
                 Button("New Tab") { model.run("overlay/show") }
                     .keyboardShortcut("t", modifiers: .command)
+                Divider()
+                Button("Profiles…") { model.profilesShown = true }
             } label: {
                 Image(systemName: "plus").font(.system(size: 13, weight: .medium))
             }
@@ -657,6 +659,9 @@ struct Footer: View {
             .fixedSize()
             .frame(width: 28, height: 28)
             .help("New")
+            .popover(isPresented: $model.profilesShown, arrowEdge: .top) {
+                ProfilesView(model: model)
+            }
         }
         .frame(height: 40)
     }

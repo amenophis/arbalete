@@ -19,6 +19,8 @@ final class AppModel: ObservableObject {
     @Published var history: [Visit] = []
     /// The sidebar shows the library, on a section, under what its field searches.
     @Published var libraryShown = false
+    /// The list of profiles shows above the footer.
+    @Published var profilesShown = false
     @Published var section = LibrarySection.spaces
     @Published var query = "" {
         didSet { if section == .history { searchHistory() } }
@@ -78,6 +80,8 @@ final class AppModel: ObservableObject {
             if let found = try? JSONDecoder().decode(Found.self, from: detail), found.text == query {
                 history = found.entries
             }
+        case "arbalete:rename-profile":
+            profilesShown = true
         case "arbalete:library":
             openLibrary(.spaces)
         case "arbalete:open-library":
