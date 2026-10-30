@@ -383,6 +383,10 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   until Split View shows both tabs side by side, a split row opens its first tab, and a click on
   either half shows that tab alone.
 - Per-OS finish: macOS vibrancy, Windows Mica, Wayland/X11.
+- Several tabs selected at once, like Arc: ⌘-click adds or removes a tab, ⇧-click selects a range, all
+  highlighted. Dragging one of them moves the whole selection, in its order: into the pinned section, into
+  the favorites (as far as they have room), into a folder, or to another Space by holding it over that
+  Space's icon in the switcher. Closing, archiving or moving from the menu acts on the whole selection too.
 
 ### Phase 10 — Linux and Windows
 - CI on Linux and Windows: system libraries CEF needs, loading `libcef` in tests, Windows sandbox bootstrap.
