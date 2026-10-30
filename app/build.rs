@@ -17,6 +17,7 @@ fn main() {
     for source in &sources {
         println!("cargo:rerun-if-changed={}", source.display());
     }
+    println!("cargo:rerun-if-changed=macos/Bridge.h");
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let library = out.join("libArbaleteUI.a");
     let arch = match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
@@ -33,6 +34,7 @@ fn main() {
         ])
         .args(["-module-name", "ArbaleteUI", "-target"])
         .arg(format!("{arch}-apple-macos14.0"))
+        .args(["-import-objc-header", "macos/Bridge.h"])
         .arg("-o")
         .arg(&library)
         .args(&sources)
