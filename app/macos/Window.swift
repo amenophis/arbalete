@@ -37,8 +37,9 @@ struct BackdropTint: View {
     }
 }
 
-/// The sidebar's place in the window: docked, in it, it shows the backdrop through; floating above
-/// the page, which is a window of its own, it is a child window, which blurs the page under it.
+/// The sidebar, in a child window of the main one, whose own views Chromium keeps every click
+/// from: docked, it shows the backdrop through, and its transparent corner the window's buttons,
+/// which clicks there reach; floating above the page, it blurs the page under it.
 @MainActor
 final class SidebarHost {
     private let window: NSWindow
@@ -87,28 +88,15 @@ final class SidebarHost {
         effect.isHidden = !floating
         container.layer?.cornerRadius = floating ? 10 : 0
         container.layer?.masksToBounds = floating
-        container.isHidden = frame == nil
-        guard let frame, let content = window.contentView else {
-            panel.place(in: window, nil)
-            return
+        panel.hasShadow = floating
+        panel.place(in: window, frame)
+        if container.superview != panel.contentView {
+            panel.contentView?.addSubview(container)
         }
-        if floating {
-            panel.hasShadow = true
-            panel.place(in: window, frame)
-            if container.superview != panel.contentView {
-                panel.contentView?.addSubview(container)
-            }
-            container.frame = panel.contentView?.bounds ?? .zero
-            panel.invalidateShadow()
-        } else {
-            panel.place(in: window, nil)
-            if container.superview != content {
-                content.addSubview(container, positioned: .below, relativeTo: edge)
-            }
-            let y = content.isFlipped ? frame.minY : content.bounds.height - frame.maxY
-            container.frame = NSRect(x: frame.minX, y: y, width: frame.width, height: frame.height)
-        }
+        container.frame = panel.contentView?.bounds ?? .zero
+        container.autoresizingMask = [.width, .height]
         container.subviews.forEach { $0.frame = container.bounds }
+        panel.invalidateShadow()
     }
 }
 

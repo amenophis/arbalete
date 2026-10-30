@@ -42,7 +42,7 @@ struct SidebarToolbar: View {
                 NavButtons(model: model)
             }
         }
-        .padding(.leading, 63)
+        .padding(.leading, 76)
         .frame(height: 40)
     }
 }
@@ -161,14 +161,14 @@ func domain(_ url: String) -> String {
 /// the button's frame in the window.
 struct SiteControlsButton: View {
     @ObservedObject var model: AppModel
+    /// Where the button is: "docked" for a frame in the window, or "toolbar" for one in the bar
+    /// above the page.
+    var view = "docked"
 
     var body: some View {
         GeometryReader { geometry in
             IconButton(symbol: "slider.horizontal.3", label: "Site controls", size: 26) {
-                let frame = geometry.frame(in: .global)
-                let rect = [frame.minX, frame.minY, frame.width, frame.height]
-                    .map { String(Int($0.rounded())) }.joined(separator: "/")
-                model.run("site/show/docked/\(rect)")
+                model.run("site/show/\(view)/\(inMainWindow(geometry.frame(in: .global)))")
             }
         }
         .frame(width: 26, height: 26)
@@ -179,14 +179,13 @@ struct SiteControlsButton: View {
 struct PinnedExtension: View {
     @ObservedObject var model: AppModel
     let `extension`: Extension
+    var view = "docked"
 
     var body: some View {
         GeometryReader { geometry in
             Button {
-                let frame = geometry.frame(in: .global)
-                let rect = [frame.minX, frame.minY, frame.width, frame.height]
-                    .map { String(Int($0.rounded())) }.joined(separator: "/")
-                model.run("extension/popup/\(`extension`.id)/docked/\(rect)")
+                let rect = inMainWindow(geometry.frame(in: .global))
+                model.run("extension/popup/\(`extension`.id)/\(view)/\(rect)")
             } label: {
                 Favicon(url: `extension`.icon, size: 16)
                     .frame(width: 26, height: 26)
@@ -751,4 +750,22 @@ struct RightClick: NSViewRepresentable {
 /// A value as a command's path holds it.
 func percentEncoded(_ value: String) -> String {
     value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+}
+
+/// A view's frame, from the top left corner of the window it shows in, as a command's path gives
+/// it: in the main window, from its content's top left corner, as "x/y/width/height".
+@MainActor func inMainWindow(_ frame: CGRect) -> String {
+    var rect = frame
+    if let from = NSApp.currentEvent?.window, let main = mainWindow, from != main,
+        let fromHeight = from.contentView?.frame.height,
+        let mainHeight = main.contentView?.frame.height
+    {
+        let bottomLeft = NSRect(
+            x: frame.minX, y: fromHeight - frame.maxY, width: frame.width, height: frame.height)
+        let inMain = main.convertFromScreen(from.convertToScreen(bottomLeft))
+        rect = CGRect(
+            x: inMain.minX, y: mainHeight - inMain.maxY, width: inMain.width, height: inMain.height)
+    }
+    return [rect.minX, rect.minY, rect.width, rect.height]
+        .map { String(Int($0.rounded())) }.joined(separator: "/")
 }

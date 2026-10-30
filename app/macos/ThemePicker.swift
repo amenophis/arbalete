@@ -1,0 +1,509 @@
+// A Space's theme, edited like Arc's (ui/src/ThemePicker.tsx, show_theme_picker in
+// app/src/shell.rs): dots on a pad, whose angle is a color's hue and distance its lightness, the
+// first one leading; the system's, a light or a dark appearance; a palette to start from; the
+// colors' intensity on a wavy slider; and their grain on a dial. Every change shows at once in
+// the window. Escape and losing the keyboard close it.
+
+import AppKit
+import SwiftUI
+
+/// The palette's pages, nine colors each.
+let palettes: [[String]] = [
+    ["#f3efe8", "#ec9cbd", "#9a72aa", "#e5525a", "#f47c45", "#f3d14b", "#38d27f", "#62b4d8", "#5a5d84"],
+    ["#fdfbf8", "#fbe8f1", "#ead3ea", "#f6cdd2", "#fae0d3", "#fdf8e5", "#e2fbea", "#ddf1fb", "#c6c7e3"],
+    ["#4a3b58", "#623855", "#844545", "#a6704a", "#d0b46b", "#cfcca8", "#84a985", "#365f4b", "#2e4467"],
+    ["#ffffff", "#e6e6e6", "#cccccc", "#b3b3b3", "#808080", "#666666", "#333333", "#1a1a1a", "#000000"],
+]
+
+let maxColors = 3
+
+/// A color's hue, from 0 to 360, saturation and lightness, from 0 to 1.
+struct Hsl {
+    var h: Double
+    var s: Double
+    var l: Double
+}
+
+func toHsl(_ hex: String) -> Hsl {
+    let rgb = channels(hex)
+    let (r, g, b) = (rgb[0], rgb[1], rgb[2])
+    let (high, low) = (max(r, g, b), min(r, g, b))
+    let l = (high + low) / 2
+    if high == low { return Hsl(h: 0, s: 0, l: l) }
+    let d = high - low
+    let s = l > 0.5 ? d / (2 - high - low) : d / (high + low)
+    let h =
+        high == r ? (g - b) / d + (g < b ? 6 : 0) : high == g ? (b - r) / d + 2 : (r - g) / d + 4
+    return Hsl(h: h * 60, s: s, l: l)
+}
+
+func fromHsl(_ hsl: Hsl) -> String {
+    let a = hsl.s * min(hsl.l, 1 - hsl.l)
+    func channel(_ n: Double) -> Int {
+        let k = (n + hsl.h / 30).truncatingRemainder(dividingBy: 12)
+        let value = hsl.l - a * max(-1, min(k - 3, 9 - k, 1))
+        return Int((value * 255).rounded())
+    }
+    return String(format: "#%02x%02x%02x", channel(0), channel(8), channel(4))
+}
+
+/// The pad: a dot's angle around the center is the color's hue, clockwise from the right, and
+/// its distance from the center its lightness, across `range`, at one saturation.
+struct Wheel {
+    var saturation: Double
+    var range: (Double, Double)
+}
+
+/// A dot at the pad's edge sits this far from the center, its radius being 1.
+private let edge = 0.99
+
+/// The pad for a theme, from its leading color: as saturated, and its lightness ±0.25 in auto
+/// mode, or within the light or dark half the mode forces. Without colors, the whole range.
+func wheelFor(_ theme: Theme) -> Wheel {
+    let (lowest, highest) = (0.01, 0.97)
+    guard let lead = theme.colors.first else {
+        return Wheel(saturation: 0.8, range: (lowest, highest))
+    }
+    let hsl = toHsl(lead)
+    let saturation = max(0.01, hsl.s)
+    if theme.mode == "auto" {
+        return Wheel(
+            saturation: saturation, range: (max(lowest, hsl.l - 0.25), min(highest, hsl.l + 0.25)))
+    }
+    let (low, high) = theme.mode == "dark" ? (lowest, 0.425) : (0.575, highest)
+    return Wheel(saturation: saturation, range: (min(low, hsl.l), max(high, hsl.l)))
+}
+
+/// The color at a point of the pad, from its center, its radius being 1.
+func colorAt(_ wheel: Wheel, _ x: Double, _ y: Double) -> String {
+    var hue = atan2(y, x) * 180 / .pi
+    if hue < 0 { hue += 360 }
+    let t = min(1, max(0, hypot(x, y) / edge))
+    let (low, high) = wheel.range
+    return fromHsl(Hsl(h: hue, s: wheel.saturation, l: low + t * (high - low)))
+}
+
+/// Where a color sits on the pad, from its center, its radius being 1.
+func pointOf(_ wheel: Wheel, _ color: String) -> CGPoint {
+    let hsl = toHsl(color)
+    let (low, high) = wheel.range
+    let t = high > low ? min(1, max(0, (hsl.l - low) / (high - low))) : 0
+    let angle = hsl.h * .pi / 180
+    return CGPoint(x: cos(angle) * t * edge, y: sin(angle) * t * edge)
+}
+
+/// The colors that go with a leading one, as many as the theme holds: its complement for two,
+/// both sides of it for three, as far from the center.
+func harmony(_ color: String, _ count: Int) -> [String] {
+    let hsl = toHsl(color)
+    let offsets: [Double] = [[], [0], [0, 180], [0, 150, 210]][min(count, 3)]
+    return offsets.map { offset in
+        offset == 0
+            ? color
+            : fromHsl(Hsl(h: (hsl.h + offset).truncatingRemainder(dividingBy: 360), s: hsl.s, l: hsl.l))
+    }
+}
+
+@MainActor
+final class ThemePickerModel: ObservableObject {
+    @Published var space = 0
+    @Published var theme = Theme(colors: [], mode: "auto", intensity: 1, noise: 0)
+    @Published var wheel = Wheel(saturation: 0.8, range: (0.01, 0.97))
+    @Published var page = 0
+    let app: AppModel
+    /// The theme to send next, at most one every frame's time while a dot or a knob moves.
+    private var pending: Theme?
+
+    init(app: AppModel) {
+        self.app = app
+    }
+
+    func handle(_ name: String, _ detail: Data) {
+        guard name == "arbalete:theme" else { return }
+        struct Shown: Decodable {
+            var space: Int
+            var theme: Theme
+        }
+        guard let shown = try? JSONDecoder().decode(Shown.self, from: detail) else { return }
+        space = shown.space
+        theme = shown.theme
+        wheel = wheelFor(shown.theme)
+    }
+
+    func change(_ update: (inout Theme) -> Void, rewheel: Bool = false) {
+        update(&theme)
+        if rewheel { wheel = wheelFor(theme) }
+        if pending == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+                guard let self, let sent = self.pending else { return }
+                self.pending = nil
+                let json = (try? JSONEncoder().encode(sent)).flatMap { String(data: $0, encoding: .utf8) }
+                self.app.run("space/theme/\(self.space)/\(percentEncoded(json ?? ""))")
+            }
+        }
+        pending = theme
+    }
+}
+
+struct ThemePickerView: View {
+    @ObservedObject var picker: ThemePickerModel
+
+    var body: some View {
+        let theme = picker.theme
+        let dark = isDark(theme)
+        let neutral = dark ? "#1b1820" : "#eeebf3"
+        let stops = theme.colors.isEmpty
+            ? [neutral] : theme.colors.map { mix($0, neutral, theme.intensity) }
+        VStack(spacing: 10) {
+            Pad(picker: picker)
+            ModeButtons(picker: picker)
+            Palette(picker: picker)
+            HStack {
+                SineSlider(value: theme.intensity, enabled: !theme.colors.isEmpty) { intensity in
+                    picker.change { $0.intensity = intensity }
+                }
+                Spacer()
+                Dial(value: theme.noise, enabled: !theme.colors.isEmpty) { noise in
+                    picker.change { $0.noise = noise }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: stops.map(color), startPoint: .topLeading, endPoint: .bottomTrailing)
+                Color(red: 0.15, green: 0.13, blue: 0.18).opacity(dark ? 0.8 : 0.35)
+            })
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
+    }
+}
+
+/// The pad's dots: a click on an empty pad picks the first color, a drag moves a dot, the
+/// leading one taking the others along; − and + remove the last color and add one that goes
+/// with the others.
+struct Pad: View {
+    @ObservedObject var picker: ThemePickerModel
+    private let dragged = State<Int?>(initialValue: nil)
+
+    var body: some View {
+        let colors = picker.theme.colors
+        let wheel = picker.wheel
+        GeometryReader { geometry in
+            let size = geometry.size
+            let radius = min(size.width, size.height) / 2
+            let point = { (location: CGPoint) in
+                CGPoint(
+                    x: (location.x - size.width / 2) / radius,
+                    y: (location.y - size.height / 2) / radius)
+            }
+            ZStack {
+                RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.05))
+                DotGrid().clipShape(RoundedRectangle(cornerRadius: 16))
+                if colors.isEmpty {
+                    Text("Tap to pick a color for this space")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                ForEach(Array(colors.enumerated()), id: \.offset) { index, hex in
+                    let at = pointOf(wheel, hex)
+                    Circle()
+                        .fill(color(hex))
+                        .overlay(Circle().strokeBorder(.white, lineWidth: index == 0 ? 3 : 2))
+                        .frame(width: index == 0 ? 30 : 22, height: index == 0 ? 30 : 22)
+                        .shadow(radius: 2)
+                        .position(
+                            x: size.width / 2 + at.x * radius, y: size.height / 2 + at.y * radius)
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        let at = point(drag.location)
+                        if dragged.wrappedValue == nil {
+                            dragged.wrappedValue = dotUnder(drag.startLocation, size, radius)
+                            if colors.isEmpty {
+                                picker.change({ $0.colors = [colorAt(wheel, at.x, at.y)] })
+                                return
+                            }
+                        }
+                        move(dragged.wrappedValue ?? 0, at)
+                    }
+                    .onEnded { _ in dragged.wrappedValue = nil })
+            .overlay(alignment: .bottomTrailing) {
+                HStack(spacing: 6) {
+                    PickerButton(symbol: "minus", label: "Remove a color") {
+                        picker.change { $0.colors.removeLast() }
+                    }
+                    .disabled(colors.isEmpty)
+                    PickerButton(symbol: "plus", label: "Add a color") {
+                        let lead = colors.first ?? colorAt(wheel, 0, -0.5)
+                        picker.change {
+                            $0.colors += harmony(lead, colors.count + 1).dropFirst(colors.count)
+                        }
+                    }
+                    .disabled(colors.count == maxColors)
+                }
+                .padding(8)
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    /// The dot under a point, the last drawn first; the leading one elsewhere.
+    private func dotUnder(_ location: CGPoint, _ size: CGSize, _ radius: CGFloat) -> Int {
+        for (index, hex) in picker.theme.colors.enumerated().reversed() {
+            let at = pointOf(picker.wheel, hex)
+            let center = CGPoint(x: size.width / 2 + at.x * radius, y: size.height / 2 + at.y * radius)
+            if hypot(location.x - center.x, location.y - center.y) < 16 { return index }
+        }
+        return 0
+    }
+
+    private func move(_ index: Int, _ at: CGPoint) {
+        let wheel = picker.wheel
+        let colors = picker.theme.colors
+        guard index < colors.count else { return }
+        let color = colorAt(wheel, at.x, at.y)
+        if index > 0 {
+            picker.change { $0.colors[index] = color }
+            return
+        }
+        // The other dots turn and stretch with the leading one.
+        let from = pointOf(wheel, colors[0])
+        let turn = atan2(at.y, at.x) - atan2(from.y, from.x)
+        let length = hypot(from.x, from.y)
+        let stretch = length > 0.01 ? hypot(at.x, at.y) / length : 1
+        let others = colors.dropFirst().map { hex in
+            let p = pointOf(wheel, hex)
+            let (c, s) = (cos(turn), sin(turn))
+            return colorAt(wheel, (p.x * c - p.y * s) * stretch, (p.x * s + p.y * c) * stretch)
+        }
+        picker.change { $0.colors = [color] + others }
+    }
+}
+
+/// The pad's grid of faint dots.
+struct DotGrid: View {
+    var body: some View {
+        Canvas { context, size in
+            var x: CGFloat = 3
+            while x < size.width {
+                var y: CGFloat = 3
+                while y < size.height {
+                    context.fill(
+                        Path(ellipseIn: CGRect(x: x - 0.8, y: y - 0.8, width: 1.6, height: 1.6)),
+                        with: .color(.white.opacity(0.2)))
+                    y += 6
+                }
+                x += 6
+            }
+        }
+    }
+}
+
+struct PickerButton: View {
+    let symbol: String
+    let label: String
+    var pressed = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(.white.opacity(pressed ? 0.3 : 0.12)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+    }
+}
+
+struct ModeButtons: View {
+    @ObservedObject var picker: ThemePickerModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(
+                [("auto", "Automatic appearance", "sparkles"), ("light", "Light appearance", "sun.max"),
+                 ("dark", "Dark appearance", "moon.stars")], id: \.0
+            ) { mode, label, symbol in
+                PickerButton(symbol: symbol, label: label, pressed: picker.theme.mode == mode) {
+                    picker.change({ $0.mode = mode }, rewheel: true)
+                }
+            }
+        }
+    }
+}
+
+struct Palette: View {
+    @ObservedObject var picker: ThemePickerModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                picker.page -= 1
+            } label: {
+                Image(systemName: "chevron.left").frame(width: 18, height: 24)
+            }
+            .buttonStyle(.plain)
+            .disabled(picker.page == 0)
+            .help("Previous colors")
+            ForEach(palettes[picker.page], id: \.self) { hex in
+                Button {
+                    let colors = harmony(hex, max(1, picker.theme.colors.count))
+                    picker.change({ $0.colors = colors }, rewheel: true)
+                } label: {
+                    Circle().fill(color(hex)).frame(width: 24, height: 24)
+                        .overlay(Circle().strokeBorder(.white.opacity(0.3)))
+                }
+                .buttonStyle(.plain)
+                .help(hex)
+            }
+            Button {
+                picker.page += 1
+            } label: {
+                Image(systemName: "chevron.right").frame(width: 18, height: 24)
+            }
+            .buttonStyle(.plain)
+            .disabled(picker.page == palettes.count - 1)
+            .help("More colors")
+        }
+    }
+}
+
+/// The colors' intensity, from 0 to 1: a wave up to the thumb, as tall as the value, and its
+/// rest dimmed past it.
+struct SineSlider: View {
+    let value: Double
+    let enabled: Bool
+    let onChange: (Double) -> Void
+    private let size = CGSize(width: 228, height: 64)
+    private let waves = 6.0
+    private let amplitude = 13.0
+
+    var body: some View {
+        Canvas { context, size in
+            let thumb = 14 + value * (size.width - 28)
+            let track = Path(
+                roundedRect: CGRect(x: 0, y: size.height / 2 - 16, width: size.width, height: 32),
+                cornerRadius: 16)
+            context.fill(track, with: .color(.white.opacity(0.1)))
+            func wave(_ from: Double, _ to: Double) -> Path {
+                var path = Path()
+                var x = from
+                while x <= to {
+                    let y = size.height / 2 - sin(x / size.width * waves * 2 * .pi) * amplitude * value
+                    if x == from { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
+                    x += 2
+                }
+                return path
+            }
+            context.stroke(wave(thumb, size.width - 12), with: .color(.white.opacity(0.25)), lineWidth: 3)
+            context.stroke(wave(12, thumb), with: .color(.white), lineWidth: 3)
+            context.fill(
+                Path(roundedRect: CGRect(x: thumb - 14, y: 4, width: 28, height: size.height - 8), cornerRadius: 14),
+                with: .color(.white))
+        }
+        .frame(width: size.width, height: size.height)
+        .opacity(enabled ? 1 : 0.4)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0).onChanged { drag in
+                guard enabled else { return }
+                onChange(min(1, max(0, (drag.location.x - 14) / (size.width - 28))))
+            })
+        .accessibilityElement()
+        .accessibilityLabel("Intensity")
+        .accessibilityValue("\(Int(value * 100))")
+        .accessibilityAdjustableAction { direction in
+            guard enabled else { return }
+            onChange(min(1, max(0, value + (direction == .increment ? 0.05 : -0.05))))
+        }
+    }
+}
+
+/// The grain, from 0 to 1, on a dial: the dots up to its handle light up, and the disk shows it.
+struct Dial: View {
+    let value: Double
+    let enabled: Bool
+    let onChange: (Double) -> Void
+    private let dots = 24
+    /// The turn the dots span from the top, clockwise, leaving a gap before the top.
+    private let span = 2 * Double.pi - 0.25
+    private let size = 92.0
+
+    var body: some View {
+        Canvas { context, canvas in
+            let center = CGPoint(x: size / 2, y: size / 2)
+            let ring = size / 2 - 6
+            let angle = { (fraction: Double) in fraction * span - .pi / 2 }
+            for i in 0..<dots {
+                let fraction = Double(i) / Double(dots - 1)
+                let a = angle(fraction)
+                let lit = enabled && value > 0 && fraction <= value + 1e-6
+                let at = CGPoint(x: center.x + cos(a) * ring, y: center.y + sin(a) * ring)
+                context.fill(
+                    Path(ellipseIn: CGRect(x: at.x - 2.6, y: at.y - 2.6, width: 5.2, height: 5.2)),
+                    with: .color(.white.opacity(lit ? 1 : 0.25)))
+            }
+            let disk = CGRect(x: center.x - (ring - 12), y: center.y - (ring - 12), width: 2 * (ring - 12), height: 2 * (ring - 12))
+            context.fill(Path(ellipseIn: disk), with: .color(.white.opacity(0.12)))
+            // The grain on the disk: specks, the more the grainier.
+            var generator = SplitMix(seed: 7)
+            for _ in 0..<Int(400 * value) {
+                let r = sqrt(Double(generator.next() % 1000) / 1000) * (ring - 12)
+                let t = Double(generator.next() % 1000) / 1000 * 2 * .pi
+                context.fill(
+                    Path(CGRect(x: center.x + cos(t) * r, y: center.y + sin(t) * r, width: 1, height: 1)),
+                    with: .color(.white.opacity(0.5)))
+            }
+            let handle = angle(value)
+            var line = Path()
+            line.move(to: CGPoint(x: center.x + cos(handle) * (ring - 6), y: center.y + sin(handle) * (ring - 6)))
+            line.addLine(to: CGPoint(x: center.x + cos(handle) * (ring + 4), y: center.y + sin(handle) * (ring + 4)))
+            context.stroke(line, with: .color(.white), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        }
+        .frame(width: size, height: size)
+        .opacity(enabled ? 1 : 0.4)
+        .contentShape(Circle())
+        .gesture(
+            DragGesture(minimumDistance: 0).onChanged { drag in
+                guard enabled else { return }
+                let x = drag.location.x - size / 2
+                let y = drag.location.y - size / 2
+                let from = (atan2(y, x) + .pi / 2 + 2 * .pi).truncatingRemainder(dividingBy: 2 * .pi)
+                onChange(min(1, from / span))
+            })
+        .accessibilityElement()
+        .accessibilityLabel("Grain")
+        .accessibilityValue("\(Int(value * 100))")
+        .accessibilityAdjustableAction { direction in
+            guard enabled else { return }
+            onChange(min(1, max(0, value + (direction == .increment ? 0.05 : -0.05))))
+        }
+    }
+}
+
+/// A small seeded generator, so that the dial's grain stays still as it redraws.
+struct SplitMix {
+    var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+}

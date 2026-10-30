@@ -6,7 +6,10 @@ import AppKit
 import SwiftUI
 
 /// A borderless child window of the main one, which moves with it.
-final class ChildPanel: NSPanel {
+final class ChildPanel: NSPanel, NSWindowDelegate {
+    /// Called when another window takes the keyboard from it.
+    var resigned: () -> Void = {}
+
     init(view: NSView) {
         super.init(
             contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
@@ -17,17 +20,31 @@ final class ChildPanel: NSPanel {
         becomesKeyOnlyIfNeeded = true
         isReleasedWhenClosed = false
         contentView = view
+        delegate = self
     }
 
     override var canBecomeKey: Bool { true }
+
+    func windowDidResignKey(_ notification: Notification) {
+        DispatchQueue.main.async {
+            // The web overlay it stands for, out of sight, takes the keyboard as it shows.
+            if NSApp.keyWindow?.alphaValue == 0 {
+                self.makeKey()
+            } else {
+                self.resigned()
+            }
+        }
+    }
 
     /// Shows the panel at `frame`, in `parent`'s points from its content's top left corner, above
     /// its other child windows; or hides it without a frame.
     func place(in parent: NSWindow, _ frame: NSRect?) {
         guard let frame, let content = parent.contentView else {
             if isVisible {
+                let key = isKeyWindow
                 parent.removeChildWindow(self)
                 orderOut(nil)
+                if key { parent.makeKey() }
             }
             return
         }
@@ -36,7 +53,9 @@ final class ChildPanel: NSPanel {
         let rect = NSRect(
             x: frame.minX, y: height - frame.maxY, width: frame.width, height: frame.height)
         setFrame(parent.convertToScreen(rect), display: true)
-        if !isVisible {
+        // Above the other child windows, like the page's, which CEF may add or order since.
+        if parent.childWindows?.last != self {
+            parent.removeChildWindow(self)
             parent.addChildWindow(self, ordered: .above)
         }
     }
@@ -51,11 +70,19 @@ final class Surface {
     var shown: () -> Void = {}
     /// Whether it takes the keyboard when it shows.
     var takesKeyboard = false
+    /// Called when it shows and another window takes the keyboard from it.
+    var resigned: () -> Void {
+        get { panel.resigned }
+        set { panel.resigned = newValue }
+    }
 
-    init<Content: View>(in parent: NSWindow, radius: CGFloat, @ViewBuilder view: () -> Content) {
+    init<Content: View>(
+        in parent: NSWindow, radius: CGFloat, material: NSVisualEffectView.Material = .popover,
+        @ViewBuilder view: () -> Content
+    ) {
         self.parent = parent
         let effect = NSVisualEffectView()
-        effect.material = .popover
+        effect.material = material
         effect.blendingMode = .behindWindow
         effect.state = .active
         effect.wantsLayer = true
@@ -79,7 +106,8 @@ final class Surface {
         panel.invalidateShadow()
         if showing {
             if takesKeyboard { panel.makeKey() }
-            self.shown()
+            // Once its views are made, which they are on first showing.
+            DispatchQueue.main.async { self.shown() }
         }
     }
 }
