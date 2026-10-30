@@ -222,6 +222,8 @@ thread_local! {
     static SWITCH: RefCell<Option<(Vec<NodeId>, usize)>> = const { RefCell::new(None) };
     /// The sidebar sent the window's colors, which show the card.
     static COLORED: Cell<bool> = const { Cell::new(false) };
+    /// The window's colors last sent (set_window_colors): the card's, the grain and the gradient.
+    static WINDOW_COLORS: RefCell<Option<(u32, f64, Vec<u32>)>> = const { RefCell::new(None) };
     /// The docked sidebar shows the library, wider (LIBRARY_WIDTH).
     static LIBRARY: Cell<bool> = const { Cell::new(false) };
     /// The library shows the Spaces, filling the window while it is shown, the card hidden.
@@ -808,6 +810,7 @@ fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) 
     #[cfg(target_os = "macos")]
     if let Some(surface) = native_surface(view) {
         crate::native::event(surface, event);
+        return;
     }
     if let Some(view) = view.with_borrow(Clone::clone) {
         dispatch_in(&view, event);
@@ -819,7 +822,10 @@ fn dispatch(view: &'static LocalKey<RefCell<Option<BrowserView>>>, event: &str) 
 /// sidebar stands for in every mode.
 #[cfg(target_os = "macos")]
 fn native_surface(view: &'static LocalKey<RefCell<Option<BrowserView>>>) -> Option<&'static str> {
-    std::ptr::eq(view, &SIDEBAR).then_some("sidebar")
+    [(&SIDEBAR, "sidebar"), (&OVERLAY_VIEW, "overlay")]
+        .into_iter()
+        .find(|(native, _)| std::ptr::eq(view, *native))
+        .map(|(_, surface)| surface)
 }
 
 /// Dispatches an event in a view's page, like `dispatch`.
@@ -879,17 +885,32 @@ fn open_overlay(visible: bool, tab: Option<(String, Option<String>)>) {
         );
     }
     overlay.set_visible(visible.into());
+    #[cfg(target_os = "macos")]
+    round_overlay();
+    #[cfg(not(target_os = "macos"))]
     if visible && let Some(view) = overlay.contents_view() {
-        round_overlay();
         view.request_focus();
     }
 }
 
-/// Rounds the Command Bar's window and draws its shadow, again after it changes size.
+/// Shows the Command Bar where the app placed it, again after it changes size: the native one,
+/// on macOS, over the web one, which stays out of sight.
 fn round_overlay() {
     #[cfg(target_os = "macos")]
-    if let Some(host) = OVERLAY_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host()) {
-        crate::mac::round_command_bar(host.window_handle());
+    if let Some(overlay) = OVERLAY.with_borrow(Clone::clone) {
+        mirror(&OVERLAY_VIEW, &overlay);
+    }
+}
+
+/// Shows a native surface where the app shows its web counterpart's overlay, which stays out of
+/// sight and lets clicks through to it.
+#[cfg(target_os = "macos")]
+fn mirror(view: &'static LocalKey<RefCell<Option<BrowserView>>>, overlay: &OverlayController) {
+    if let Some(host) = view.with_borrow(|view| view.as_ref()?.browser()?.host()) {
+        crate::mac::hide_window(host.window_handle());
+    }
+    if let Some(surface) = native_surface(view) {
+        crate::native::surface(surface, overlay.is_visible() == 1, &overlay.bounds());
     }
 }
 
@@ -3517,6 +3538,7 @@ wrap_task! {
 /// gradient's `colors` and `grain`, and the card behind its content views. The card shows from the
 /// sidebar's first colors on, so that it never flashes another color.
 fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
+    WINDOW_COLORS.set(Some((card_color, grain, colors.to_vec())));
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
         // The native interface tints the window itself, over the blurred desktop, which shows
         // through: transparent, but not 0, which CEF takes for its theme's color.
@@ -4099,6 +4121,14 @@ wrap_window_delegate! {
             Size { width: 1280, height: 820 }
         }
 
+        // CEF gives views its theme's colors again once it changes, as when the window shows:
+        // the window's own, transparent on macOS, and the card's come back.
+        fn on_theme_changed(&self, _view: Option<&mut View>) {
+            if let Some(colors) = WINDOW_COLORS.with_borrow(Clone::clone) {
+                set_window_colors(colors.0, colors.1, &colors.2);
+            }
+        }
+
         // The card, the revealed sidebar and the margins follow the window's size.
         // A slide places them on its next step.
         fn on_layout_changed(&self, _view: Option<&mut View>, _new_bounds: Option<&Rect>) {
@@ -4129,7 +4159,7 @@ wrap_window_delegate! {
                     ..Default::default()
                 }))
                 .expect("box layout");
-            let sidebar = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html"), docked_width, None);
+            let sidebar = browser_view(UiClient::new(), &web_surface(""), docked_width, None);
             // On macOS, the native sidebar stands in for it (app/macos).
             sidebar.set_visible((!cfg!(target_os = "macos")).into());
             let mut view = View::from(&sidebar);
@@ -4164,14 +4194,14 @@ wrap_window_delegate! {
             controller.set_visible(0);
             CARD.set(Some(controller));
             // Below the overlay, which is added after it.
-            let reveal = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#reveal"), no_width, None);
+            let reveal = browser_view(UiClient::new(), &web_surface("#reveal"), no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&reveal)), DockingMode::CUSTOM, 1)
                 .expect("reveal");
             controller.set_visible(0);
             REVEAL_VIEW.set(Some(reveal));
             REVEAL.set(Some(controller));
-            let overlay = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#overlay"), no_width, None);
+            let overlay = browser_view(UiClient::new(), &web_surface("#overlay"), no_width, None);
             let controller = window
                 .add_overlay_view(Some(&mut View::from(&overlay)), DockingMode::CUSTOM, 1)
                 .expect("overlay");
@@ -4199,6 +4229,9 @@ wrap_window_delegate! {
                 crate::native::attach(window.window_handle());
                 // The native interface blurs the desktop through the window's transparent parts.
                 window.set_background_color(0x0000_0001);
+                // What the web sidebar asks for once ready (Command::Ready).
+                send_state();
+                send_downloads();
             }
             WINDOW.set(Some(window));
             place_card();
@@ -4492,6 +4525,16 @@ fn browser_view_sized(
         Some(&mut AlloyViewDelegate::new(width, height)),
     )
     .expect("browser view")
+}
+
+/// A surface of the web UI, like "#overlay"; blank on macOS, where the native interface stands
+/// in for it, so that its page sends no command.
+fn web_surface(hash: &str) -> String {
+    if cfg!(target_os = "macos") {
+        "about:blank".to_string()
+    } else {
+        format!("{UI_ORIGIN}index.html{hash}")
+    }
 }
 
 fn no_width() -> i32 {

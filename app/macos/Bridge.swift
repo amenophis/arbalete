@@ -81,6 +81,7 @@ final class AppModel: ObservableObject {
 @MainActor var model: AppModel?
 @MainActor var backdrop: Backdrop?
 @MainActor var sidebar: SidebarHost?
+@MainActor var commandBar: CommandBar?
 
 /// Puts the interface in the window `handle` is, or is in: the blur behind every view, and the
 /// sidebar above them.
@@ -97,7 +98,16 @@ public func attach(_ handle: UnsafeMutableRawPointer, _ send: Send) {
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
         backdrop = Backdrop(content: content, model: app)
-        sidebar = SidebarHost(content: content, model: app)
+        sidebar = SidebarHost(window: window, model: app)
+        let bar = CommandBar(app: app)
+        commandBar = bar
+        let overlay = Surface(in: window, radius: 14) { CommandBarView(bar: bar) }
+        overlay.takesKeyboard = true
+        overlay.shown = { [weak bar] in
+            guard let field = bar?.field, field.currentEditor() == nil else { return }
+            field.window?.makeFirstResponder(field)
+        }
+        surfaces["overlay"] = overlay
     }
 }
 
@@ -111,6 +121,8 @@ public func event(
         switch String(cString: surface) {
         case "sidebar":
             model?.handle(String(cString: name), detail)
+        case "overlay":
+            commandBar?.handle(String(cString: name), detail)
         default:
             break
         }
