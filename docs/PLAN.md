@@ -363,7 +363,9 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
 - Freeze, then unload hidden tabs on timers; reload on selection from the saved URL, with the snapshot shown
   while loading. Done but the snapshot: a page hidden 5 minutes is frozen, then unloaded after an hour, unless
   it plays media.
-- Memory pressure and low-power detection on each OS.
+- Memory pressure and low-power detection on each OS. Done on macOS: under memory pressure, hidden pages are
+  frozen after a minute and unloaded after 5, all at once when it is critical; in Low Power Mode, they are
+  frozen after a minute.
 - Never-suspended cases (media, capture, Split View, exception patterns), settings and sidebar indicator.
   Done but Split View, which does not exist yet: pages playing media (their elements or the Media Session) or
   capturing, and the sites kept awake from the site controls, are never suspended; a setting turns suspension
