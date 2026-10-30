@@ -2,6 +2,10 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Space } from "./bridge";
 import { NewSpace, Spaces } from "./Spaces";
+import type { Theme } from "./theme";
+
+// A theme of one color, like a Space saved before themes.
+const solid = (color: string): Theme => ({ colors: [color], mode: "auto", intensity: 1, noise: 0 });
 
 const fetch = vi.fn();
 const onPage = vi.fn();
@@ -15,18 +19,23 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const spaces: Space[] = [
-  { id: 13, title: "Home", emoji: null, color: "purple", profile: 1, pinned: [] },
-  { id: 14, title: "Work", emoji: "💼", color: "blue", profile: 1, pinned: [] },
-  { id: 15, title: "😀 fun", emoji: null, color: "green", profile: 1, pinned: [] },
+  { id: 13, title: "Home", emoji: null, theme: solid("#6e56cf"), profile: 1, pinned: [] },
+  { id: 14, title: "Work", emoji: "💼", theme: solid("#3e7bfa"), profile: 1, pinned: [] },
+  { id: 15, title: "😀 fun", emoji: null, theme: solid("#30a46c"), profile: 1, pinned: [] },
 ];
 
 const icon = (title: string) => screen.getByRole("button", { name: title });
 const emojiField = () => screen.getByRole("textbox", { name: "Space emoji" }) as HTMLInputElement;
 const nameField = () => screen.getByRole("textbox", { name: "Space name" }) as HTMLInputElement;
 
+// Opens the displayed Space's editor, as its menu does.
 function edit(displayed = 14) {
   render(<Spaces spaces={spaces} displayed={displayed} onPage={onPage} />);
-  fireEvent.click(icon(spaces.find((space) => space.id === displayed)?.title ?? ""));
+  act(() => {
+    dispatchEvent(
+      new CustomEvent("arbalete:edit-space", { detail: { space: displayed, field: "name" } }),
+    );
+  });
 }
 
 test("shows each Space's emoji, or a dot", () => {
@@ -36,19 +45,15 @@ test("shows each Space's emoji, or a dot", () => {
   expect(icons[0].querySelector(".dot")).not.toBeNull();
 });
 
-test("goes to another Space's page, and opens the displayed one's editor", () => {
+test("goes to another Space's page, and opens the displayed one's theme picker", () => {
   render(<Spaces spaces={spaces} displayed={13} onPage={onPage} />);
   fireEvent.click(icon("Work"));
   expect(onPage).toHaveBeenLastCalledWith(1);
+  expect(fetch).not.toHaveBeenCalled();
+  fireEvent.click(icon("Home"));
+  expect(fetch).toHaveBeenLastCalledWith("/command/theme/show/13", { method: "POST" });
   expect(screen.queryByRole("textbox")).toBeNull();
-  const home = icon("Home");
-  expect(home.getAttribute("aria-expanded")).toBe("false");
-  fireEvent.click(home);
-  expect(home.getAttribute("aria-expanded")).toBe("true");
-  expect(nameField().value).toBe("Home");
   expect(onPage).toHaveBeenCalledTimes(1);
-  fireEvent.click(home);
-  expect(screen.queryByRole("textbox")).toBeNull();
 });
 
 test("renames the displayed Space with Enter", () => {
@@ -102,20 +107,13 @@ test("the Space's menu opens its editor on the field it edits", () => {
   expect(document.activeElement).toBe(emojiField());
   ask(14, "name");
   expect(document.activeElement).toBe(nameField());
-  ask(14, "color");
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "blue" }));
-  ask(14, "name");
-  expect(document.activeElement).toBe(nameField());
+  expect(icon("Work").getAttribute("aria-expanded")).toBe("true");
 });
 
-test("picks the displayed Space's color", () => {
+test("opens the displayed Space's theme picker from its editor", () => {
   edit();
-  const swatches = screen.getByRole("group", { name: "Color of Work" });
-  expect(within(swatches).getByRole("button", { name: "blue" }).getAttribute("aria-pressed")).toBe(
-    "true",
-  );
-  fireEvent.click(within(swatches).getByRole("button", { name: "red" }));
-  expect(fetch).toHaveBeenLastCalledWith("/command/space/color/14/red", { method: "POST" });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Theme…" }));
+  expect(fetch).toHaveBeenLastCalledWith("/command/theme/show/14", { method: "POST" });
 });
 
 test("goes back to the displayed Space's page while another page shows", () => {

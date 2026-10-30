@@ -2,7 +2,7 @@
 
 use arbalete_core::import::Choice;
 use arbalete_core::search::SearchEngine;
-use arbalete_core::sidebar::{ArchiveAfter, Color, NodeId, ProfileId, SpaceId};
+use arbalete_core::sidebar::{ArchiveAfter, Color, NodeId, ProfileId, SpaceId, Theme};
 use serde::Deserialize;
 
 /// What a site keeps that its site controls clear (Command::ClearSiteData).
@@ -111,6 +111,10 @@ pub enum Command {
     ShowSiteControls(Button),
     /// `site/hide`.
     HideSiteControls,
+    /// Shows a Space's theme picker, beside the sidebar: `theme/show/<space id>`.
+    ShowThemePicker(SpaceId),
+    /// Hides the theme picker: `theme/hide`.
+    HideThemePicker,
     /// The site controls' panel takes this height: `site/height/<height>`.
     SiteControlsHeight(i32),
     /// Opens an extension's popup from the site controls, under their button:
@@ -328,8 +332,8 @@ pub enum Command {
     /// Sets a Space's emoji, or removes it when empty: `space/emoji/<space id>/<percent-encoded
     /// emoji>`.
     SetSpaceEmoji(SpaceId, String),
-    /// Changes a Space's color: `space/color/<space id>/<color>`, like `blue`.
-    ColorSpace(SpaceId, Color),
+    /// Changes a Space's theme: `space/theme/<space id>/<percent-encoded JSON theme>`.
+    SetSpaceTheme(SpaceId, Theme),
     /// Hides a Space's tabs in the sidebar, or shows them again: `space/toggle/<space id>`.
     ToggleSpace(SpaceId),
     /// Deletes a Space with its tabs, once confirmed: `space/delete/<space id>`.
@@ -352,11 +356,13 @@ pub enum Command {
     /// Opens the System Settings pane where the user gives Arbalete Full Disk Access:
     /// `import/full-disk-access`.
     OpenFullDiskAccess,
-    /// Paints the window around the sidebar and the card, and an empty Space's card, with colors
-    /// as opaque ARGB: `window/colors/<window rrggbb>/<card rrggbb>`.
+    /// Paints the window around the sidebar and the card like the sidebar, and an empty Space's
+    /// card, with colors as opaque ARGB: `window/colors/<card rrggbb>/<grain>/<rrggbb>...`, the
+    /// gradient's one to three colors, and its grain from 0 to 1.
     WindowColors {
-        window: u32,
         card: u32,
+        grain: f64,
+        colors: Vec<u32>,
     },
 }
 
@@ -480,6 +486,7 @@ impl Command {
             "find/hide" => Some(Self::HideFind),
             "extension/close" => Some(Self::CloseExtensionPopup),
             "site/hide" => Some(Self::HideSiteControls),
+            "theme/hide" => Some(Self::HideThemePicker),
             "site/store" => Some(Self::ShowStore),
             "extension/load-unpacked" => Some(Self::ShowExtensionsPage),
             "extension/update" => Some(Self::UpdateExtensions),
@@ -562,13 +569,18 @@ impl Command {
                     let text = Some(percent_decode(text)?);
                     return Some(Self::Find { text, forward });
                 }
-                if let Some((window, card)) = path
-                    .strip_prefix("window/colors/")
-                    .and_then(|r| r.split_once('/'))
-                {
+                if let Some(args) = path.strip_prefix("window/colors/") {
+                    let mut args = args.split('/');
+                    let card = parse_rgb(args.next()?)?;
+                    let grain: f64 = args.next()?.parse().ok()?;
+                    let colors = args.map(parse_rgb).collect::<Option<Vec<_>>>()?;
+                    if !(0.0..=1.0).contains(&grain) || !(1..=3).contains(&colors.len()) {
+                        return None;
+                    }
                     return Some(Self::WindowColors {
-                        window: parse_rgb(window)?,
-                        card: parse_rgb(card)?,
+                        card,
+                        grain,
+                        colors,
                     });
                 }
                 if let Some(offset) = path.strip_prefix("card/offset/") {
@@ -692,15 +704,19 @@ impl Command {
                     let id = serde_json::from_str(id).ok()?;
                     return percent_decode(emoji).map(|emoji| Self::SetSpaceEmoji(id, emoji));
                 }
-                if let Some((id, color)) = path
-                    .strip_prefix("space/color/")
+                if let Some((id, theme)) = path
+                    .strip_prefix("space/theme/")
                     .and_then(|r| r.split_once('/'))
                 {
                     let id = serde_json::from_str(id).ok()?;
-                    return parse_color(color).map(|color| Self::ColorSpace(id, color));
+                    let theme = serde_json::from_str(&percent_decode(theme)?).ok()?;
+                    return Some(Self::SetSpaceTheme(id, theme));
                 }
                 if let Some(id) = path.strip_prefix("favorites/hide-hint/") {
                     return serde_json::from_str(id).ok().map(Self::HideFavoritesHint);
+                }
+                if let Some(id) = path.strip_prefix("theme/show/") {
+                    return serde_json::from_str(id).ok().map(Self::ShowThemePicker);
                 }
                 if let Some(id) = path.strip_prefix("space/toggle/") {
                     return serde_json::from_str(id).ok().map(Self::ToggleSpace);
@@ -980,16 +996,20 @@ mod tests {
     #[test]
     fn parses_window_colors() {
         assert_eq!(
-            Command::parse("window/colors/1b0e1f/F8F6FB"),
+            Command::parse("window/colors/F8F6FB/0.5/1b0e1f/6daee9"),
             Some(Command::WindowColors {
-                window: 0xff1b_0e1f,
                 card: 0xfff8_f6fb,
+                grain: 0.5,
+                colors: vec![0xff1b_0e1f, 0xff6d_aee9],
             })
         );
-        assert_eq!(Command::parse("window/colors/1b0e1f"), None);
-        assert_eq!(Command::parse("window/colors/1b0e1/f8f6fb"), None);
-        assert_eq!(Command::parse("window/colors/+b0e1f/f8f6fb"), None);
-        assert_eq!(Command::parse("window/colors/1b0e1fff/f8f6fb"), None);
+        assert_eq!(Command::parse("window/colors/f8f6fb/0"), None);
+        assert_eq!(Command::parse("window/colors/f8f6fb/2/1b0e1f"), None);
+        assert_eq!(Command::parse("window/colors/f8f6fb/0/1/2/3/4"), None);
+        assert_eq!(Command::parse("window/colors/f8f6fb/x/1b0e1f"), None);
+        assert_eq!(Command::parse("window/colors/f8f6fb/0/1b0e1"), None);
+        assert_eq!(Command::parse("window/colors/+8f6fb/0/1b0e1f"), None);
+        assert_eq!(Command::parse("window/colors/f8f6fb/0/1b0e1fff"), None);
     }
 
     #[test]
@@ -1281,12 +1301,15 @@ mod tests {
             panic!("not an emoji")
         };
         assert_eq!(emoji, "");
-        let Some(Command::ColorSpace(id, color)) = Command::parse("space/color/4/blue") else {
-            panic!("not a color")
+        let theme = r##"{"colors":["#6daee9"],"mode":"light","intensity":0.8,"noise":0}"##;
+        let path = format!("space/theme/4/{}", theme.replace('#', "%23"));
+        let Some(Command::SetSpaceTheme(id, theme)) = Command::parse(&path) else {
+            panic!("not a theme")
         };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
         assert_eq!(
-            serde_json::to_string(&(id, color)).unwrap(),
-            r#"[4,"blue"]"#
+            (theme.colors, theme.intensity),
+            (vec!["#6daee9".to_string()], 0.8)
         );
         let Some(Command::ToggleSpace(id)) = Command::parse("space/toggle/4") else {
             panic!("not a toggle")
@@ -1305,8 +1328,14 @@ mod tests {
         assert_eq!(Command::parse("space/move/4"), None);
         assert_eq!(Command::parse("space/toggle/x"), None);
         assert_eq!(Command::parse("space/delete/x"), None);
-        assert_eq!(Command::parse("space/color/4/teal"), None);
-        assert_eq!(Command::parse("space/color/x/blue"), None);
+        let Some(Command::ShowThemePicker(id)) = Command::parse("theme/show/4") else {
+            panic!("not a theme picker")
+        };
+        assert_eq!(serde_json::to_string(&id).unwrap(), "4");
+        assert_eq!(Command::parse("theme/hide"), Some(Command::HideThemePicker));
+        assert_eq!(Command::parse("theme/show/x"), None);
+        assert_eq!(Command::parse("space/theme/4/%7B"), None);
+        assert_eq!(Command::parse("space/theme/x/%7B%7D"), None);
         assert_eq!(Command::parse("space/rename/4"), None);
         assert_eq!(Command::parse("space/emoji/x/a"), None);
     }

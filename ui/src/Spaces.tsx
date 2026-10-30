@@ -3,8 +3,8 @@ import { type Color, firstGrapheme, type Space, send, useAppEvent } from "./brid
 import { keepOnEscape, NameField, Swatches } from "./Profiles";
 
 // One icon per Space, its emoji or a dot, which slides the sidebar to its page with `onPage`. The
-// Space whose page shows, if any, is marked aria-current; clicking its icon again opens its editor,
-// which the Space's menu also opens on one of its fields.
+// Space whose page shows, if any, is marked aria-current; clicking its icon again opens its theme
+// picker, like Arc's. The Space's menu opens its editor on its emoji or its name.
 export function Spaces({
   spaces,
   displayed,
@@ -26,11 +26,7 @@ export function Spaces({
   });
   const editor = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const selector = {
-      emoji: ".emoji",
-      name: "input:not(.emoji)",
-      color: ".swatch[aria-pressed=true]",
-    };
+    const selector = { emoji: ".emoji", name: "input:not(.emoji)" };
     if (focus) editor.current?.querySelector<HTMLElement>(selector[focus.field])?.focus();
   }, [focus]);
   return (
@@ -48,8 +44,8 @@ export function Spaces({
                 aria-current={isCurrent ? "true" : undefined}
                 aria-expanded={isCurrent ? editing : undefined}
                 onClick={() => {
-                  if (isCurrent) return setOpen(!editing);
                   setOpen(false);
+                  if (isCurrent) return send(`theme/show/${space.id}`);
                   onPage(index);
                 }}
               >
@@ -71,11 +67,12 @@ export function Spaces({
   );
 }
 
-type Field = "emoji" | "name" | "color";
+type Field = "emoji" | "name";
 
-// The emoji field keeps only its first character; emptying it brings the initial back.
+// The emoji field keeps only its first character; emptying it brings the initial back. Its theme
+// has a picker of its own.
 export function SpaceEditor({ space, ref }: { space: Space; ref?: Ref<HTMLDivElement> }) {
-  const { id, title, color } = space;
+  const { id, title } = space;
   const emoji = space.emoji ?? "";
   return (
     <div className="space-editor" ref={ref}>
@@ -99,11 +96,9 @@ export function SpaceEditor({ space, ref }: { space: Space; ref?: Ref<HTMLDivEle
           onRename={(value) => send(`space/rename/${id}/${encodeURIComponent(value)}`)}
         />
       </div>
-      <Swatches
-        label={`Color of ${title}`}
-        color={color}
-        onPick={(option) => send(`space/color/${id}/${option}`)}
-      />
+      <button type="button" className="edit-theme" onClick={() => send(`theme/show/${id}`)}>
+        Edit Theme…
+      </button>
     </div>
   );
 }

@@ -4,7 +4,9 @@
 //! that are malformed, are skipped: one odd item must not stop the import of the others.
 
 use super::{Copy, chromium};
-use crate::sidebar::{Archived, Color, NodeId, ProfileId, Sidebar, SpaceId, Tab};
+use crate::sidebar::{
+    Archived, MAX_THEME_COLORS, Mode, NodeId, ProfileId, Sidebar, SpaceId, Tab, Theme,
+};
 use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -168,10 +170,9 @@ impl<'a> Import<'a> {
         if let Some(emoji) = custom["iconType"]["emoji_v2"].as_str() {
             self.sidebar.set_space_emoji(id, emoji).ok()?;
         }
-        if let Some(color) = nearest_color(&custom["windowTheme"]["primaryColorPalette"]["midTone"])
-        {
-            self.sidebar.set_space_color(id, color).ok()?;
-        }
+        self.sidebar
+            .set_space_theme(id, theme(&custom["windowTheme"]))
+            .ok()?;
         let space = self.sidebar.spaces().last()?;
         let (pinned, today) = (space.pinned, space.today);
         self.children(arc_pinned, pinned);
@@ -253,32 +254,61 @@ fn text(value: &Value) -> Option<&str> {
     value.as_str().filter(|text| !text.trim().is_empty())
 }
 
-/// The colors of ui/src/bridge.ts.
-const PALETTE: [(Color, [u8; 3]); 8] = [
-    (Color::Purple, [0x6e, 0x56, 0xcf]),
-    (Color::Blue, [0x3e, 0x7b, 0xfa]),
-    (Color::Green, [0x30, 0xa4, 0x6c]),
-    (Color::Yellow, [0xe5, 0xb8, 0x00]),
-    (Color::Orange, [0xf7, 0x6b, 0x15]),
-    (Color::Red, [0xe5, 0x48, 0x4d]),
-    (Color::Pink, [0xd6, 0x40, 0x9f]),
-    (Color::Gray, [0x8b, 0x8d, 0x98]),
-];
+/// A Space's theme from Arc's `windowTheme`: its single color, or its gradient's base colors then
+/// its overlay's visible ones, with its translucency style and modifiers. Without one, the Space
+/// has no color, as in Arc.
+fn theme(window_theme: &Value) -> Theme {
+    let style = &window_theme["background"]["single"]["_0"]["style"]["color"]["_0"];
+    let (kind, config) = ["blendedGradient", "blendedSingleColor", "basicColor"]
+        .into_iter()
+        .map(|kind| (kind, &style[kind]["_0"]))
+        .find(|(_, config)| config.is_object())
+        .unwrap_or(("", &Value::Null));
+    let colors: Vec<_> = match kind {
+        "blendedGradient" => {
+            let list = |key: &str| config[key].as_array().cloned().unwrap_or_default();
+            let mut colors = list("baseColors");
+            colors.extend(list("overlayColors"));
+            colors
+        }
+        _ => vec![config["color"].clone()],
+    };
+    let colors = colors
+        .iter()
+        .filter(|color| color["alpha"].as_f64().unwrap_or(1.0) > 0.0)
+        .filter_map(hex)
+        .take(MAX_THEME_COLORS)
+        .collect();
+    let mode = match config["translucencyStyle"].as_str() {
+        Some("light") => Mode::Light,
+        Some("dark") => Mode::Dark,
+        _ => Mode::Auto,
+    };
+    let factor = |key: &str, default: f64| {
+        let value = config["modifiers"][key].as_f64().unwrap_or(default);
+        value.clamp(0.0, 1.0)
+    };
+    Theme {
+        colors,
+        mode,
+        intensity: factor("intensityFactor", 1.0),
+        noise: factor("noiseFactor", 0.0),
+    }
+}
 
-/// The palette's color closest to an Arc color, whose components go from 0 to 1.
-fn nearest_color(color: &Value) -> Option<Color> {
+/// An Arc color as `#rrggbb`. Its components go from 0 to 1, a little beyond in extended sRGB.
+fn hex(color: &Value) -> Option<String> {
     let rgb = ["red", "green", "blue"].map(|c| color[c].as_f64());
     let [Some(red), Some(green), Some(blue)] = rgb else {
         return None;
     };
-    let distance = |palette: [u8; 3]| -> f64 {
-        let [r, g, b] = palette.map(|c| f64::from(c) / 255.0);
-        (r - red).powi(2) + (g - green).powi(2) + (b - blue).powi(2)
-    };
-    PALETTE
-        .iter()
-        .min_by(|a, b| distance(a.1).total_cmp(&distance(b.1)))
-        .map(|(color, _)| *color)
+    let byte = |c: f64| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(format!(
+        "#{:02x}{:02x}{:02x}",
+        byte(red),
+        byte(green),
+        byte(blue)
+    ))
 }
 
 #[cfg(test)]
@@ -329,20 +359,40 @@ mod tests {
     }
 
     #[test]
-    fn imports_spaces_in_order_with_their_profile_emoji_and_nearest_color() {
+    fn imports_spaces_in_order_with_their_profile_emoji_and_theme() {
         let sidebar = fixture();
         let [personal, work] = [0, 1].map(|i| sidebar.profiles()[i].id);
         let spaces: Vec<_> = sidebar
             .spaces()
             .iter()
-            .map(|s| (s.title.as_str(), s.emoji.as_deref(), s.color, s.profile))
+            .map(|s| (s.title.as_str(), s.emoji.as_deref(), &s.theme, s.profile))
             .collect();
+        let home = Theme {
+            colors: vec!["#e64d52".into()],
+            mode: Mode::Light,
+            intensity: 1.0,
+            noise: 0.5,
+        };
+        let none = Theme {
+            colors: Vec::new(),
+            mode: Mode::Auto,
+            intensity: 1.0,
+            noise: 0.0,
+        };
+        // The gradient's base colors, then its overlay's visible one; extended components are
+        // brought back between 0 and 1.
+        let office = Theme {
+            colors: vec!["#407af7".into(), "#ff8000".into(), "#33cc66".into()],
+            mode: Mode::Dark,
+            intensity: 0.8,
+            noise: 0.0,
+        };
         assert_eq!(
             spaces,
             [
-                ("Home", Some("🏡"), Color::Red, personal),
-                ("Space", None, Color::Purple, personal),
-                ("Office", Some("💼"), Color::Blue, work),
+                ("Home", Some("🏡"), &home, personal),
+                ("Space", None, &none, personal),
+                ("Office", Some("💼"), &office, work),
             ]
         );
         assert_eq!(sidebar.displayed().title, "Home");
@@ -512,15 +562,5 @@ mod tests {
             add(&mut sidebar, &json, "Default", profile).unwrap();
         }
         assert_eq!(sidebar, Sidebar::default());
-    }
-
-    #[test]
-    fn maps_a_color_to_the_nearest_of_the_palette() {
-        let color =
-            |red, green, blue| nearest_color(&json!({ "red": red, "green": green, "blue": blue }));
-        assert_eq!(color(0.2, 0.65, 0.4), Some(Color::Green));
-        assert_eq!(color(0.55, 0.55, 0.58), Some(Color::Gray));
-        assert_eq!(color(1.0, 0.75, 0.0), Some(Color::Yellow));
-        assert_eq!(nearest_color(&json!({ "red": 1.0 })), None);
     }
 }

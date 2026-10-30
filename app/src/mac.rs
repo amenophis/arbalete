@@ -60,6 +60,8 @@ thread_local! {
     static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     /// The actions of the menu last shown, which its items' tags index.
     static MENU_ACTIONS: RefCell<Vec<Action>> = const { RefCell::new(Vec::new()) };
+    /// What paints the main window under its views (paint_window).
+    static BACKDROP: RefCell<Option<Backdrop>> = const { RefCell::new(None) };
 }
 
 #[derive(Default)]
@@ -1098,6 +1100,19 @@ pub fn round_command_bar(view: *mut c_void) {
     }
 }
 
+/// The theme picker's corner radius, in points.
+const THEME_PICKER_RADIUS: f64 = 20.0;
+
+/// Rounds the corners of the theme picker's window and outlines it, like the Command Bar's.
+pub fn round_theme_picker(view: *mut c_void) {
+    round(view, THEME_PICKER_RADIUS);
+    // SAFETY: CEF gives the window's NSView, which the window keeps alive.
+    if let Some(window) = unsafe { view.cast::<NSView>().as_ref() }.and_then(NSView::window) {
+        window.setHasShadow(true);
+        window.invalidateShadow();
+    }
+}
+
 /// Makes a window invisible and lets clicks through it, while a sheet it holds, like Chromium's
 /// folder picker, shows. `handle` is the window, or a view in it, as CEF gives it.
 pub fn hide_window(handle: *mut c_void) {
@@ -1239,4 +1254,178 @@ pub fn shift(view: *mut c_void, x: f64) {
 /// The user asked the system for less motion.
 pub fn reduce_motion() -> bool {
     NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+}
+
+/// A view under the main window's views, which leave it showing where they are transparent: around
+/// the sidebar and the card. Its layers paint it like the sidebar's background (index.css): a
+/// gradient from the window's top left corner to its bottom right one, a third color rising from
+/// its bottom left corner to its top right one, and grain.
+struct Backdrop {
+    gradient: Retained<AnyObject>,
+    overlay: Retained<AnyObject>,
+    grain: Retained<AnyObject>,
+}
+
+/// The grain's opacity at a theme's full noise (GRAIN in ui/src/theme.ts).
+const GRAIN_OPACITY: f64 = 0.2;
+
+/// The grain's tile, in points; its pixels are half a point, one pixel on a Retina display.
+const GRAIN_SIZE: usize = 64;
+
+/// Paints the main window with a gradient's one to three opaque ARGB `colors` and `grain`, from 0
+/// to 1, under its views. `handle` is the window, or a view in it, as CEF gives it.
+pub fn paint_window(handle: *mut c_void, colors: &[u32], grain: f64) {
+    BACKDROP.with_borrow_mut(|backdrop| {
+        if backdrop.is_none() {
+            *backdrop = make_backdrop(handle);
+        }
+        let Some(backdrop) = backdrop else { return };
+        let Some(transaction) = AnyClass::get(c"CATransaction") else {
+            return;
+        };
+        let color = |argb: u32| {
+            let [_, red, green, blue] = argb.to_be_bytes().map(|c| f64::from(c) / 255.0);
+            NSColor::colorWithSRGBRed_green_blue_alpha(red, green, blue, 1.0)
+        };
+        let first = colors.first().copied().unwrap_or_default();
+        let base = [color(first), color(colors.get(1).copied().unwrap_or(first))];
+        let third = colors.get(2).map(|&argb| color(argb));
+        unsafe {
+            // The colors follow a swipe frame by frame, without fading.
+            let _: () = msg_send![transaction, begin];
+            let _: () = msg_send![transaction, setDisableActions: Bool::YES];
+            set_colors(&backdrop.gradient, &base);
+            if let Some(third) = &third {
+                set_colors(
+                    &backdrop.overlay,
+                    &[third.colorWithAlphaComponent(0.0), third.clone()],
+                );
+            }
+            let _: () = msg_send![&*backdrop.overlay, setHidden: Bool::new(third.is_none())];
+            let _: () = msg_send![&*backdrop.grain, setOpacity: (grain * GRAIN_OPACITY) as f32];
+            let _: () = msg_send![transaction, commit];
+        }
+    });
+}
+
+/// Gives a gradient layer its colors.
+unsafe fn set_colors(layer: &AnyObject, colors: &[Retained<NSColor>]) {
+    // CGColors go in an NSArray as the objects they bridge to.
+    let colors: Vec<*const AnyObject> = colors
+        .iter()
+        .map(|color| {
+            let color: *const CGColor = unsafe { msg_send![&**color, CGColor] };
+            color.cast()
+        })
+        .collect();
+    let Some(array) = AnyClass::get(c"NSArray") else {
+        return;
+    };
+    unsafe {
+        let colors: Retained<AnyObject> =
+            msg_send![array, arrayWithObjects: colors.as_ptr(), count: colors.len()];
+        let _: () = msg_send![layer, setColors: &*colors];
+    }
+}
+
+/// Puts a backdrop under the views of the window `handle` is, or is in.
+fn make_backdrop(handle: *mut c_void) -> Option<Backdrop> {
+    use objc2_app_kit::{NSAutoresizingMaskOptions, NSWindowOrderingMode};
+    // SAFETY: CEF gives a live NSWindow or NSView, which its window keeps alive.
+    let object = unsafe { handle.cast::<AnyObject>().as_ref() }?;
+    let window = if let Some(window) = object.downcast_ref::<NSWindow>() {
+        objc2::Message::retain(window)
+    } else {
+        object.downcast_ref::<NSView>().and_then(NSView::window)?
+    };
+    let content = window.contentView()?;
+    let frame = unsafe { content.superview() }?;
+    let mtm = MainThreadMarker::new()?;
+    window.setOpaque(false);
+    window.setBackgroundColor(Some(&NSColor::clearColor()));
+    let view = NSView::initWithFrame(NSView::alloc(mtm), content.frame());
+    view.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
+    view.setWantsLayer(true);
+    frame.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, Some(&content));
+    let root: Retained<AnyObject> = unsafe { msg_send![&*view, layer] };
+    let (gradient_class, layer_class) = (
+        AnyClass::get(c"CAGradientLayer")?,
+        AnyClass::get(c"CALayer")?,
+    );
+    // Each layer fills the view as it resizes (kCALayerWidthSizable | kCALayerHeightSizable).
+    let fill = |class: &AnyClass| -> Retained<AnyObject> {
+        unsafe {
+            let layer: Retained<AnyObject> = msg_send![class, layer];
+            let bounds: NSRect = msg_send![&*root, bounds];
+            let _: () = msg_send![&*layer, setFrame: bounds];
+            let _: () = msg_send![&*layer, setAutoresizingMask: 2u32 | 16u32];
+            let _: () = msg_send![&*root, addSublayer: &*layer];
+            layer
+        }
+    };
+    let gradient = fill(gradient_class);
+    let overlay = fill(gradient_class);
+    let grain = fill(layer_class);
+    // The layers' unit square has its origin at the bottom left.
+    unsafe {
+        let point = |x: f64, y: f64| objc2_foundation::NSPoint::new(x, y);
+        let _: () = msg_send![&*gradient, setStartPoint: point(0.0, 1.0)];
+        let _: () = msg_send![&*gradient, setEndPoint: point(1.0, 0.0)];
+        let _: () = msg_send![&*overlay, setStartPoint: point(0.0, 0.0)];
+        let _: () = msg_send![&*overlay, setEndPoint: point(1.0, 1.0)];
+        let pattern = NSColor::colorWithPatternImage(&grain_image(mtm));
+        let pattern: *const CGColor = msg_send![&*pattern, CGColor];
+        let _: () = msg_send![&*grain, setBackgroundColor: pattern];
+        let _: () = msg_send![&*grain, setOpacity: 0.0f32];
+    }
+    Some(Backdrop {
+        gradient,
+        overlay,
+        grain,
+    })
+}
+
+/// A tile of black specks of random opacity.
+fn grain_image(mtm: MainThreadMarker) -> Retained<objc2_app_kit::NSImage> {
+    let pixels = GRAIN_SIZE * 2;
+    let (Some(rep_class), Some(_)) = (AnyClass::get(c"NSBitmapImageRep"), Some(mtm)) else {
+        return objc2_app_kit::NSImage::new();
+    };
+    unsafe {
+        let rep: objc2::rc::Allocated<AnyObject> = msg_send![rep_class, alloc];
+        let rep: Option<Retained<AnyObject>> = msg_send![
+            rep,
+            initWithBitmapDataPlanes: std::ptr::null_mut::<*mut u8>(),
+            pixelsWide: pixels as isize,
+            pixelsHigh: pixels as isize,
+            bitsPerSample: 8isize,
+            samplesPerPixel: 2isize,
+            hasAlpha: Bool::YES,
+            isPlanar: Bool::NO,
+            colorSpaceName: ns_string!("NSDeviceWhiteColorSpace"),
+            bytesPerRow: (pixels * 2) as isize,
+            bitsPerPixel: 16isize
+        ];
+        let Some(rep) = rep else {
+            return objc2_app_kit::NSImage::new();
+        };
+        let data: *mut u8 = msg_send![&*rep, bitmapData];
+        let bytes = std::slice::from_raw_parts_mut(data, pixels * pixels * 2);
+        // Xorshift: the same grain on every launch, without a dependency.
+        let mut state = 0x2545_f491_u32;
+        for [white, alpha] in bytes.as_chunks_mut::<2>().0 {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            *white = 0;
+            *alpha = (state >> 24) as u8;
+        }
+        let size = NSSize::new(GRAIN_SIZE as f64, GRAIN_SIZE as f64);
+        let _: () = msg_send![&*rep, setSize: size];
+        let image = objc2_app_kit::NSImage::initWithSize(objc2_app_kit::NSImage::alloc(), size);
+        let _: () = msg_send![&*image, addRepresentation: &*rep];
+        image
+    }
 }

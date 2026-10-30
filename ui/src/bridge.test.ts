@@ -44,14 +44,12 @@ test("mixes a share of a color into another, like color-mix in srgb", () => {
   expect(mix("#3e7bfa", "#1b0e1f", 14)).toBe("#201d3e");
 });
 
-test("tints the window with a tint and an empty Space's card with the Space's color", () => {
-  const black = { color: "#000000", strength: 1 };
-  expect(windowColors(black, "#000000", "#ffffff", "#ffffff")).toBe("window/colors/dbdbdb/ebebeb");
-  // A page that is no Space's leaves the window untinted, halfway to it half tinted.
-  const none = { color: "#000000", strength: 0 };
-  expect(windowColors(none, "#000000", "#ffffff", "#ffffff")).toBe("window/colors/ffffff/ebebeb");
-  const half = { color: "#000000", strength: 0.5 };
-  expect(windowColors(half, "#000000", "#ffffff", "#ffffff")).toBe("window/colors/ededed/ebebeb");
+test("paints the window with a paint's stops and grain, and an empty Space's card a little tinted", () => {
+  const light = { stops: ["#ffffff"], grain: 0, dark: false };
+  expect(windowColors(light, "#000000")).toBe("window/colors/e4e2e7/0/ffffff");
+  // Without a leading color, the card is the panel's color; the grain keeps three decimals.
+  const dark = { stops: ["#000000", "#ff0000", "#00ff00"], grain: 0.12345, dark: true };
+  expect(windowColors(dark, undefined)).toBe("window/colors/1e1a28/0.123/000000/ff0000/00ff00");
 });
 
 test("forgets the hover kept from before the sidebar hid or moved, until the pointer moves", () => {

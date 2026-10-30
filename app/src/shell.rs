@@ -185,6 +185,9 @@ thread_local! {
     static FIND: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The text last searched for, which ⌘G searches again.
     static FIND_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+    /// A Space's theme picker, beside the sidebar.
+    static THEME_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
+    static THEME: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
     /// The site controls' panel, under their button.
     static SITE_VIEW: RefCell<Option<BrowserView>> = const { RefCell::new(None) };
     static SITE: RefCell<Option<OverlayController>> = const { RefCell::new(None) };
@@ -370,7 +373,7 @@ impl UiState {
                 "id": s.id,
                 "title": s.title,
                 "emoji": s.emoji,
-                "color": s.color,
+                "theme": s.theme,
                 "profile": s.profile,
                 "pinned": self.overview(s.pinned, s.profile),
             })).collect::<Vec<_>>(),
@@ -2172,6 +2175,59 @@ fn show_site_controls(button: Button) {
     }
 }
 
+/// The theme picker's size, like Arc's.
+const THEME_SIZE: Size = Size {
+    width: 365,
+    height: 520,
+};
+
+/// Shows a Space's theme picker beside the sidebar, at the window's bottom, like Arc's, with the
+/// Space's theme to edit.
+fn show_theme_picker(id: SpaceId) {
+    let theme = STATE.with_borrow(|state| {
+        let space = state.sidebar.spaces().iter().find(|space| space.id == id)?;
+        Some(space.theme.clone())
+    });
+    let (Some(theme), Some(controller)) = (theme, THEME.with_borrow(Clone::clone)) else {
+        return;
+    };
+    let detail = json!({ "space": id, "theme": theme });
+    dispatch(
+        &THEME_VIEW,
+        &format!(r#"new CustomEvent("arbalete:theme", {{ detail: {detail} }})"#),
+    );
+    controller.set_visible(1);
+    place_theme_picker();
+    #[cfg(target_os = "macos")]
+    if let Some(host) = THEME_VIEW.with_borrow(|view| view.as_ref()?.browser()?.host()) {
+        crate::mac::round_theme_picker(host.window_handle());
+    }
+    if let Some(view) = controller.contents_view() {
+        view.request_focus();
+    }
+}
+
+/// Puts the theme picker, if it shows, just right of the sidebar, above the window's bottom edge.
+fn place_theme_picker() {
+    let (Some(controller), Some(size)) = (
+        THEME.with_borrow(Clone::clone),
+        WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())),
+    ) else {
+        return;
+    };
+    if controller.is_visible() == 0 {
+        return;
+    }
+    let card = SIDEBAR_MODE.get().layout(&size).card;
+    let height = THEME_SIZE.height.min(size.height - 2 * CARD_MARGIN);
+    controller.set_bounds(Some(&Rect {
+        x: card.x + 6,
+        y: size.height - height - 2 * CARD_MARGIN,
+        width: THEME_SIZE.width,
+        height,
+    }));
+}
+
 /// Where a button of a UI view is, in the window.
 fn button_in_window(button: Button) -> Option<Rect> {
     let source = match button.view {
@@ -2916,7 +2972,7 @@ fn create_space(title: &str, emoji: &str, color: Color, tab: Option<NodeId>) {
         let profile = sidebar.displayed().profile;
         let space = sidebar.create_space(title, profile)?;
         sidebar.set_space_emoji(space, emoji)?;
-        sidebar.set_space_color(space, color)?;
+        sidebar.set_space_theme(space, color.into())?;
         // A tab moved there is selected; a folder moved there is not a tab to select.
         if let Some(tab) = tab
             && sidebar.move_to_space(tab, space).is_ok()
@@ -3293,11 +3349,20 @@ wrap_task! {
     }
 }
 
-/// Paints the window around the sidebar and the card, and the card behind its content views. The
-/// card shows from the sidebar's first colors on, so that it never flashes another color.
-fn set_window_colors(window_color: u32, card_color: u32) {
+/// Paints the window around the sidebar and the card as the sidebar paints itself, with its
+/// gradient's `colors` and `grain`, and the card behind its content views. The card shows from the
+/// sidebar's first colors on, so that it never flashes another color.
+fn set_window_colors(card_color: u32, grain: f64, colors: &[u32]) {
     if let Some(window) = WINDOW.with_borrow(Clone::clone) {
-        window.set_background_color(window_color);
+        // macOS draws the gradient under the window's views, which leave it showing: transparent,
+        // but not 0, which CEF takes for its theme's color.
+        #[cfg(target_os = "macos")]
+        {
+            window.set_background_color(0x0000_0001);
+            crate::mac::paint_window(window.window_handle(), colors, grain);
+        }
+        #[cfg(not(target_os = "macos"))]
+        window.set_background_color(colors[0]);
     }
     if let Some(panel) = card_panel() {
         panel.set_background_color(card_color);
@@ -3306,6 +3371,19 @@ fn set_window_colors(window_color: u32, card_color: u32) {
     if let Some(card) = CARD.with_borrow(Clone::clone) {
         card.set_visible((!fills_window()).into());
     }
+}
+
+/// Tells the sidebars the window's width, which their gradient spans like the window's.
+fn send_window_width() {
+    let Some(size) = WINDOW.with_borrow(|window| window.as_ref().map(|w| w.size())) else {
+        return;
+    };
+    let event = format!(
+        r#"new CustomEvent("arbalete:window-width", {{ detail: {} }})"#,
+        size.width
+    );
+    dispatch(&SIDEBAR, &event);
+    dispatch(&REVEAL_VIEW, &event);
 }
 
 /// Opens a profile's web data in its own directory, `Profile <id>`: Chromium only accepts profile
@@ -3431,6 +3509,7 @@ pub fn run(command: Command) {
         (Command::Ready, _) => {
             send_state();
             send_downloads();
+            send_window_width();
         }
         (Command::Download(action, id), _) => download_command(action, id),
         (Command::ShowDownloads, _) => show_downloads(),
@@ -3601,8 +3680,8 @@ pub fn run(command: Command) {
         (Command::SetSpaceEmoji(id, emoji), _) => {
             let _ = update_sidebar(|sidebar| sidebar.set_space_emoji(id, &emoji));
         }
-        (Command::ColorSpace(id, color), _) => {
-            let _ = update_sidebar(|sidebar| sidebar.set_space_color(id, color));
+        (Command::SetSpaceTheme(id, theme), _) => {
+            let _ = update_sidebar(|sidebar| sidebar.set_space_theme(id, theme));
         }
         (Command::ToggleSpace(id), _) => {
             let _ = update_sidebar(|sidebar| sidebar.toggle_space(id));
@@ -3621,7 +3700,14 @@ pub fn run(command: Command) {
         (Command::CloseImport, _) => close_import(),
         (Command::Import(choices), _) => run_import(choices),
         (Command::OpenFullDiskAccess, _) => open_full_disk_access(),
-        (Command::WindowColors { window, card }, _) => set_window_colors(window, card),
+        (
+            Command::WindowColors {
+                card,
+                grain,
+                colors,
+            },
+            _,
+        ) => set_window_colors(card, grain, &colors),
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
         (Command::Reload, Some(browser)) => browser.reload(),
@@ -3652,6 +3738,12 @@ pub fn run(command: Command) {
         (Command::HideFind, browser) => hide_find(browser.as_ref()),
         (Command::ShowSiteControls(button), _) => show_site_controls(button),
         (Command::HideSiteControls, _) => hide_site_controls(),
+        (Command::ShowThemePicker(id), _) => show_theme_picker(id),
+        (Command::HideThemePicker, _) => {
+            if let Some(controller) = THEME.with_borrow(Clone::clone) {
+                controller.set_visible(0);
+            }
+        }
         (Command::SiteControlsHeight(height), _) => {
             SITE_HEIGHT.set(height);
             place_site_controls();
@@ -3846,6 +3938,8 @@ wrap_window_delegate! {
                 place_find();
             }
             update_drag_regions();
+            send_window_width();
+            place_theme_picker();
         }
     }
 
@@ -3920,6 +4014,13 @@ wrap_window_delegate! {
             controller.set_visible(0);
             SITE_VIEW.set(Some(site));
             SITE.set(Some(controller));
+            let theme = browser_view(UiClient::new(), &format!("{UI_ORIGIN}index.html#theme"), no_width, None);
+            let controller = window
+                .add_overlay_view(Some(&mut View::from(&theme)), DockingMode::CUSTOM, 1)
+                .expect("theme picker");
+            controller.set_visible(0);
+            THEME_VIEW.set(Some(theme));
+            THEME.set(Some(controller));
             window.show();
             WINDOW.set(Some(window));
             place_card();
@@ -5402,7 +5503,7 @@ mod tests {
         state.sidebar.set_space_emoji(work, "💼").unwrap();
         state
             .sidebar
-            .set_space_color(work, arbalete_core::sidebar::Color::Blue)
+            .set_space_theme(work, arbalete_core::sidebar::Color::Blue.into())
             .unwrap();
         // The library glances at every Space's pinned tabs, folders closed.
         let pinned = state.sidebar.spaces()[1].pinned;
@@ -5417,9 +5518,10 @@ mod tests {
             .unwrap();
         let json = state.to_json();
         assert_eq!(json["space"], serde_json::json!(work));
+        let theme = |color: &str| serde_json::json!({ "colors": [color], "mode": "auto", "intensity": 0.25, "noise": 0.0 });
         let spaces = serde_json::json!([
-            { "id": home, "title": "Home", "emoji": null, "color": "purple", "profile": profile, "pinned": [] },
-            { "id": work, "title": "Work", "emoji": "💼", "color": "blue", "profile": profile, "pinned": [
+            { "id": home, "title": "Home", "emoji": null, "theme": theme("#6e56cf"), "profile": profile, "pinned": [] },
+            { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
                 { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false },
             ] },

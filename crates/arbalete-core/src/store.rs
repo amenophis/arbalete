@@ -68,7 +68,7 @@ mod tests {
         let work = sidebar.add_space("Work", home.profile).unwrap();
         sidebar.display(work).unwrap();
         sidebar.set_space_emoji(work, "💼").unwrap();
-        sidebar.set_space_color(work, Color::Green).unwrap();
+        sidebar.set_space_theme(work, Color::Green.into()).unwrap();
 
         save(&sidebar, &path).unwrap();
         assert_eq!(load(&path).unwrap(), Some(sidebar));

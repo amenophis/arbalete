@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { COLORS, mix, type Space, send, type Tint, WindowPainter } from "./bridge";
+import { mix, type Space, send, type Tint, WindowPainter } from "./bridge";
+import { blend, neutralPaint, type Paint, paint, systemDark } from "./theme";
 
 // The Spaces' pages sit side by side and the sidebar shows one at a time. A position counts in
 // pages: 0 shows the first Space, 0.5 half of it and half of the second. One more page after the
@@ -105,12 +106,22 @@ export function tint(spaces: Space[], position: number): Tint | undefined {
   const clamped = Math.min(spaces.length, Math.max(-1, position));
   const left = Math.floor(clamped);
   const share = clamped - left;
-  const color = (page: number) => spaces[page] && COLORS[spaces[page].color];
+  const color = (page: number) => spaces[page]?.theme.colors[0];
   const [from, to] = [color(left), color(left + 1)];
   return {
-    color: from && to ? mix(to, from, share * 100) : (from ?? to ?? COLORS.gray),
+    color: from && to ? mix(to, from, share * 100) : (from ?? to ?? "#8b8d98"),
     strength: (from ? 1 - share : 0) + (to ? share : 0),
   };
+}
+
+// The window's paint between the two pages a position shows: a page that is no Space's has the
+// neutral one, `system` telling the system's appearance.
+export function paintAt(spaces: Space[], position: number, system: boolean): Paint {
+  const clamped = Math.min(spaces.length, Math.max(-1, position));
+  const left = Math.floor(clamped);
+  const of = (page: number) =>
+    spaces[page] ? paint(spaces[page].theme, system) : neutralPaint(system);
+  return blend(of(left), of(left + 1), clamped - left);
 }
 
 // How far, in pages, a Space's favorites move within its page so that they stand still: between
@@ -285,6 +296,15 @@ class Pager {
       this.sidebar.style.setProperty("--space", color.color);
       this.sidebar.style.setProperty("--tinted", String(color.strength));
     }
+    const look = paintAt(this.spaces, this.position, systemDark());
+    if (this.sidebar) {
+      const [first, second = first, third] = look.stops;
+      this.sidebar.style.setProperty("--stop-1", first);
+      this.sidebar.style.setProperty("--stop-2", second);
+      this.sidebar.style.setProperty("--stop-3", third ?? "transparent");
+      this.sidebar.style.setProperty("--grain", String(look.grain));
+      this.sidebar.dataset.appearance = look.dark ? "dark" : "light";
+    }
     // The library takes the whole sidebar, from the moment the pages head for it (index.css).
     this.sidebar?.toggleAttribute("data-library", this.page === -1);
     // Only the first Space's page fades, and a reordering may make another page first.
@@ -308,8 +328,8 @@ class Pager {
       this.bubble.toggleAttribute("data-armed", armed(this.pull));
     }
     const space = this.spaces[this.displayed];
-    if (this.native && color && space) {
-      this.painter.paint(color, COLORS[space.color]);
+    if (this.native && space) {
+      this.painter.paint(look, space.theme.colors[0]);
       this.moveCard();
     }
   }
@@ -324,14 +344,19 @@ class Pager {
     send(card);
   }
 
+  // The neutrals follow the system's appearance.
+  private readonly repaint = () => this.render();
+
   start() {
-    this.painter.start();
+    window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", this.repaint);
   }
 
   stop() {
     cancelAnimationFrame(this.frame);
     this.frame = 0;
-    this.painter.stop();
+    window
+      .matchMedia?.("(prefers-color-scheme: dark)")
+      .removeEventListener?.("change", this.repaint);
   }
 }
 
