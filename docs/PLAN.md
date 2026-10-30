@@ -365,6 +365,9 @@ Commit sequence (Arc first, the browser Arbalete users are most likely to come f
   it plays media.
 - Memory pressure and low-power detection on each OS.
 - Never-suspended cases (media, capture, Split View, exception patterns), settings and sidebar indicator.
+  Done but Split View, which does not exist yet: pages playing media (their elements or the Media Session) or
+  capturing, and the sites kept awake from the site controls, are never suspended; a setting turns suspension
+  off, and the sidebar dims the tabs asleep.
 - Acceptance: with 100 tabs open, memory used after unloading compared with all tabs alive, measured and recorded.
 
 ### Phase 8 — Link routing

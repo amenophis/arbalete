@@ -405,6 +405,7 @@ function Items({
         title={item.title || item.url}
         favicon={item.favicon}
         muted={item.muted ?? false}
+        asleep={item.asleep ?? false}
         active={item.id === active}
         renaming={item.id === renaming}
         onRename={onRename}
@@ -506,12 +507,13 @@ function NameField({
 }
 
 // Every state update brings new tab objects: primitive props let unchanged rows skip rendering.
-// Its menu's Rename Tab edits its name in place; a muted tab says so.
+// Its menu's Rename Tab edits its name in place; a muted tab says so, and an asleep one is dimmed.
 const TabItem = memo(function TabItem({
   id,
   title,
   favicon,
   muted,
+  asleep,
   active,
   renaming,
   onRename,
@@ -520,6 +522,7 @@ const TabItem = memo(function TabItem({
   title: string;
   favicon: string | null;
   muted: boolean;
+  asleep: boolean;
   active: boolean;
   renaming: boolean;
   onRename: Rename;
@@ -535,11 +538,12 @@ const TabItem = memo(function TabItem({
     );
   }
   return (
-    <li className="tab-row" data-id={id}>
+    <li className="tab-row" data-id={id} data-asleep={asleep || undefined}>
       <button
         type="button"
         className="tab"
         aria-current={active ? "page" : undefined}
+        title={asleep ? "Asleep to save memory: it reloads when shown" : undefined}
         onClick={() => send(`select/${id}`)}
       >
         <TabIcon favicon={favicon} />
