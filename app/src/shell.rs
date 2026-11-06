@@ -8660,6 +8660,9 @@ wrap_display_handler! {
             let Some(tab) = page_tab(browser) else {
                 return little_changed(browser, |little| little.url = url);
             };
+            if tab_has(tab, |tab| tab.url == url) {
+                return;
+            }
             update_sidebar(|sidebar| {
                 if let Some(tab) = sidebar.tab_mut(tab) {
                     // Another site's page has its own icon, or none: the previous page's goes
@@ -8683,6 +8686,9 @@ wrap_display_handler! {
             let Some(tab) = page_tab(browser) else {
                 return little_changed(browser, |little| little.title = title);
             };
+            if tab_has(tab, |tab| tab.title == title) {
+                return;
+            }
             update_sidebar(|sidebar| {
                 if let Some(tab) = sidebar.tab_mut(tab) {
                     tab.title = title;
@@ -8714,6 +8720,16 @@ wrap_display_handler! {
             }
         }
     }
+}
+
+/// Whether the sidebar's tab `tab` is as `is` asks.
+fn tab_has(tab: NodeId, is: impl FnOnce(&Tab) -> bool) -> bool {
+    STATE.with_borrow(|state| {
+        state
+            .sidebar
+            .node(tab)
+            .is_some_and(|node| matches!(&node.kind, NodeKind::Tab(tab) if is(tab)))
+    })
 }
 
 /// The site of a url: its host and port, or the url itself when it has no host, like about:blank.
