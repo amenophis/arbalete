@@ -7045,10 +7045,6 @@ wrap_app! {
             }
         }
 
-        fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
-            crate::scheme::register(registrar);
-        }
-
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
             Some(ArbaleteBrowserProcessHandler::new(self.data_dir.clone()))
         }
