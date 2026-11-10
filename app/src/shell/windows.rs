@@ -236,6 +236,13 @@ wrap_app! {
             // Sites asking to sign in reach the sign-in prompt (auth_credentials): Chrome's own
             // prompt has no tab to show in.
             command_line.append_switch(Some(&CefString::from("disable-chrome-login-prompt")));
+            // Sites see Arbalete next to Chromium in the client hints' brands, like Brave, and
+            // Chrome's own User-Agent, which WhatsApp Web checks. A switch of
+            // amenophis/cef-codecs' CEF, client hints only from build 6.
+            command_line.append_switch_with_value(
+                Some(&CefString::from("user-agent-brand")),
+                Some(&CefString::from(concat!("Arbalete/", env!("CARGO_PKG_VERSION")))),
+            );
             // The helper extension, in every profile, tells extensions which tab is which.
             if let Some(dir) = extensions::helper_dir() {
                 command_line.append_switch_with_value(
