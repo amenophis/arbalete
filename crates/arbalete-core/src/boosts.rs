@@ -490,7 +490,7 @@ mod tests {
             site("http://user@news.example.com/").as_deref(),
             Some("news.example.com")
         );
-        assert_eq!(site("arbalete://settings/"), None);
+        assert_eq!(site("arb://settings/"), None);
         assert_eq!(site("about:blank"), None);
         assert_eq!(site("file:///tmp/a.html"), None);
     }

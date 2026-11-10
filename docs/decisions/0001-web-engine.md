@@ -122,7 +122,7 @@ To answer before the compatibility layer is built, in this order:
    bundle (replaced by decision 0011: our CEF build's DevTools session gives the tab id). That switch loads it in every request context, the app's own UI included, which the helper then
    sees but does not touch. Installed extensions reached the UI too: their content scripts ran in it while it
    was served under `https://arbalete.ui/` (Dark Reader restyled the toolbar). The UI is now served from a
-   scheme of its own, `arbalete://ui/`, which content scripts never match.
+   scheme of its own, `arb://ui/`, which content scripts never match.
 3. **Installing from the Chrome Web Store** when every browser is Alloy style. Lead: a dedicated Chrome-style
    window for the Web Store. **Answered (2026-10-28)**: a Chrome-style window of its own, in the profile's
    request context, on the extension's Web Store page (`chromewebstore.google.com/detail/<id>`), has the
@@ -202,7 +202,7 @@ To answer before the compatibility layer is built, in this order:
   agreement with Google.
 - **Chromium's own pages in Alloy style (2026-11-07).** Build 2 of that CEF carries a patch letting Alloy-style
   browsers show Chromium's WebUI pages. Its settings, extensions, history, downloads, password manager, flags and
-  internals open in ordinary tabs, shown as `arbalete://` addresses (`app/src/shell/chrome_pages.rs`). The pages
+  internals open in ordinary tabs, shown as `arb://` addresses (`app/src/shell/chrome_pages.rs`). The pages
   that still crash in a tab, like `chrome://bookmarks`, open in Chromium's window.
 - With a CEF build of its own, the fallback above, a patched CEF, is now within reach should Alloy style fall
   short; it has not been needed.

@@ -343,7 +343,7 @@ pub fn add_capture(dir: &Path, capture: NewCapture) -> Result<u64, Error> {
     Ok(id)
 }
 
-const SCHEME: &str = "arbalete://easel/";
+const SCHEME: &str = "arb://easel/";
 
 /// The address of the tab showing the Easel `number`.
 pub fn url(number: u64) -> String {
@@ -562,7 +562,7 @@ mod tests {
     #[test]
     fn reads_an_easel_from_its_address() {
         assert_eq!(number(&url(12)), Some(12));
-        assert_eq!(number("arbalete://easel/x"), None);
+        assert_eq!(number("arb://easel/x"), None);
         assert_eq!(number("https://example.com/"), None);
     }
 

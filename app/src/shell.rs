@@ -106,7 +106,7 @@ use views::*;
 pub use windows::*;
 
 /// The UI is served by the app itself under this origin, of its own scheme (app/src/scheme.rs).
-const UI_ORIGIN: &str = "arbalete://ui/";
+const UI_ORIGIN: &str = "arb://ui/";
 
 /// CEF's root cache path, which holds every profile's web data. Read from the IO thread too,
 /// which serves the favicons.
@@ -1186,7 +1186,7 @@ mod tests {
         assert_eq!(
             space_icon(&sidebar.spaces()[0]),
             Some(format!(
-                "site:arbalete://ui/favicon/{profile}/{}",
+                "site:arb://ui/favicon/{profile}/{}",
                 arbalete_core::favicon::file_name(source)
             ))
         );
@@ -1370,7 +1370,7 @@ mod tests {
         assert_eq!(closed["url"], "https://example.com/");
         assert_eq!(closed["closedAt"], 60_000);
         let favicon = format!(
-            "arbalete://ui/favicon/{}/d41d8cd98f00b204e9800998ecf8427e.png",
+            "arb://ui/favicon/{}/d41d8cd98f00b204e9800998ecf8427e.png",
             serde_json::json!(profile)
         );
         assert_eq!(closed["favicon"], favicon);

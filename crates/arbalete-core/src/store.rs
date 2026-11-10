@@ -97,12 +97,14 @@ pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// Loads the session, or `None` when nothing was saved yet.
 pub fn load(path: &Path) -> Result<Option<Session>, LoadError> {
-    let json = match fs::read(path) {
+    let json = match fs::read_to_string(path) {
         Ok(json) => json,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(LoadError::Io(error)),
     };
-    let saved: Saved = serde_json::from_slice(&json).map_err(LoadError::Invalid)?;
+    // Internal pages moved from arbalete:// to arb://: the tabs saved before move with them.
+    let migrated = json.replace("\"arbalete://", "\"arb://");
+    let saved: Saved = serde_json::from_str(&migrated).map_err(LoadError::Invalid)?;
     if saved.version != VERSION {
         return Err(LoadError::UnsupportedVersion(saved.version));
     }
@@ -110,6 +112,9 @@ pub fn load(path: &Path) -> Result<Option<Session>, LoadError> {
         .sidebar
         .check_invariants()
         .map_err(LoadError::Inconsistent)?;
+    if migrated != json {
+        write_atomically(path, migrated.as_bytes()).map_err(LoadError::Io)?;
+    }
     Ok(Some(Session {
         sidebar: saved.sidebar,
         place: saved.place,
@@ -186,6 +191,48 @@ mod tests {
         let session = load(&path).unwrap().unwrap();
         assert_eq!(session.place, None);
         assert_eq!(session.windows, vec![Window { view, place: None }]);
+    }
+
+    #[test]
+    fn moves_the_tabs_of_arbalete_addresses_to_arb() {
+        let dir = TestDir::new("store-arb");
+        let path = dir.0.join("sidebar.json");
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].clone();
+        sidebar
+            .add_tab(home.pinned, "arbalete://easel/1", "Plan")
+            .unwrap();
+        sidebar.open_tab(home.id, "arbalete://settings").unwrap();
+        sidebar
+            .open_tab(home.id, "https://a.test/?q=arbalete://x")
+            .unwrap();
+        let session = Session {
+            sidebar,
+            ..Session::default()
+        };
+        save(&session, &path).unwrap();
+
+        let urls = |session: &Session| -> Vec<String> {
+            let mut urls: Vec<_> = session
+                .sidebar
+                .tabs()
+                .map(|(_, tab)| tab.url.clone())
+                .collect();
+            urls.sort();
+            urls
+        };
+        let loaded = load(&path).unwrap().unwrap();
+        assert_eq!(
+            urls(&loaded),
+            [
+                "arb://easel/1",
+                "arb://settings",
+                "https://a.test/?q=arbalete://x"
+            ]
+        );
+        // Saved back: the file holds the new addresses.
+        assert!(!fs::read_to_string(&path).unwrap().contains("\"arbalete://"));
+        assert_eq!(urls(&load(&path).unwrap().unwrap()), urls(&loaded));
     }
 
     #[test]

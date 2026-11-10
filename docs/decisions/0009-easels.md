@@ -37,7 +37,7 @@ A first version of local Easels, with live captures and Arc's look, without shar
   version and the objects) and `images/`, the pictures its objects show. `arbalete-core` (`easel.rs`) loads and
   saves it; a save writes atomically, refuses a picture missing from `images/` or a name that leaves it, and
   deletes the pictures no object shows any more.
-- **In the sidebar**: an Easel is a tab whose address is `arbalete://easel/<number>`, named like a tab
+- **In the sidebar**: an Easel is a tab whose address is `arb://easel/<number>`, named like a tab
   ("Untitled Easel" until renamed) and shown with a drawing icon instead of a favicon. Being a tab, it pins,
   moves into folders and favorites, archives from "Today", closes, reopens with ⇧⌘T, restores from the archive
   and shows in the Command Bar's tab search without new code. Like Arc's, it goes into a split, beside a

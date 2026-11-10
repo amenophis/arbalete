@@ -1,4 +1,4 @@
-//! Chromium's own pages and windows: its settings and others in tabs, shown as arbalete://, the
+//! Chromium's own pages and windows: its settings and others in tabs, shown as arb://, the
 //! rest in a window, the windows it asks the user in, the browsers it opens by itself, and the
 //! pages drawn nowhere.
 
@@ -75,7 +75,7 @@ const TAB_PAGES: [&str; 26] = [
 ];
 
 /// The scheme the user sees Chromium's pages that open in a tab under, as Arbalete's own.
-const SHOWN_SCHEME: &str = "arbalete://";
+const SHOWN_SCHEME: &str = "arb://";
 
 /// Whether `url` is one of Chromium's own pages that open in a tab.
 pub(super) fn is_tab_page(url: &str) -> bool {
@@ -95,7 +95,7 @@ fn page_host<'a>(url: &'a str, scheme: &str) -> Option<&'a str> {
         .then_some(host)
 }
 
-/// The address the user sees for `url`: arbalete://settings for chrome://settings, a page that
+/// The address the user sees for `url`: arb://settings for chrome://settings, a page that
 /// opens in a tab; any other as it is. Only what shows changes: the session and the history
 /// keep Chromium's.
 pub(super) fn shown_url(url: &str) -> String {
@@ -106,7 +106,7 @@ pub(super) fn shown_url(url: &str) -> String {
 }
 
 /// The address to load for `url`, typed or opened by the user: chrome://settings for
-/// arbalete://settings (shown_url); any other as it is.
+/// arb://settings (shown_url); any other as it is.
 pub(super) fn url_to_load(url: &str) -> String {
     match page_host(url, SHOWN_SCHEME) {
         Some(_) => format!("chrome://{}", &url[SHOWN_SCHEME.len()..]),
@@ -129,7 +129,7 @@ pub(super) fn page_may_open(page: &str, url: &str) -> bool {
         .map(|(scheme, _)| scheme.to_ascii_lowercase());
     match scheme.as_deref() {
         Some("chrome") => is_tab_page(page),
-        Some("arbalete" | "devtools" | "view-source") => false,
+        Some("arb" | "devtools" | "view-source") => false,
         _ => true,
     }
 }
@@ -632,15 +632,15 @@ mod tests {
     }
 
     #[test]
-    fn shows_chromium_pages_that_open_in_a_tab_as_arbalete_s() {
-        assert_eq!(shown_url("chrome://settings"), "arbalete://settings");
+    fn shows_chromium_pages_that_open_in_a_tab_as_arb_s() {
+        assert_eq!(shown_url("chrome://settings"), "arb://settings");
         assert_eq!(
             shown_url("chrome://settings/content/siteDetails?site=https%3A%2F%2Fa.test"),
-            "arbalete://settings/content/siteDetails?site=https%3A%2F%2Fa.test"
+            "arb://settings/content/siteDetails?site=https%3A%2F%2Fa.test"
         );
         assert_eq!(
             shown_url("chrome://extensions/?id=a"),
-            "arbalete://extensions/?id=a"
+            "arb://extensions/?id=a"
         );
         assert_eq!(shown_url("chrome://bookmarks/"), "chrome://bookmarks/");
         assert_eq!(shown_url("chrome://settingsx/"), "chrome://settingsx/");
@@ -648,18 +648,15 @@ mod tests {
             shown_url("https://settings.test/"),
             "https://settings.test/"
         );
-        assert_eq!(shown_url("arbalete://ui/"), "arbalete://ui/");
+        assert_eq!(shown_url("arb://ui/"), "arb://ui/");
     }
 
     #[test]
-    fn loads_arbalete_addresses_as_chromium_s() {
-        assert_eq!(url_to_load("arbalete://settings"), "chrome://settings");
-        assert_eq!(
-            url_to_load("Arbalete://history/?q=a"),
-            "chrome://history/?q=a"
-        );
-        assert_eq!(url_to_load("arbalete://bookmarks"), "arbalete://bookmarks");
-        assert_eq!(url_to_load("arbalete://ui/"), "arbalete://ui/");
+    fn loads_arb_addresses_as_chromium_s() {
+        assert_eq!(url_to_load("arb://settings"), "chrome://settings");
+        assert_eq!(url_to_load("Arb://history/?q=a"), "chrome://history/?q=a");
+        assert_eq!(url_to_load("arb://bookmarks"), "arb://bookmarks");
+        assert_eq!(url_to_load("arb://ui/"), "arb://ui/");
         assert_eq!(url_to_load("https://a.test/"), "https://a.test/");
         for url in [
             "chrome://settings/help",
@@ -676,7 +673,7 @@ mod tests {
         assert!(is_tab_page("chrome://downloads"));
         assert!(!is_tab_page("chrome://bookmarks"));
         assert!(!is_tab_page("chrome://newtab/"));
-        assert!(!is_tab_page("arbalete://settings"));
+        assert!(!is_tab_page("arb://settings"));
     }
 
     #[test]
@@ -688,15 +685,15 @@ mod tests {
         assert!(page_may_open("chrome://settings/", "chrome://extensions/"));
         assert!(page_may_open("chrome://settings/", "https://a.test/"));
         assert!(!page_may_open("chrome://bookmarks/", "chrome://settings/"));
-        assert!(!page_may_open("chrome://settings/", "arbalete://ui/"));
+        assert!(!page_may_open("chrome://settings/", "arb://ui/"));
         for url in [
             "chrome://settings",
             "CHROME://settings",
             " chrome://settings",
             "chr\tome://settings",
             "chrome:settings",
-            "arbalete://settings",
-            "arbalete://ui/",
+            "arb://settings",
+            "arb://ui/",
             "devtools://devtools/bundled/inspector.html",
             "view-source:chrome://settings",
         ] {
