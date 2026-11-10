@@ -154,6 +154,13 @@ a:focus-visible, summary:focus-visible {
 .hero .subtitle { margin: 0; font-size: 20px; line-height: 1.5; color: var(--muted); max-width: 30em; }
 .actions { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
 .small { margin: 0; font-size: 14px; color: var(--muted); }
+/* The Homebrew command, with its copy button. */
+.brew { display: flex; flex-direction: column; gap: 8px; max-width: 100%; }
+.command { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 16px; min-height: 48px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); max-width: 100%; }
+.command code { font: 14px/1.4 ui-monospace, "SF Mono", Menlo, monospace; min-width: 0; }
+.copy { flex-shrink: 0; min-height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-strong); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.copy:hover { border-color: var(--accent-text); }
+.copy:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 
 /* The browser window drawn in the hero. */
 .window { position: relative; border-radius: 16px; border: 1px solid var(--line); background: var(--win); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.03) inset; overflow: hidden; aspect-ratio: 16 / 11; display: flex; }

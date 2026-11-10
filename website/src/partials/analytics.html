@@ -15,9 +15,9 @@
     respect_dnt: true,
     person_profiles: "identified_only"
   });
-  // A click on a link marked data-event, like the downloads: its name and where it was.
+  // A click on a link or button marked data-event, like the downloads: its name and where it was.
   document.addEventListener("click", function (event) {
-    var link = event.target.closest && event.target.closest("a[data-event]");
-    if (link) posthog.capture(link.dataset.event, { place: link.dataset.place || "", version: link.dataset.version || "", href: link.href });
+    var link = event.target.closest && event.target.closest("[data-event]");
+    if (link) posthog.capture(link.dataset.event, { place: link.dataset.place || "", version: link.dataset.version || "", href: link.href || "" });
   });
 </script>

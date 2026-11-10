@@ -39,6 +39,13 @@
       </a>
       <a class="btn btn-ghost" href="https://github.com/amenophis/arbalete" data-event="github_clicked" data-place="hero">View on GitHub</a>
     </div>
+    <div class="brew">
+      <p class="small">Or with <a href="https://brew.sh">Homebrew</a>, which skips the first launch's “Open Anyway” step:</p>
+      <div class="command">
+        <code id="brew-command">brew install --cask amenophis/tap/arbalete</code>
+        <button type="button" class="copy" data-copy="brew-command" data-event="brew_copied" data-place="hero">Copy</button>
+      </div>
+    </div>
     <p class="small">Preview builds can be rough. Feedback is welcome. · MPL-2.0</p>
   </div>
   <div class="window" role="img" aria-label="Illustration of a browser window with a vertical sidebar of tabs on the left and a page on the right">
@@ -174,5 +181,20 @@
 
 </main>
 <!-- @footer -->
+<script>
+  // A button marked data-copy copies the text of the element it names, or selects it when the
+  // browser refuses the clipboard.
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest && event.target.closest("[data-copy]");
+    if (!button) return;
+    var text = document.getElementById(button.dataset.copy);
+    navigator.clipboard.writeText(text.textContent).then(function () {
+      button.textContent = "Copied";
+      setTimeout(function () { button.textContent = "Copy"; }, 2000);
+    }, function () {
+      getSelection().selectAllChildren(text);
+    });
+  });
+</script>
 </body>
 </html>
