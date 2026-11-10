@@ -3,6 +3,7 @@
 // (app/src/command.rs).
 
 import AppKit
+import Combine
 import SwiftUI
 
 /// Runs a command from a window, given as JSON (command(_:_:)).
@@ -627,6 +628,8 @@ final class NativeWindow {
     private(set) weak var window: NSWindow?
     /// Closes the Command Bar on a click out of it (closeCommandBar).
     private var clicks: Any?
+    /// Gives the panels the displayed Space's appearance as it changes.
+    private var appearance: AnyCancellable?
 
     init(window: NSWindow, content: NSView, app: AppModel) {
         model = app
@@ -744,6 +747,13 @@ final class NativeWindow {
         let viewer = MediaViewer(in: window, model: app)
         self.viewer = viewer
         app.viewingChanged = { [weak viewer] in viewer?.update() }
+        // Like Arc's, the Command Bar and the other panels are light or dark as the displayed
+        // Space's theme is, as the sidebar is (SidebarHost), not as the system is.
+        appearance = app.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self else { return }
+            let appearance = NSAppearance(named: isDark(app.space?.theme) ? .darkAqua : .aqua)
+            self.surfaces.values.forEach { $0.appearance = appearance }
+        }
     }
 
     /// Closes its panels, the window they belong to closing.
