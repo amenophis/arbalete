@@ -22,3 +22,10 @@ void arbalete_window_closed(unsigned int id);
 /// Whether the Little Arbalete window `id` may close now: the app first closes its page, which
 /// closes the window.
 bool arbalete_little_should_close(unsigned int id);
+
+/// Whether the Picture in Picture window `id` may close now: the app first closes its page, which
+/// closes the window.
+bool arbalete_picture_should_close(unsigned int id);
+
+/// The Picture in Picture window `id`'s bar asks for its page's tab: it shows, and the window goes.
+void arbalete_picture_back(unsigned int id);

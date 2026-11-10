@@ -91,7 +91,7 @@ use overlay::*;
 pub use pages::*;
 pub use peek::*;
 use permission_prompt::*;
-use picture::*;
+pub use picture::*;
 pub use profiles::opened_web_data;
 use profiles::*;
 pub use session::*;
