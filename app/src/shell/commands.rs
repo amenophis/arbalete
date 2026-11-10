@@ -494,9 +494,8 @@ fn run_command(command: Command) {
             let profile = displayed_profile();
             let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
             let Some(extension) = extension else { return };
-            // Chromium confirms it otherwise.
             #[cfg(target_os = "macos")]
-            if extensions::removes_itself(profile, &id) {
+            {
                 let question = format!("Remove “{}”?", extension.name);
                 let detail = "Its data in this profile is deleted too.";
                 if !crate::mac::confirm(&question, detail, "Remove") {
