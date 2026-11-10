@@ -119,7 +119,7 @@ To answer before the compatibility layer is built, in this order:
    its tab id. `chrome.tabs.get(tabId)` then works, with `active: false` and `windowId: -1`, as the pages sit
    in no Chromium window: the shim fills in both. Third-party extensions lack the `debugger` permission, so
    Arbalete ships a small helper extension without content scripts, loaded with `--load-extension` from the
-   bundle. That switch loads it in every request context, the app's own UI included, which the helper then
+   bundle (replaced by decision 0011: our CEF build's DevTools session gives the tab id). That switch loads it in every request context, the app's own UI included, which the helper then
    sees but does not touch. Installed extensions reached the UI too: their content scripts ran in it while it
    was served under `https://arbalete.ui/` (Dark Reader restyled the toolbar). The UI is now served from a
    scheme of its own, `arbalete://ui/`, which content scripts never match.
