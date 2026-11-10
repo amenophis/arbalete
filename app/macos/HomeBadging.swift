@@ -82,6 +82,8 @@ final class RecentItems: ObservableObject {
         // Like Arc's, a new item drops onto the button; the ones there at launch do not.
         let ids = Set(items.map(\.id))
         defer { known = (known ?? []).union(ids) }
+        // The download the badge shows may have finished since.
+        armDismissal()
         guard let known, let fresh = items.first(where: { !known.contains($0.id) && $0.date > seenSince })
         else { return }
         // Like Arc's, a new download first flies from the page to the button.
@@ -94,16 +96,27 @@ final class RecentItems: ObservableObject {
 
     private func show(_ item: RecentItem) {
         dismissal?.cancel()
+        dismissal = nil
         badge = item.id
-        // Like Arc's, measured: gone after about five seconds, but a download while it runs.
+        armDismissal()
+    }
+
+    /// Like Arc's, read from its code: the badge stays while its download runs, then goes thirty
+    /// seconds after the download completed; any other item's after five seconds.
+    private func armDismissal() {
+        guard let badge, dismissal == nil else { return }
+        // Failed and canceled downloads leave the items: their badge goes with them.
+        guard let item = items.first(where: { $0.id == badge }) else { return dismissBadge() }
         guard !item.running else { return }
         let dismiss = DispatchWorkItem { [weak self] in self?.dismissBadge() }
         dismissal = dismiss
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.9, execute: dismiss)
+        let delay: Double = item.kind == .download ? 30 : 5
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: dismiss)
     }
 
     func dismissBadge() {
         dismissal?.cancel()
+        dismissal = nil
         badge = nil
     }
 
@@ -240,7 +253,10 @@ struct LibraryEntry: View {
         closing.wrappedValue?.cancel()
         let over = hoveredButton.wrappedValue || hoveredFlyout.wrappedValue
         let change = DispatchWorkItem { [recent] in
-            if recent.expanded != over { recent.expanded = over }
+            guard recent.expanded != over else { return }
+            recent.expanded = over
+            // Like Arc's (onDidExpandFlyout): the items unfolded, the badge is seen.
+            if over { recent.dismissBadge() }
         }
         closing.wrappedValue = change
         DispatchQueue.main.asyncAfter(deadline: .now() + (over ? 0.12 : 0.08), execute: change)
