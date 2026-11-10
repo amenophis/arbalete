@@ -64,6 +64,16 @@ final class Surface {
         didSet { tintView.layer?.backgroundColor = tint?.cgColor }
     }
     private let parent: NSWindow
+    /// Its appearance, light or dark: like Arc's, the displayed Space's theme's.
+    var appearance: NSAppearance? {
+        get { holder.appearance }
+        set {
+            holder.appearance = newValue
+            holder.effectiveAppearance.performAsCurrentDrawingAppearance {
+                border.strokeColor = NSColor.separatorColor.cgColor
+            }
+        }
+    }
     /// How rounded it is.
     var radius: CGFloat {
         didSet { if radius != oldValue { shape() } }
