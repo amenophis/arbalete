@@ -3,8 +3,9 @@
 //! A DevTools session the app opens on a page of its own sees every target of the browser: it
 //! attaches to each extension's service worker as it starts and injects a shim
 //! (extension-shim.js), which answers with the profile's active tab and asks Arbalete to create or
-//! update tabs. A helper extension (app/extension), loaded in every profile, tells each page's tab
-//! id, which extensions know pages by.
+//! update tabs. The same session tells each page's tab id, which extensions know pages by, and
+//! manages the profiles' extensions, through the Extensions domain amenophis/cef-codecs extends
+//! from build 7.
 
 use arbalete_core::sidebar::{NodeId, ProfileId};
 use cef::*;
@@ -14,14 +15,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-
-/// The helper extension's directory in the bundle, if it is there: `cef` builds outside the
-/// bundle run without it.
-pub fn helper_dir() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?.parent()?.join("Resources/arbalete-helper");
-    dir.join("manifest.json").exists().then_some(dir)
-}
 
 /// An extension the user installed in a profile, as its button shows it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -82,8 +75,7 @@ fn preference_time(value: &Value) -> Option<u64> {
 
 /// Where Chromium installs extensions, as its preferences record it: from the Web Store or
 /// elsewhere into the profile (1), unpacked by the user (4), or by other programs (6, 7). Its own
-/// components (5) and extensions loaded from the command line (8), like the helper, are not the
-/// user's.
+/// components (5) and extensions loaded from the command line (8) are not the user's.
 const USER_LOCATIONS: [i64; 4] = [1, 4, 6, 7];
 
 /// The extensions installed in a profile's directory, enabled or not, by name.
@@ -250,9 +242,6 @@ fn localized(dir: &Path, manifest: &Value, text: &str) -> String {
     message.unwrap_or(text).to_string()
 }
 
-/// The helper extension's service worker, which every extension url is told apart from.
-const HELPER_SCRIPT: &str = "/arbalete-helper.js";
-
 const SHIM: &str = include_str!("extension-shim.js");
 
 /// The selected tab of a profile, as extensions see it.
@@ -266,10 +255,8 @@ pub struct ActiveTab {
     pub loading: bool,
 }
 
-/// A tab's page: its DevTools target, its browser context and, once the helper has told it, its
-/// tab id.
+/// A tab's page: its browser context and, once the session has told it, its tab id.
 struct Content {
-    target: String,
     context: String,
     tab_id: Option<i64>,
 }
@@ -277,15 +264,13 @@ struct Content {
 /// What a message sent in the session answers.
 enum Pending {
     /// Attaching to an extension's service worker, in a browser context.
-    Attach {
-        context: String,
-        extension: String,
-        helper: bool,
-    },
-    /// The helper's list of targets and their tab ids, in a browser context.
-    TabIds(String),
-    /// The helper's list of a profile's extensions, as Chromium has them now.
+    Attach { context: String, extension: String },
+    /// A page's tab id, by its browser's identifier.
+    TabId(i32),
+    /// A profile's extensions, as Chromium has them now.
     Extensions(ProfileId),
+    /// Removing an extension from a profile.
+    Uninstall(ProfileId, String),
 }
 
 #[derive(Default)]
@@ -298,10 +283,6 @@ struct Bridge {
     attached: HashSet<String>,
     /// The extensions' workers' sessions, with their browser context and extension id.
     workers: HashMap<String, (String, String)>,
-    /// The helper's session in each browser context.
-    helpers: HashMap<String, String>,
-    /// The helper's extension id, which its folder's path sets.
-    helper_id: Option<String>,
     /// Each profile's browser context.
     contexts: HashMap<ProfileId, String>,
     /// The pages, by their browser's identifier.
@@ -319,7 +300,7 @@ impl Bridge {
         Some(*profile)
     }
 
-    /// The tab id of a profile's active tab, once the helper has told it.
+    /// The tab id of a profile's active tab, once the session has told it.
     fn active_tab_id(&self, profile: ProfileId) -> Option<i64> {
         let page = self.tabs.get(&profile)?.as_ref()?.page?;
         self.contents.get(&page)?.tab_id
@@ -420,13 +401,15 @@ fn worker_started(context: &str, url: &str) {
     crate::shell::extension_installed();
 }
 
-/// Turns an extension of a profile on or off, through the profile's helper.
+/// Turns an extension of a profile on or off.
 pub fn set_enabled(profile: ProfileId, id: &str, enabled: bool) {
-    let id_json = serde_json::to_string(id).expect("a string");
-    helper_evaluate(
-        profile,
-        &format!("chrome.management.setEnabled({id_json}, {enabled})"),
-    );
+    if let Some(context) = context_of(profile) {
+        let params = json!({ "id": id, "browserContextId": context, "enabled": enabled });
+        send(
+            json!({ "method": "Extensions.setEnabled", "params": params }),
+            None,
+        );
+    }
     INSTALLED.with_borrow_mut(|installed| {
         let list = installed.get_mut(&profile).map(|(_, list)| list);
         if let Some(extension) = list
@@ -450,20 +433,9 @@ pub fn options_url(profile: ProfileId, id: &str) -> Option<String> {
     ))
 }
 
-/// Evaluates an expression in a profile's helper, which holds the `management` permission.
-fn helper_evaluate(profile: ProfileId, expression: &str) {
-    let session = BRIDGE.with_borrow(|bridge| {
-        let context = bridge.contexts.get(&profile)?;
-        bridge.helpers.get(context).cloned()
-    });
-    if let Some(session) = session {
-        send_in(
-            &session,
-            "Runtime.evaluate",
-            json!({ "expression": expression }),
-            None,
-        );
-    }
+/// A profile's browser context, once one of its pages has told it.
+fn context_of(profile: ProfileId) -> Option<String> {
+    BRIDGE.with_borrow(|bridge| bridge.contexts.get(&profile).cloned())
 }
 
 /// Reads a profile's extensions again, after their page may have changed them.
@@ -475,31 +447,23 @@ pub fn reload(profile: ProfileId) {
 }
 
 /// Reads a profile's extensions again: from Chromium's preferences, which list their files, then
-/// as Chromium has them now, from the helper (reconcile). Chromium writes its preferences only
+/// as Chromium has them now (reconcile). Chromium writes its preferences only
 /// seconds after a change: alone, they would bring back an extension just removed or turned off.
 fn refresh(profile: ProfileId, dir: &Path) {
     let list = installed(dir);
     INSTALLED.with_borrow_mut(|all| all.insert(profile, (dir.to_path_buf(), list)));
     update_icons(profile);
     crate::shell::extensions_changed();
-    let session = BRIDGE.with_borrow(|bridge| {
-        let context = bridge.contexts.get(&profile)?;
-        bridge.helpers.get(context).cloned()
-    });
-    if let Some(session) = session {
-        let expression = "chrome.management.getAll().then((all) => all.map(({ id, enabled }) => ({ id, enabled })))";
-        let params =
-            json!({ "expression": expression, "awaitPromise": true, "returnByValue": true });
-        send_in(
-            &session,
-            "Runtime.evaluate",
-            params,
+    if let Some(context) = context_of(profile) {
+        let params = json!({ "browserContextId": context });
+        send(
+            json!({ "method": "Extensions.getExtensions", "params": params }),
             Some(Pending::Extensions(profile)),
         );
     }
 }
 
-/// Makes a profile's extensions those Chromium has now, `live`, as the helper lists them: the
+/// Makes a profile's extensions those Chromium has now, `live`: the
 /// removed ones go, the others are turned on or off, and those the preferences do not list yet
 /// are read from their files, or later from the preferences (reread_later).
 fn reconcile(profile: ProfileId, live: &[Value]) {
@@ -544,14 +508,12 @@ fn reconcile(profile: ProfileId, live: &[Value]) {
 
 /// Reads a profile's extensions again once Chromium has written its preferences, for those it
 /// runs whose files were not found, `ids`: loaded from a folder, only the preferences tell
-/// where. Once per extension, as one the preferences never list would repeat it; never for the
-/// helper, which they do not list.
+/// where. Once per extension, as one the preferences never list would repeat it.
 fn reread_later(profile: ProfileId, ids: Vec<String>) {
-    let helper = BRIDGE.with_borrow(|bridge| bridge.helper_id.clone());
     let new = REREAD.with_borrow_mut(|reread| {
         let mut new = false;
         for id in ids {
-            new |= helper.as_ref() != Some(&id) && reread.insert(id);
+            new |= reread.insert(id);
         }
         new
     });
@@ -581,7 +543,7 @@ wrap_task! {
 }
 
 /// An extension installed into a profile's directory, from its files, in a directory named after
-/// its version: the helper and extensions loaded from a folder are not there.
+/// its version: extensions loaded from a folder are not there.
 fn read_installed(dir: &Path, id: &str) -> Option<Installed> {
     let versions = std::fs::read_dir(dir.join("Extensions").join(id))
         .into_iter()
@@ -902,16 +864,18 @@ fn glob_matches(glob: &str, text: &str) -> bool {
     rest.ends_with(last)
 }
 
-/// Whether a target is an extension's service worker, and the helper's.
-fn worker_kind(target: &Value) -> Option<bool> {
-    let url = target["url"].as_str()?;
-    (target["type"] == "service_worker" && url.starts_with("chrome-extension://"))
-        .then(|| url.ends_with(HELPER_SCRIPT))
+/// Whether a target is an extension's service worker.
+fn is_extension_worker(target: &Value) -> bool {
+    let url = target["url"].as_str().unwrap_or_default();
+    target["type"] == "service_worker" && url.starts_with("chrome-extension://")
 }
 
 /// Attaches to an extension's service worker as it starts.
 fn target_seen(target: &Value) {
-    let (Some(helper), Some(id)) = (worker_kind(target), target["targetId"].as_str()) else {
+    let Some(id) = target["targetId"]
+        .as_str()
+        .filter(|_| is_extension_worker(target))
+    else {
         return;
     };
     let context = target["browserContextId"]
@@ -923,29 +887,15 @@ fn target_seen(target: &Value) {
     }
     let url = target["url"].as_str().unwrap_or_default();
     let extension = extension_id(url).unwrap_or_default().to_string();
-    if helper {
-        BRIDGE.with_borrow_mut(|bridge| bridge.helper_id = Some(extension.clone()));
-    } else {
-        worker_started(&context, url);
-    }
+    worker_started(&context, url);
     let params = json!({ "targetId": id, "flatten": true });
     let message = json!({ "method": "Target.attachToTarget", "params": params });
-    let pending = Pending::Attach {
-        context,
-        extension,
-        helper,
-    };
+    let pending = Pending::Attach { context, extension };
     send(message, Some(pending));
 }
 
-/// Shims an extension's worker once attached, or asks the helper for the tab ids.
-fn attached(session: &str, context: String, extension: String, helper: bool) {
-    if helper {
-        BRIDGE
-            .with_borrow_mut(|bridge| bridge.helpers.insert(context.clone(), session.to_string()));
-        ask_tab_ids(&context);
-        return;
-    }
+/// Shims an extension's worker once attached.
+fn attached(session: &str, context: String, extension: String) {
     BRIDGE.with_borrow_mut(|bridge| {
         bridge
             .workers
@@ -980,29 +930,16 @@ fn script_loaded(session: &str) {
     push_state(&context);
 }
 
-/// Asks the helper of a browser context which tab id each page has.
-fn ask_tab_ids(context: &str) {
-    let Some(session) = BRIDGE.with_borrow(|bridge| bridge.helpers.get(context).cloned()) else {
-        return;
-    };
-    let params = json!({ "expression": "self.arbaleteTargets()", "awaitPromise": true, "returnByValue": true });
-    let pending = Pending::TabIds(context.to_string());
-    send_in(&session, "Runtime.evaluate", params, Some(pending));
-}
-
-/// Records the tab id of the pages of a browser context.
-fn tab_ids(context: &str, targets: &[Value]) {
-    BRIDGE.with_borrow_mut(|bridge| {
-        for content in bridge
-            .contents
-            .values_mut()
-            .filter(|c| c.context == context)
-        {
-            let target = targets.iter().find(|t| t["id"] == content.target.as_str());
-            content.tab_id = target.and_then(|t| t["tabId"].as_i64());
-        }
+/// Records a page's tab id.
+fn tab_id(page: i32, tab_id: Option<i64>) {
+    let context = BRIDGE.with_borrow_mut(|bridge| {
+        let content = bridge.contents.get_mut(&page)?;
+        content.tab_id = tab_id;
+        Some(content.context.clone())
     });
-    push_state(context);
+    if let Some(context) = context {
+        push_state(&context);
+    }
 }
 
 /// Where a shim's call came from, to answer it there: a service worker's session in the
@@ -1426,19 +1363,12 @@ wrap_task! {
 }
 
 /// What Chromium asks the user about in the app's Chrome-style window, where only it can: an
-/// extension's request for optional permissions, or removing an extension, which Chromium always
-/// confirms when another extension, the helper, asks for it.
-enum ChromeTask {
-    Permissions {
-        caller: Caller,
-        /// The shim's number for the request, which its answer names.
-        request: i64,
-        permissions: Value,
-    },
-    Uninstall {
-        profile: ProfileId,
-        id: String,
-    },
+/// extension's request for optional permissions.
+struct ChromeTask {
+    caller: Caller,
+    /// The shim's number for the request, which its answer names.
+    request: i64,
+    permissions: Value,
 }
 
 thread_local! {
@@ -1462,7 +1392,7 @@ fn request_permissions(caller: Caller, call: &Value) {
         return;
     };
     let permissions = call["permissions"].clone();
-    CHROME_TASK.set(Some(ChromeTask::Permissions {
+    CHROME_TASK.set(Some(ChromeTask {
         caller,
         request,
         permissions,
@@ -1471,55 +1401,24 @@ fn request_permissions(caller: Caller, call: &Value) {
     crate::shell::open_chrome_task_window(profile, &url, "Extension Permissions", false);
 }
 
-/// Whether a profile's extension can remove itself, at the app's asking: turned on, its pages
-/// run. It then asks no confirmation, which the app's own stands for.
-pub fn removes_itself(profile: ProfileId, id: &str) -> bool {
-    list(profile)
-        .iter()
-        .any(|extension| extension.id == id && extension.enabled)
-}
-
-/// Removes an extension from a profile. Turned on, it removes itself, which Chromium confirms
-/// nothing for, from one of its own pages, its manifest, in a hidden view (removes_itself).
-/// Otherwise, as it runs no page, the helper removes it, which holds the `management`
-/// permission, once the user confirms it in Chromium's dialog: Chromium always asks when an
-/// extension removes another.
+/// Removes an extension from a profile, without Chromium's prompt: the app asks the user itself.
 pub fn uninstall(profile: ProfileId, id: &str) {
-    if removes_itself(profile, id) {
-        let expression = "chrome.management.uninstallSelf({ showConfirmDialog: false })";
-        let url = format!("chrome-extension://{id}/manifest.json");
-        crate::shell::run_in_hidden_page(profile, &url, expression);
-        removed(profile, id);
-        return;
+    if let Some(context) = context_of(profile) {
+        let params = json!({ "id": id, "browserContextId": context });
+        send(
+            json!({ "method": "Extensions.uninstall", "params": params }),
+            Some(Pending::Uninstall(profile, id.to_string())),
+        );
     }
-    let Some(helper) = BRIDGE.with_borrow(|bridge| bridge.helper_id.clone()) else {
-        return;
-    };
-    if CHROME_TASK.with_borrow(Option::is_some) {
-        return;
-    }
-    CHROME_TASK.set(Some(ChromeTask::Uninstall {
-        profile,
-        id: id.to_string(),
-    }));
-    let url = format!("chrome-extension://{helper}/manifest.json");
-    crate::shell::open_chrome_task_window(profile, &url, "Remove Extension", false);
 }
 
 /// Asks Chromium, with a user gesture, once the window's page has loaded: Chromium shows its
 /// prompt in it.
 pub fn chrome_task_page_loaded(browser: &Browser) {
     let Some(host) = browser.host() else { return };
-    let action = CHROME_TASK.with_borrow(|task| match task.as_ref()? {
-        ChromeTask::Permissions { permissions, .. } => {
-            Some(format!("chrome.permissions.request({permissions})"))
-        }
-        ChromeTask::Uninstall { id, .. } => {
-            let id = serde_json::to_string(id).expect("a string");
-            Some(format!(
-                "chrome.management.uninstall({id}).then(() => true, () => false)"
-            ))
-        }
+    let action = CHROME_TASK.with_borrow(|task| {
+        let permissions = &task.as_ref()?.permissions;
+        Some(format!("chrome.permissions.request({permissions})"))
     });
     let Some(action) = action else { return };
     let registration = host.add_dev_tools_message_observer(Some(&mut ChromeTaskObserver::new()));
@@ -1534,14 +1433,11 @@ pub fn chrome_task_page_loaded(browser: &Browser) {
 /// Ends the task with the user's answer, `value`, and closes the window.
 fn finish_chrome_task(value: &Value) {
     let yes = *value == true;
-    match CHROME_TASK.take() {
-        Some(ChromeTask::Permissions {
-            caller, request, ..
-        }) => {
-            caller.evaluate(&format!("self.__arbaleteAnswer({request}, {yes})"));
-        }
-        Some(ChromeTask::Uninstall { profile, id }) if yes => removed(profile, &id),
-        Some(ChromeTask::Uninstall { .. }) | None => {}
+    if let Some(ChromeTask {
+        caller, request, ..
+    }) = CHROME_TASK.take()
+    {
+        caller.evaluate(&format!("self.__arbaleteAnswer({request}, {yes})"));
     }
     crate::shell::close_chrome_task_window();
 }
@@ -1619,10 +1515,7 @@ fn message_received(message: &Value) {
         }
         Some("Target.detachedFromTarget") => {
             if let Some(session) = message["params"]["sessionId"].as_str() {
-                BRIDGE.with_borrow_mut(|bridge| {
-                    bridge.workers.remove(session);
-                    bridge.helpers.retain(|_, helper| helper != session);
-                });
+                BRIDGE.with_borrow_mut(|bridge| bridge.workers.remove(session));
             }
         }
         Some("Inspector.workerScriptLoaded") => {
@@ -1648,25 +1541,21 @@ fn message_received(message: &Value) {
         return;
     };
     match BRIDGE.with_borrow_mut(|bridge| bridge.pending.remove(&id)) {
-        Some(Pending::Attach {
-            context,
-            extension,
-            helper,
-        }) => {
+        Some(Pending::Attach { context, extension }) => {
             if let Some(session) = message["result"]["sessionId"].as_str() {
-                attached(session, context, extension, helper);
+                attached(session, context, extension);
             }
         }
-        Some(Pending::TabIds(context)) => {
-            let targets = message["result"]["result"]["value"].as_array().cloned();
-            tab_ids(&context, &targets.unwrap_or_default());
-        }
+        Some(Pending::TabId(page)) => tab_id(page, message["result"]["tabId"].as_i64()),
         Some(Pending::Extensions(profile)) => {
-            if let Some(live) = message["result"]["result"]["value"].as_array() {
+            if let Some(live) = message["result"]["extensions"].as_array() {
                 reconcile(profile, live);
             }
         }
-        None => {}
+        Some(Pending::Uninstall(profile, id)) if message["error"].is_null() => {
+            removed(profile, &id);
+        }
+        Some(Pending::Uninstall(..)) | None => {}
     }
 }
 
@@ -1679,7 +1568,6 @@ fn content_info(profile: ProfileId, page: i32, message: &Value) {
         return;
     };
     let content = Content {
-        target: target.to_string(),
         context: context.to_string(),
         tab_id: None,
     };
@@ -1690,7 +1578,11 @@ fn content_info(profile: ProfileId, page: i32, message: &Value) {
             bridge.contents.insert(page, content);
         }
     });
-    ask_tab_ids(context);
+    let params = json!({ "targetId": target });
+    send(
+        json!({ "method": "Extensions.getTabId", "params": params }),
+        Some(Pending::TabId(page)),
+    );
 }
 
 fn parse(message: Option<&[u8]>) -> Option<Value> {
@@ -1803,7 +1695,7 @@ mod tests {
             "block": { "location": 1, "path": "block/2.0_0", "disable_reasons": [] },
             "off": { "location": 1, "path": "off/1.0_0", "disable_reasons": [1] },
             "pdf": { "location": 5, "path": "/framework/pdf" },
-            "helper": { "location": 8, "path": "/bundle/arbalete-helper" },
+            "flag": { "location": 8, "path": "/somewhere/flag" },
         } } });
         profile.write("Secure Preferences", &preferences.to_string());
         profile.write(
@@ -1896,30 +1788,20 @@ mod tests {
     }
 
     #[test]
-    fn tells_extension_workers_and_the_helper_from_other_targets() {
+    fn tells_extension_workers_from_other_targets() {
         let target = |kind: &str, url: &str| json!({ "type": kind, "url": url });
-        assert_eq!(
-            worker_kind(&target(
-                "service_worker",
-                "chrome-extension://abc/background.js"
-            )),
-            Some(false)
-        );
-        assert_eq!(
-            worker_kind(&target(
-                "service_worker",
-                "chrome-extension://def/arbalete-helper.js"
-            )),
-            Some(true)
-        );
-        assert_eq!(
-            worker_kind(&target("page", "chrome-extension://abc/popup.html")),
-            None
-        );
-        assert_eq!(
-            worker_kind(&target("service_worker", "https://site.test/sw.js")),
-            None
-        );
+        assert!(is_extension_worker(&target(
+            "service_worker",
+            "chrome-extension://abc/background.js"
+        )));
+        assert!(!is_extension_worker(&target(
+            "page",
+            "chrome-extension://abc/popup.html"
+        )));
+        assert!(!is_extension_worker(&target(
+            "service_worker",
+            "https://site.test/sw.js"
+        )));
     }
 
     #[test]

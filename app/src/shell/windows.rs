@@ -243,13 +243,6 @@ wrap_app! {
                 Some(&CefString::from("user-agent-brand")),
                 Some(&CefString::from(concat!("Arbalete/", env!("CARGO_PKG_VERSION")))),
             );
-            // The helper extension, in every profile, tells extensions which tab is which.
-            if let Some(dir) = extensions::helper_dir() {
-                command_line.append_switch_with_value(
-                    Some(&CefString::from("load-extension")),
-                    Some(&CefString::from(dir.to_string_lossy().as_ref())),
-                );
-            }
             // Opens DevTools to the editor's debug launch (.vscode/launch.json). Development builds
             // only: the port gives full control of every profile to anything on this machine.
             if cfg!(debug_assertions)
