@@ -48,24 +48,10 @@
     </div>
     <p class="small">Preview builds can be rough. Feedback is welcome. · MPL-2.0</p>
   </div>
-  <div class="window" role="img" aria-label="Illustration of a browser window with a vertical sidebar of tabs on the left and a page on the right">
-    <div class="win-side">
-      <div class="lights"><span></span><span></span><span></span></div>
-      <div class="address"></div>
-      <div class="favorites"><span></span><span></span><span></span><span></span></div>
-      <div class="divider"></div>
-      <div class="tabs"><span style="width: 92%"></span><span style="width: 78%"></span><span class="active"></span><span style="width: 84%"></span><span style="width: 66%"></span></div>
-      <div class="spaces"><span></span><span></span><span></span><span></span></div>
-    </div>
-    <div class="win-page">
-      <div class="page">
-        <div class="line title" style="width: 42%"></div>
-        <div class="line" style="width: 80%"></div>
-        <div class="line" style="width: 70%"></div>
-        <div class="blocks"><span></span><span></span></div>
-      </div>
-    </div>
-  </div>
+  <picture class="shot hero-shot">
+    <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/hero-light.webp">
+    <img src="assets/screenshots/hero-dark.webp" width="1600" height="1000" alt="Arbalete's window: a sidebar with favorites, a folder of pinned tabs and today's tabs, beside a page of the Rust book">
+  </picture>
 </section>
 
 <section id="features" class="wrap section" aria-labelledby="features-title">
@@ -118,6 +104,33 @@
   </div>
 </section>
 
+<section id="tour" class="wrap section" aria-labelledby="tour-title">
+  <div class="head">
+    <p class="eyebrow violet">Tour</p>
+    <h2 id="tour-title" class="sec-title">See it in action.</h2>
+  </div>
+  <figure class="shot tour-wide">
+    <img src="assets/screenshots/spaces.webp" width="1280" height="800" loading="lazy" alt="Switching between three Spaces, each with its own colors">
+    <figcaption>Spaces keep their own tabs and theme: ⌃1, ⌃2… or a swipe go from one to the next.</figcaption>
+  </figure>
+  <div class="tour">
+    <figure class="shot">
+      <picture>
+        <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/command-light.webp">
+        <img src="assets/screenshots/command-dark.webp" width="1600" height="1000" loading="lazy" alt="The Command Bar searching for rust: open tabs and a history page">
+      </picture>
+      <figcaption>The Command Bar (⌘T) opens an address, a search, an open tab or a page from your history.</figcaption>
+    </figure>
+    <figure class="shot">
+      <picture>
+        <source media="(prefers-color-scheme: light)" srcset="assets/screenshots/split-light.webp">
+        <img src="assets/screenshots/split-dark.webp" width="1600" height="1000" loading="lazy" alt="docs.rs and a GitHub source file side by side">
+      </picture>
+      <figcaption>Split View shows up to four tabs side by side.</figcaption>
+    </figure>
+  </div>
+</section>
+
 <section id="arc" class="wrap section compact" aria-labelledby="arc-title">
   <div class="panel">
     <div class="panel-text">
@@ -125,6 +138,7 @@
       <p class="lead">Arc is shutting down on December 22, 2026. Arbalete keeps the ideas many of us came to rely on (a sidebar, Spaces, profiles) in an open-source browser that no single company can switch off. Import your Spaces and tabs, and carry on.</p>
       <p class="small"><a href="releases.html" data-event="download_clicked" data-place="arc">Download the preview</a> · <a href="#missing">What's not supported yet</a></p>
     </div>
+    <img class="shot panel-shot" src="assets/screenshots/import.webp" width="1600" height="1056" loading="lazy" alt="The import screen at first launch, listing Arc, Chrome and Firefox profiles">
   </div>
 </section>
 
