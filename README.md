@@ -5,6 +5,41 @@ Built with Rust on Chromium, with a native SwiftUI interface on macOS.
 
 > **Status:** early development, preview builds for macOS. Website: [arbalete.co](https://arbalete.co).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hero-dark.webp">
+  <img src="docs/screenshots/hero-light.webp" alt="Arbalete's window: the sidebar with favorites, a folder of pinned tabs and today's tabs, beside a page of the Rust book">
+</picture>
+
+## Tour
+
+The **Command Bar** (⌘T) opens an address, a search, an open tab or a page from the history.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/command-dark.webp">
+  <img src="docs/screenshots/command-light.webp" alt="The Command Bar searching for rust: open tabs and a history page">
+</picture>
+
+**Spaces** keep their own tabs and theme; ⌃1, ⌃2… or a swipe go from one to the next.
+
+<img src="docs/screenshots/spaces.webp" alt="Switching between three Spaces, each with its own colors">
+
+**Split View** shows up to four tabs side by side.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/split-dark.webp">
+  <img src="docs/screenshots/split-light.webp" alt="docs.rs and a GitHub source file side by side">
+</picture>
+
+**Chrome extensions** come from the Chrome Web Store; pinned ones sit by the address.
+
+<img src="docs/screenshots/extensions-light.webp" alt="Bitwarden and uBlock Origin Lite pinned by the address, with the uBlock Origin Lite popup open">
+
+At first launch, Arbalete **imports from Arc** (Spaces, favorites, tabs, history) and other browsers.
+
+<img src="docs/screenshots/import.webp" alt="The first launch's import screen listing Arc, Chrome and Firefox profiles">
+
+The screenshots use demo data only: [docs/screenshots](docs/screenshots/README.md) tells how to take them again.
+
 ## Goals
 
 - A vertical sidebar with Favorites, pinned tabs and today's tabs.
