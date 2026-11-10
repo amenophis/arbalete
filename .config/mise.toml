@@ -7,7 +7,7 @@ cargo-deny = "0.20.2"
 # Lists the licenses of the crates the app is built from (mise run app).
 "github:EmbarkStudios/cargo-about" = "0.9.3"
 # Lays out the disk image's window (mise run release).
-uv = "0.13.6"
+uv = "0.13.7"
 "pipx:dmgbuild" = "1.6.7"
 
 [env]
