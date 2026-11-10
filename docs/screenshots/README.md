@@ -34,7 +34,8 @@ account, nothing from a real profile.
    An extension's popup is a window of its own: capture it too and lay it over the main one.
    The Spaces animation records the window alone, so that nothing over it shows:
    `swiftc -O -o record docs/screenshots/record.swift`, then `./record <window id> 7 frames`
-   while the Spaces menu's Space 2, 3 and 1 switch Spaces.
+   (JPEG frames at the screen's pixel size, 24 a second) while the Spaces menu's Space 2, 3
+   and 1 switch Spaces.
    The import screen is a first launch: an empty data folder with the demo home, whose Arc,
    Chrome and Firefox profiles hold no data.
 
@@ -43,7 +44,21 @@ account, nothing from a real profile.
    ```sh
    ffmpeg -i hero-light.png -vf scale=1600:-1:flags=lanczos hero-1600.png
    cwebp -q 82 -m 6 -sharp_yuv hero-1600.png -o hero-light.webp
-   img2webp -loop 0 -lossy -q 70 -d 83 frames/*.png -o spaces.webp
+   ```
+
+   The animation drops the frames that repeat the one before and keeps how long each shows, so
+   that it stays sharp and light:
+
+   ```sh
+   ffmpeg -framerate 24 -pattern_type glob -i 'frames/*.jpg' \
+     -vf scale=1600:-1:flags=lanczos,mpdecimate,showinfo -fps_mode vfr kept/%03d.png 2> kept.log
+   ```
+
+   then `img2webp -loop 0 -lossy -q 80 -m 6`, each kept frame after `-d` and its duration in
+   milliseconds, the time to the next one's `pts_time` in `kept.log`:
+
+   ```sh
+   img2webp -loop 0 -lossy -q 80 -m 6 -d 1500 kept/001.png -d 42 kept/002.png … -o spaces.webp
    ```
 
 The extensions shot needs Bitwarden and uBlock Origin Lite installed from the Chrome Web Store
