@@ -7,8 +7,9 @@
 //! - **`StorableSidebar.json`**: in `sidebar.containers`, the entry with `items`, `spaces` and
 //!   `topAppsContainerIDs`, each a flat array alternating keys (ids) and values. Items are linked
 //!   by `parentID` / `childrenIds` and hold one kind in `data`: `tab` (`savedURL`, `savedTitle`;
-//!   the item's `title` when renamed), `list` (a folder), `splitView` (its tabs as children) or
-//!   `itemContainer` (a root). A Space's `containerIDs` alternates `pinned` / `unpinned` and their
+//!   the item's `title` when renamed), `list` (a folder), `splitView` (its tabs as children,
+//!   `layoutOrientation`, `horizontal` or `vertical`, and `itemWidthFactors`, each tab's part of
+//!   the room) or `itemContainer` (a root). A Space's `containerIDs` alternates `pinned` / `unpinned` and their
 //!   root; its `profile` is `{"default": true}` or `{"custom": {"_0": {"directoryBasename": …}}}`,
 //!   the profile's directory in `User Data`. Its `customInfo` holds `iconType` (`emoji_v2`, or a
 //!   named `icon`) and `windowTheme`: under `background.single._0.style.color._0`, one of
@@ -291,22 +292,73 @@ impl<'a> Import<'a> {
             return;
         }
         let data = &item["data"];
-        if let Some(url) = data["tab"]["savedURL"].as_str() {
-            // The title the user gave the tab, else the page's.
-            let title = text(&item["title"]).or(text(&data["tab"]["savedTitle"]));
+        if let Some((url, title)) = tab(item) {
             // The parent is a container or a folder: only full favorites refuse the tab, which is
             // then left out.
-            let _ = self.sidebar.add_tab(parent, url, title.unwrap_or(url));
+            let _ = self.sidebar.add_tab(parent, url, title);
         } else if data.get("list").is_some() {
             let title = text(&item["title"]).unwrap_or("Folder");
             // Favorites hold only tabs: a folder among them hands them its tabs.
             let folder = self.sidebar.add_folder(parent, title).unwrap_or(parent);
             self.children(id, folder);
         } else if data.get("splitView").is_some() {
-            // Arbalete has no split views yet: their tabs take their place.
-            self.children(id, parent);
+            self.split(item, &data["splitView"], parent);
         }
     }
+
+    /// Imports a split of Arc's tabs, with its orientation and its parts of the room. A split
+    /// Arbalete cannot make, of too few or too many tabs, gives its tabs in its place.
+    fn split(&mut self, item: &'a Value, split_view: &Value, parent: NodeId) {
+        let ids = item["childrenIds"].as_array().into_iter().flatten();
+        let mut tabs = Vec::new();
+        for (index, id) in ids.enumerate() {
+            let Some(id) = id.as_str() else { continue };
+            let Some(child) = self.items.get(id).copied() else {
+                continue;
+            };
+            if let Some(tab) = tab(child)
+                && self.imported.insert(id)
+            {
+                tabs.push((index, id, tab));
+            }
+        }
+        let pages: Vec<_> = tabs.iter().map(|&(_, _, tab)| tab).collect();
+        let Ok(split) = self.sidebar.add_split(parent, &pages) else {
+            for (url, title) in pages {
+                let _ = self.sidebar.add_tab(parent, url, title);
+            }
+            return;
+        };
+        let stacked = split_view["layoutOrientation"] == "vertical";
+        let _ = self.sidebar.set_split_stacked(split, stacked);
+        // By tab id, as Arc stores its maps, else in the order of the tabs.
+        let factors = &split_view["itemWidthFactors"];
+        let by_id: HashMap<_, _> = pairs(factors)
+            .filter_map(|(id, factor)| Some((id.as_str()?, factor.as_f64()?)))
+            .collect();
+        let factors: Option<Vec<_>> = tabs
+            .iter()
+            .map(|&(index, id, _)| {
+                if by_id.is_empty() {
+                    factors.get(index)?.as_f64()
+                } else {
+                    by_id.get(id).copied()
+                }
+            })
+            .collect();
+        // Arbalete refuses factors that are not all positive, keeping equal parts.
+        if let Some(factors) = factors {
+            let _ = self.sidebar.set_split_factors(split, &factors);
+        }
+    }
+}
+
+/// An Arc tab's saved url and title: the one the user gave it, else its page's, else its url.
+fn tab(item: &Value) -> Option<(&str, &str)> {
+    let tab = &item["data"]["tab"];
+    let url = tab["savedURL"].as_str()?;
+    let title = text(&item["title"]).or(text(&tab["savedTitle"]));
+    Some((url, title.unwrap_or(url)))
 }
 
 /// Arc stores its maps as arrays alternating keys and values.
@@ -446,7 +498,7 @@ mod tests {
         sidebar
     }
 
-    /// A node's content, as urls and `folder[...]`, for comparisons that read like the sidebar.
+    /// A node's content, as urls, `folder[...]` and `split[... | ...]`, for comparisons that read like the sidebar.
     fn content(sidebar: &Sidebar, id: NodeId) -> Vec<String> {
         let node = sidebar.node(id).unwrap();
         node.children
@@ -456,7 +508,8 @@ mod tests {
                 NodeKind::Folder { title, .. } => {
                     format!("{title}[{}]", content(sidebar, child).join(", "))
                 }
-                NodeKind::Container | NodeKind::Split => panic!("no container or split imported"),
+                NodeKind::Split => format!("split[{}]", content(sidebar, child).join(" | ")),
+                NodeKind::Container => panic!("no container imported"),
             })
             .collect()
     }
@@ -555,21 +608,83 @@ mod tests {
     }
 
     #[test]
-    fn imports_today_tabs_with_split_views_as_separate_tabs() {
+    fn imports_today_tabs_with_their_split_views() {
         let sidebar = fixture();
         let [home, reading] = [0, 1].map(|i| sidebar.spaces()[i].today);
         assert_eq!(
             content(&sidebar, home),
             [
                 "https://search.example.com/?q=arbalete",
-                "https://left.example.com/",
-                "https://right.example.com/",
+                "split[https://left.example.com/ | https://right.example.com/]",
             ]
         );
+        let split = sidebar.node(home).unwrap().children[1];
+        let layout = sidebar.split_layout(split);
+        assert!(!layout.stacked);
+        assert_eq!(layout.factors, [0.3, 0.7]);
         assert_eq!(
             content(&sidebar, reading),
             ["https://blog.example.org/post"]
         );
+    }
+
+    #[test]
+    fn imports_split_views_wherever_arc_keeps_them_with_their_layout() {
+        let tab = |url: &str| json!({ "data": { "tab": { "savedURL": url } } });
+        let json = json!({ "sidebar": { "containers": [{
+            "topAppsContainerIDs": [{ "default": true }, "favorites"],
+            "spaces": ["s", { "profile": { "default": true },
+                "containerIDs": ["pinned", "pinned", "unpinned", "today"] }],
+            "items": [
+                "pinned", { "childrenIds": ["folder"] },
+                "folder", { "title": "Work", "childrenIds": ["stacked"], "data": { "list": {} } },
+                "stacked", { "childrenIds": ["a", "b", "c"], "data": { "splitView": {
+                    "layoutOrientation": "vertical", "itemWidthFactors": [1.0, 2.0, 1.0] } } },
+                "a", tab("https://a.example/"),
+                "b", tab("https://b.example/"),
+                "c", tab("https://c.example/"),
+                "favorites", { "childrenIds": ["favorite"] },
+                "favorite", { "childrenIds": ["d", "e"], "data": { "splitView": {
+                    "layoutOrientation": "horizontal", "itemWidthFactors": ["d", 0.0, "e", 1.0] } } },
+                "d", tab("https://d.example/"),
+                "e", tab("https://e.example/"),
+                "today", { "childrenIds": ["alone", "f"] },
+                // A split left with one tab, its other one without a url.
+                "alone", { "childrenIds": ["g", "no-url"], "data": { "splitView": {} } },
+                "g", tab("https://g.example/"),
+                "no-url", { "data": { "tab": {} } },
+                "f", tab("https://f.example/"),
+            ],
+        }]}});
+        let mut sidebar = Sidebar::empty();
+        let profile = sidebar.add_profile("Default");
+        add(&mut sidebar, &json.to_string(), "Default", profile).unwrap();
+        let space = sidebar.spaces()[0].clone();
+        assert_eq!(
+            content(&sidebar, space.pinned),
+            ["Work[split[https://a.example/ | https://b.example/ | https://c.example/]]"]
+        );
+        let folder = sidebar.node(space.pinned).unwrap().children[0];
+        let stacked = sidebar.node(folder).unwrap().children[0];
+        let layout = sidebar.split_layout(stacked);
+        assert!(layout.stacked);
+        assert_eq!(layout.factors, [0.25, 0.5, 0.25]);
+        let a = sidebar.node(stacked).unwrap().children[0];
+        let a = sidebar.tab_mut(a).unwrap();
+        assert_eq!(a.saved_url.as_deref(), Some("https://a.example/"));
+        let favorites = sidebar.profiles()[0].favorites;
+        assert_eq!(
+            content(&sidebar, favorites),
+            ["split[https://d.example/ | https://e.example/]"]
+        );
+        // A factor Arbalete refuses keeps equal parts.
+        let favorite = sidebar.node(favorites).unwrap().children[0];
+        assert_eq!(sidebar.split_layout(favorite).factors, [0.5, 0.5]);
+        assert_eq!(
+            content(&sidebar, space.today),
+            ["https://g.example/", "https://f.example/"]
+        );
+        sidebar.check_invariants().unwrap();
     }
 
     #[test]

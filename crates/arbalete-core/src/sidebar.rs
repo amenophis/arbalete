@@ -349,6 +349,20 @@ pub struct Archived {
 pub const ARCHIVE_SIZE: usize = 1000;
 
 impl Tab {
+    /// A tab showing `url`, which it saves when `pinned`.
+    fn new(url: &str, title: &str, pinned: bool) -> Self {
+        Self {
+            url: url.to_string(),
+            title: title.to_string(),
+            favicon: None,
+            opener: None,
+            saved_url: pinned.then(|| url.to_string()),
+            name: None,
+            muted: false,
+            last_shown: None,
+        }
+    }
+
     /// What the sidebar calls the tab: its name, or its page's title.
     pub fn label(&self) -> &str {
         self.name.as_deref().unwrap_or(&self.title)
@@ -1223,22 +1237,32 @@ impl Sidebar {
     ) -> Result<NodeId, Error> {
         self.check_container(parent)?;
         self.check_room(parent)?;
-        let tab = Tab {
-            url: url.to_string(),
-            title: title.to_string(),
-            favicon: None,
-            opener: None,
-            saved_url: self.is_pinned(parent).then(|| url.to_string()),
-            name: None,
-            muted: false,
-            last_shown: None,
-        };
+        let tab = Tab::new(url, title, self.is_pinned(parent));
         self.show_favorites_hint(parent);
         let id = self.insert(None, NodeKind::Tab(tab));
         self.nodes.get_mut(&id).expect("just inserted").parent = Some(parent);
         let children = self.children_mut(parent);
         children.insert(index.min(children.len()), id);
         Ok(id)
+    }
+
+    /// Adds a split of these tabs, `(url, title)` in order, side by side in equal parts, last in
+    /// `parent`, which may be favorites, for importers: from two to `MAX_SPLIT_TABS` tabs.
+    pub fn add_split(&mut self, parent: NodeId, tabs: &[(&str, &str)]) -> Result<NodeId, Error> {
+        self.check_container(parent)?;
+        self.check_room(parent)?;
+        match tabs.len() {
+            0 | 1 => return Err(Error::NotSplittable),
+            count if count > MAX_SPLIT_TABS => return Err(Error::SplitFull),
+            _ => {}
+        }
+        self.show_favorites_hint(parent);
+        let split = self.insert(Some(parent), NodeKind::Split);
+        let pinned = self.is_pinned(split);
+        for (url, title) in tabs {
+            self.insert(Some(split), NodeKind::Tab(Tab::new(url, title, pinned)));
+        }
+        Ok(split)
     }
 
     /// Where a row is, to put it back there: its parent and its index among the parent's
@@ -4062,6 +4086,35 @@ mod tests {
         assert!(sidebar.is_favorite(a) && sidebar.is_favorite(b));
         let folder = sidebar.add_folder(home.pinned, "f").unwrap();
         assert_eq!(sidebar.move_node(folder, favorites, 0), Err(Error::NotATab));
+    }
+
+    #[test]
+    fn adds_a_split_of_two_to_four_new_tabs_even_among_favorites() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let favorites = sidebar.profiles()[0].favorites;
+        let pages = [("a", "A"), ("b", "B"), ("c", "C"), ("d", "D"), ("e", "E")];
+        let split = sidebar.add_split(home.pinned, &pages[..2]).unwrap();
+        assert_eq!(children(&sidebar, home.pinned), [split]);
+        let tabs = children(&sidebar, split);
+        let tab = sidebar.tab_mut(tabs[1]).unwrap();
+        assert_eq!(
+            (tab.title.as_str(), tab.saved_url.as_deref()),
+            ("B", Some("b"))
+        );
+        sidebar.add_split(favorites, &pages[..4]).unwrap();
+        assert!(sidebar.is_favorite(children(&sidebar, favorites)[0]));
+        assert_eq!(
+            sidebar.add_split(home.today, &pages[..1]),
+            Err(Error::NotSplittable)
+        );
+        assert_eq!(sidebar.add_split(home.today, &pages), Err(Error::SplitFull));
+        assert_eq!(
+            sidebar.add_split(split, &pages[..2]),
+            Err(Error::NotAContainer)
+        );
+        assert!(children(&sidebar, home.today).is_empty());
+        sidebar.check_invariants().unwrap();
     }
 
     #[test]
