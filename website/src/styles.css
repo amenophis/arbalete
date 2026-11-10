@@ -13,8 +13,6 @@
   --accent-text: #9aa0ff;
   --glow: rgba(47, 56, 255, 0.35);
   --chip: rgba(47, 56, 255, 0.18);
-  --win: rgba(20, 18, 48, 0.72);
-  --tab: rgba(255, 255, 255, 0.06);
   /* The logo's colors, and its outline. */
   --m1: #ff5a5a;
   --m2: #a35bff;
@@ -41,8 +39,6 @@
     --accent-text: #2229c9;
     --glow: rgba(47, 56, 255, 0.16);
     --chip: rgba(47, 56, 255, 0.1);
-    --win: rgba(255, 255, 255, 0.78);
-    --tab: rgba(20, 18, 42, 0.05);
     --m1: #f04848;
     --m2: #8e45f0;
     --m3: #2f6bf0;
@@ -162,34 +158,12 @@ a:focus-visible, summary:focus-visible {
 .copy:hover { border-color: var(--accent-text); }
 .copy:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 
-/* The browser window drawn in the hero. */
-.window { position: relative; border-radius: 16px; border: 1px solid var(--line); background: var(--win); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.03) inset; overflow: hidden; aspect-ratio: 16 / 11; display: flex; }
-.win-side { width: 30%; min-width: 150px; padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid var(--line); background: var(--panel); }
-.lights { display: flex; gap: 6px; padding: 2px 2px 8px; }
-.lights span { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
-.address { height: 28px; border-radius: 8px; background: var(--tab); border: 1px solid var(--line); }
-.favorites { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
-.favorites span { aspect-ratio: 1; border-radius: 8px; background: var(--tab); }
-.favorites span:nth-child(1) { background: var(--t-red); }
-.favorites span:nth-child(3) { background: var(--t-violet); }
-.favorites span:nth-child(4) { background: var(--t-blue); }
-.divider { height: 1px; background: var(--line); margin: 4px 0; }
-.tabs { display: flex; flex-direction: column; gap: 6px; }
-.tabs span { height: 22px; border-radius: 6px; background: var(--tab); }
-.tabs .active { background: var(--m2); opacity: 0.85; }
-.spaces { margin-top: auto; display: flex; gap: 9px; justify-content: center; align-items: center; }
-.spaces span { width: 8px; height: 8px; border-radius: 50%; opacity: 0.55; }
-.spaces span:nth-child(1) { width: 10px; height: 10px; opacity: 1; background: var(--m2); }
-.spaces span:nth-child(2) { background: var(--m1); }
-.spaces span:nth-child(3) { background: var(--muted); }
-.spaces span:nth-child(4) { background: var(--m3); }
-.win-page { flex-grow: 1; padding: 14px; display: flex; flex-direction: column; }
-.page { flex-grow: 1; border-radius: 10px; background: var(--panel-strong); border: 1px solid var(--line); padding: 28px; display: flex; flex-direction: column; gap: 14px; }
-.page .line { height: 10px; border-radius: 4px; background: var(--tab); }
-.page .line.title { height: 14px; background: var(--line); }
-.blocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; flex-grow: 1; }
-.blocks span { border-radius: 10px; background: var(--tab); border: 1px solid var(--line); }
-.blocks span:nth-child(2) { background: var(--t-violet); }
+/* Screenshots of the app, its window's corners and edges in them. */
+.shot { margin: 0; display: flex; flex-direction: column; gap: 14px; }
+.shot img { display: block; width: 100%; height: auto; filter: drop-shadow(0 24px 48px rgba(0, 0, 0, 0.35)); }
+.shot figcaption { font-size: 15px; color: var(--muted); }
+.tour { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 32px; }
+.panel-shot { flex: 1 1 360px; min-width: 0; height: auto; filter: drop-shadow(0 16px 32px rgba(0, 0, 0, 0.3)); }
 
 /* Cards */
 
@@ -284,7 +258,6 @@ a:focus-visible, summary:focus-visible {
 
 @media (max-width: 760px) {
   .hero { grid-template-columns: minmax(0, 1fr); padding-top: 40px; }
-  .win-side { display: none; }
   .hero h1 { font-size: 40px; }
   .sec-title { font-size: 30px; }
   .panel { padding: 28px; }
