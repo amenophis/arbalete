@@ -31,13 +31,21 @@ final class Output: NSObject, SCStreamOutput {
 
 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
 guard let window = content.windows.first(where: { $0.windowID == windowID }) else { fatalError("no window") }
-let filter = SCContentFilter(desktopIndependentWindow: window)
+// The display without the other apps' windows: a window captured or included by itself shows the
+// screen sharing icon in place of its buttons.
+guard let display = content.displays.first(where: { $0.frame.contains(window.frame.origin) })
+else { fatalError("no display") }
+let others = content.applications.filter { $0.processID != window.owningApplication?.processID }
+let filter = SCContentFilter(display: display, excludingApplications: others, exceptingWindows: [])
 let config = SCStreamConfiguration()
 config.width = 1280
 config.height = Int(1280 * window.frame.height / window.frame.width)
+config.sourceRect = CGRect(
+    x: window.frame.minX - display.frame.minX, y: window.frame.minY - display.frame.minY,
+    width: window.frame.width, height: window.frame.height)
+config.backgroundColor = .clear
 config.minimumFrameInterval = CMTime(value: 1, timescale: 12)
 config.showsCursor = false
-config.ignoreShadowsSingleWindow = true
 let output = Output()
 let stream = SCStream(filter: filter, configuration: config, delegate: nil)
 try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: DispatchQueue(label: "frames"))
