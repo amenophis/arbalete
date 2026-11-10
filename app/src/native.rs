@@ -47,6 +47,8 @@ unsafe extern "C" {
     fn arbalete_ui_little_hotkey(on: bool) -> bool;
     fn arbalete_ui_little_page(id: u32) -> *mut c_void;
     fn arbalete_ui_little_page_closed(view: *mut c_void);
+    fn arbalete_ui_open_picture(id: u32, width: i32, height: i32) -> *mut c_void;
+    fn arbalete_ui_picture_closed(id: u32);
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
     fn arbalete_ui_start_updates();
@@ -413,6 +415,32 @@ pub fn focused_little() -> Option<u32> {
 #[unsafe(no_mangle)]
 pub extern "C" fn arbalete_little_should_close(id: u32) -> bool {
     crate::shell::little_can_close(id)
+}
+
+/// Opens the Picture in Picture window `id`, its page `width` by `height` points, and returns the
+/// view CEF makes its page's browser in.
+pub fn open_picture(id: u32, width: i32, height: i32) -> Option<*mut c_void> {
+    // SAFETY: plain values; the view lives until picture_closed.
+    let view = unsafe { arbalete_ui_open_picture(id, width, height) };
+    (!view.is_null()).then_some(view)
+}
+
+/// Closes the Picture in Picture window `id`, its page closing: the page's view goes with it.
+pub fn picture_closed(id: u32) {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_picture_closed(id) };
+}
+
+/// Whether the Picture in Picture window `id` may close now: its page closes first, which closes it.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_picture_should_close(id: u32) -> bool {
+    crate::shell::picture_can_close(id)
+}
+
+/// The Picture in Picture window `id`'s bar asks for its page's tab.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_picture_back(id: u32) {
+    crate::shell::picture_back(id);
 }
 
 /// Opens the settings window, on the pane titled `pane` if any, or closes it.

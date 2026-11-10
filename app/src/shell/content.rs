@@ -976,7 +976,7 @@ wrap_life_span_handler! {
         /// closes. Others open in tabs, behind the one shown for a link clicked with ⌘.
         fn on_before_popup(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             frame: Option<&mut Frame>,
             popup_id: i32,
             target_url: Option<&CefString>,
@@ -990,6 +990,16 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut i32>,
         ) -> i32 {
+            // A Picture in Picture window, which the Document Picture-in-Picture API opens.
+            if target_disposition == WindowOpenDisposition::NEW_PICTURE_IN_PICTURE {
+                #[cfg(target_os = "macos")]
+                if let (Some(browser), Some(window_info), Some(client)) = (browser, window_info, client)
+                    && open_picture(browser, popup_id, window_info, client)
+                {
+                    return 0;
+                }
+                return 1;
+            }
             let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && page_may_open(&frame_url(frame), url)) else {
                 return 1;
             };
@@ -1031,6 +1041,8 @@ wrap_life_span_handler! {
             if let Some(little) = popup {
                 crate::native::little_closed(little);
             }
+            #[cfg(target_os = "macos")]
+            picture_aborted(popup_id);
         }
 
         fn on_after_created(&self, browser: Option<&mut Browser>) {
