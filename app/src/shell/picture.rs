@@ -1,5 +1,6 @@
-//! Picture in Picture, like Arc's: a tab left while its video plays with sound goes on playing in
-//! Chromium's floating video window, which closes as the tab shows again.
+//! Picture in Picture, like Arc's: a tab left during a call, like Google Meet's, goes on in the
+//! page's own Picture in Picture window, and one left while its video plays with sound in
+//! Chromium's floating video window; either closes as the tab shows again.
 
 use super::*;
 
@@ -9,11 +10,55 @@ pub(super) fn page_hidden(tab: NodeId) {
     post_task(ThreadId::UI, Some(&mut EnterPicture::new(tab)));
 }
 
-/// Opens the window on the page's video playing with sound, unless the page shows one already,
-/// and closes it as the page shows again. Chromium only opens it for a user's gesture: the request
-/// stands for the user's, who left the tab.
-const ENTER_PICTURE: &str = r#"(async () => {
-    if (document.pictureInPictureElement || !document.pictureInPictureEnabled) return;
+/// Keeps the handler a page gives the Media Session's `enterpictureinpicture` action, which
+/// Chromium runs as a call's tab is left and Google Meet answers with its Picture in Picture
+/// window. Like Chromium's, the window goes with its page.
+const KEEP_ENTER_PICTURE: &str = r#"(() => {
+    const session = navigator.mediaSession;
+    if (!session || !self.documentPictureInPicture || "__arbaleteEnterPicture" in session) return;
+    let enter = null;
+    Object.defineProperty(session, "__arbaleteEnterPicture", { get: () => enter });
+    const set = session.setActionHandler.bind(session);
+    session.setActionHandler = (action, handler) => {
+        if (action === "enterpictureinpicture") enter = handler;
+        return set(action, handler);
+    };
+    addEventListener("pagehide", () => documentPictureInPicture.window?.close());
+})()"#;
+
+/// Starts keeping a tab's page's `enterpictureinpicture` handler, in its documents to come and
+/// its current one.
+pub(super) fn picture_page_created(browser: &Browser) {
+    let Some(host) = browser.host() else { return };
+    // New documents run the scripts added for them only while the Page domain is enabled.
+    let params = json!({ "source": KEEP_ENTER_PICTURE, "runImmediately": true });
+    for message in [
+        json!({ "id": 0, "method": "Page.enable" }),
+        json!({ "id": 0, "method": "Page.addScriptToEvaluateOnNewDocument", "params": params }),
+    ] {
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+    }
+}
+
+/// During a call (`call`), runs the page's `enterpictureinpicture` handler, like Chromium's
+/// automatic Picture in Picture; otherwise opens the video window on its video playing with
+/// sound. Not when the page shows a window already, and the window it opens closes as the page
+/// shows again. Chromium only opens either for a user's gesture: the request stands for the
+/// user's, who left the tab.
+const ENTER_PICTURE: &str = r#"(async (call) => {
+    const pictures = self.documentPictureInPicture;
+    if (document.pictureInPictureElement || pictures?.window) return;
+    const enter = navigator.mediaSession?.__arbaleteEnterPicture;
+    if (call && enter) {
+        enter({ action: "enterpictureinpicture" });
+        const shown = () => {
+            if (document.hidden) return;
+            document.removeEventListener("visibilitychange", shown);
+            pictures.window?.close();
+        };
+        return document.addEventListener("visibilitychange", shown);
+    }
+    if (!document.pictureInPictureEnabled) return;
     const video = [...document.querySelectorAll("video")].find((video) =>
         !video.paused && !video.ended && !video.muted && video.volume > 0
             && video.readyState > 2 && !video.disablePictureInPicture);
@@ -25,7 +70,7 @@ const ENTER_PICTURE: &str = r#"(async () => {
         if (document.pictureInPictureElement === video) document.exitPictureInPicture();
     };
     document.addEventListener("visibilitychange", shown);
-})().catch(() => {})"#;
+})(CALL).catch(() => {})"#;
 
 /// Lets a site's videos go on in Picture in Picture as its tabs are left, or no longer, from its
 /// site controls.
@@ -57,12 +102,13 @@ wrap_task! {
             if !settings.picture_in_picture || blocked {
                 return;
             }
-            let host = PAGES.with_borrow(|pages| {
+            let page = PAGES.with_borrow(|pages| {
                 let live = pages.get(&self.tab).filter(|live| live.hidden_since.is_some())?;
-                live.browser.host()
+                Some((live.browser.host()?, live.capturing))
             });
-            let Some(host) = host else { return };
-            let params = json!({ "expression": ENTER_PICTURE, "userGesture": true });
+            let Some((host, call)) = page else { return };
+            let expression = ENTER_PICTURE.replace("(CALL)", &format!("({call})"));
+            let params = json!({ "expression": expression, "userGesture": true });
             let message = json!({ "id": 0, "method": "Runtime.evaluate", "params": params });
             host.send_dev_tools_message(Some(message.to_string().as_bytes()));
         }
