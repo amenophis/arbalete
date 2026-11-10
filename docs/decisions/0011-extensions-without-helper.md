@@ -1,6 +1,6 @@
 # 0011 — Extensions without a helper extension
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-10
 
 ## Context
