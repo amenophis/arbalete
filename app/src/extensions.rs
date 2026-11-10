@@ -349,6 +349,9 @@ thread_local! {
     static INSTALLED: RefCell<HashMap<ProfileId, (PathBuf, Vec<Installed>)>> = RefCell::default();
     /// The open popup's DevTools observer.
     static POPUP: RefCell<Option<Registration>> = const { RefCell::new(None) };
+    /// The extensions Chromium runs but whose files were not found, read again once
+    /// (reread_later).
+    static REREAD: RefCell<HashSet<String>> = RefCell::default();
 }
 
 /// The extensions' icon files, which the UI loads by their profile and extension id
@@ -403,6 +406,7 @@ fn worker_started(context: &str, url: &str) {
     });
     let Some(dir) = new else { return };
     let Some(extension) = read_installed(&dir, id) else {
+        reread_later(profile, vec![id.to_string()]);
         return;
     };
     INSTALLED.with_borrow_mut(|installed| {
@@ -497,11 +501,12 @@ fn refresh(profile: ProfileId, dir: &Path) {
 
 /// Makes a profile's extensions those Chromium has now, `live`, as the helper lists them: the
 /// removed ones go, the others are turned on or off, and those the preferences do not list yet
-/// are read from their files.
+/// are read from their files, or later from the preferences (reread_later).
 fn reconcile(profile: ProfileId, live: &[Value]) {
     let Some(dir) = INSTALLED.with_borrow(|all| Some(all.get(&profile)?.0.clone())) else {
         return;
     };
+    let mut unread = Vec::new();
     let changed = INSTALLED.with_borrow_mut(|all| {
         let Some((_, list)) = all.get_mut(&profile) else {
             return false;
@@ -519,11 +524,12 @@ fn reconcile(profile: ProfileId, live: &[Value]) {
             if list.iter().any(|extension| extension.id == id) {
                 continue;
             }
-            if let Some(extension) = read_installed(&dir, id) {
-                list.push(Installed {
+            match read_installed(&dir, id) {
+                Some(extension) => list.push(Installed {
                     enabled: state["enabled"] == true,
                     ..extension
-                });
+                }),
+                None => unread.push(id.to_string()),
             }
         }
         list.sort_by_key(|extension| extension.name.to_lowercase());
@@ -532,6 +538,45 @@ fn reconcile(profile: ProfileId, live: &[Value]) {
     if changed {
         update_icons(profile);
         crate::shell::extensions_changed();
+    }
+    reread_later(profile, unread);
+}
+
+/// Reads a profile's extensions again once Chromium has written its preferences, for those it
+/// runs whose files were not found, `ids`: loaded from a folder, only the preferences tell
+/// where. Once per extension, as one the preferences never list would repeat it; never for the
+/// helper, which they do not list.
+fn reread_later(profile: ProfileId, ids: Vec<String>) {
+    let helper = BRIDGE.with_borrow(|bridge| bridge.helper_id.clone());
+    let new = REREAD.with_borrow_mut(|reread| {
+        let mut new = false;
+        for id in ids {
+            new |= helper.as_ref() != Some(&id) && reread.insert(id);
+        }
+        new
+    });
+    if new {
+        post_delayed_task(
+            ThreadId::UI,
+            Some(&mut Reread::new(profile)),
+            PREFERENCES_WRITTEN_MS,
+        );
+    }
+}
+
+/// How long Chromium may take to write a profile's preferences after a change: it writes them
+/// at most every 10 seconds.
+const PREFERENCES_WRITTEN_MS: i64 = 11_000;
+
+wrap_task! {
+    struct Reread {
+        profile: ProfileId,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            reload(self.profile);
+        }
     }
 }
 
