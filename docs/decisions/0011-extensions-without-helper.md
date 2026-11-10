@@ -12,7 +12,7 @@ the `management` permission: turning extensions on or off from the library, list
 before it writes its preferences, and removing a turned-off one (Chromium confirming it, as one extension
 removes another).
 
-The helper is an extension like the user's: it shows on `arbalete://extensions` as "Arbalete", with a switch and
+The helper is an extension like the user's: it shows on `arb://extensions` as "Arbalete", with a switch and
 a Remove button, and to every extension holding `management`. Turned off or removed, extensions lose the active
 tab's id, the library's switches do nothing, and extensions cannot be removed while turned off.
 

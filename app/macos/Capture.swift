@@ -174,7 +174,7 @@ final class CaptureChrome {
         guard let image = veil.part, let content = parent.contentView else { return }
         let page = pageView()
         let easels = (model.page.map { $0.pinned + $0.today } ?? []).flatMap(\.tabs)
-            .filter { $0.url.hasPrefix("arbalete://easel/") }
+            .filter { $0.url.hasPrefix("arb://easel/") }
         let menu = NSMenu()
         for easel in easels {
             let item = NSMenuItem(title: easel.label, action: nil, keyEquivalent: "")
@@ -221,7 +221,7 @@ final class CaptureChrome {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + ".png")
         guard (try? png.write(to: file)) != nil else { return }
-        let number = easel.flatMap { Int($0.url.dropFirst("arbalete://easel/".count)) }
+        let number = easel.flatMap { Int($0.url.dropFirst("arb://easel/".count)) }
         model.run(
             "add-capture-to-easel", file.path, Double(size.width), Double(size.height),
             number as Any? ?? NSNull(), page.map { jsonObject($0) } ?? NSNull())
