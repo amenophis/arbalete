@@ -430,6 +430,16 @@ define_class!(
             crate::shell::run(Command::ShowOnboarding);
         }
 
+        #[unsafe(method(arbaleteAddExtension:))]
+        fn add_extension(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ShowStore);
+        }
+
+        #[unsafe(method(arbaleteManageExtensions:))]
+        fn manage_extensions(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::ManageExtensions);
+        }
+
         #[unsafe(method(arbaleteMakeDefaultBrowser:))]
         fn make_default_browser(&self, _sender: Option<&AnyObject>) {
             crate::native::make_default_browser();
@@ -937,6 +947,24 @@ pub fn setup_menu() {
                     ns_string!("Show All History"),
                     sel!(arbaleteHistory:),
                     ns_string!("y"),
+                ),
+            ],
+        ),
+        // Like Arc's, the extensions' own menu: adding them, and Chromium's page of them.
+        (
+            ns_string!("Extensions"),
+            vec![
+                item(
+                    mtm,
+                    ns_string!("Add Extension…"),
+                    sel!(arbaleteAddExtension:),
+                    ns_string!(""),
+                ),
+                item(
+                    mtm,
+                    ns_string!("Manage Extensions…"),
+                    sel!(arbaleteManageExtensions:),
+                    ns_string!(""),
                 ),
             ],
         ),
