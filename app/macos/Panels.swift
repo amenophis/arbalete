@@ -613,10 +613,10 @@ struct SiteView: View {
                         }
                         if site.pictures {
                             SiteSetting(
-                                symbol: "pip.fill", title: "Picture in Picture", on: site.picture,
+                                symbol: "pip.fill", title: "Automatic Picture in Picture", on: site.picture,
                                 states: ("Allowed", "Blocked"),
                                 help: "\(site.picture ? "Block" : "Allow") Picture in Picture "
-                                    + "for this site's videos when you leave their tab"
+                                    + "when you leave this site's tabs"
                             ) {
                                 app.run("site-picture-in-picture", site.site, !site.picture)
                             }
