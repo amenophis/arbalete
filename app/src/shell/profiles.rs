@@ -8,6 +8,7 @@ pub(super) fn profile_context(profile: ProfileId) -> Option<RequestContext> {
     let dir = profile_dir(profile);
     let settings = RequestContextSettings {
         cache_path: CefString::from(dir.to_str().expect("a UTF-8 path")),
+        persist_session_cookies: 1,
         ..Default::default()
     };
     let context = request_context_create_context(Some(&settings), None)?;
@@ -231,6 +232,9 @@ pub(super) fn create_profile_context(profile: ProfileId) {
         } else {
             dir.to_str().expect("a UTF-8 path")
         }),
+        // The app restores its tabs at launch, so it keeps the cookies without an expiry date
+        // too, like Chrome when it continues where it left off: many sites keep a sign-in in one.
+        persist_session_cookies: 1,
         ..Default::default()
     };
     request_context_create_context(
