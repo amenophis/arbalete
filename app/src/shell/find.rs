@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// The find bar's size, and its margin from the card's top right corner (app/macos/Panels.swift):
+/// The find bar's size, and its margin from the page's top right corner (app/macos/Panels.swift):
 /// Arc's, measured from a recording.
 const FIND_SIZE: Size = Size {
     width: 300,
@@ -47,18 +47,18 @@ fn make_find() {
 }
 
 /// Keeps the find bar at the top right corner of the page it searches: Peek's, under its bar, or
-/// the card's.
+/// the shown page's, under the bar above it or its split's.
 pub(super) fn place_find() {
     let Some(controller) = win().find.with_borrow(Clone::clone) else {
         return;
     };
-    let Some(size) = win()
-        .window
-        .with_borrow(|window| window.as_ref().map(|w| w.size()))
-    else {
-        return;
-    };
-    let card = if peek_shown() {
+    let page = if peek_shown() {
+        let Some(size) = win()
+            .window
+            .with_borrow(|window| window.as_ref().map(|w| w.size()))
+        else {
+            return;
+        };
         let frame = peek_frame(&size);
         Rect {
             y: frame.y + PEEK_BAR,
@@ -66,12 +66,15 @@ pub(super) fn place_find() {
             ..frame
         }
     } else {
-        win().sidebar_mode.get().layout(&size).card
+        let Some(frame) = page_frame() else {
+            return;
+        };
+        frame
     };
-    let width = FIND_SIZE.width.min(card.width - 2 * FIND_MARGIN);
+    let width = FIND_SIZE.width.min(page.width - 2 * FIND_MARGIN);
     controller.set_bounds(Some(&Rect {
-        x: card.x + card.width - width - FIND_MARGIN,
-        y: card.y + FIND_MARGIN,
+        x: page.x + page.width - width - FIND_MARGIN,
+        y: page.y + FIND_MARGIN,
         width,
         height: FIND_SIZE.height,
     }));

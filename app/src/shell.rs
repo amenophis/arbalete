@@ -386,7 +386,7 @@ struct Win {
     reveal: RefCell<Option<Spot>>,
     /// The tabs of the split shown, in order, and how it lays them out: empty while none shows.
     split: RefCell<(Vec<NodeId>, Option<SplitLayout>)>,
-    /// The find bar, at the top right corner of the card or Peek's; created the first time it is
+    /// The find bar, at the top right corner of the page it searches; created the first time it is
     /// shown.
     find_view: RefCell<Option<Panel>>,
     find: RefCell<Option<Spot>>,
@@ -1028,6 +1028,8 @@ fn native_surface(view: *const ()) -> Option<&'static str> {
 /// and the pages.
 #[cfg(target_os = "macos")]
 fn sync_native_surfaces() {
+    // As the bar above the page, a split or Peek shows or hides.
+    place_find();
     let current = win();
     for (view, overlay) in [
         (&current.overlay_view, &current.overlay),
