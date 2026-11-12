@@ -24,7 +24,8 @@ final class FindBar: ObservableObject {
             text = (try? JSONDecoder().decode(String.self, from: detail)) ?? ""
             field?.stringValue = text
             found = nil
-            focus()
+            // Once the surface shows, which takes the keyboard for itself first.
+            DispatchQueue.main.async { self.focus() }
         case "arbalete:found":
             struct Found: Decodable {
                 var count: Int
@@ -38,9 +39,15 @@ final class FindBar: ObservableObject {
         }
     }
 
-    /// Gives the field the keyboard, its text selected, as ⌘F and the arrows do in Arc's.
-    func focus() {
-        guard let field, let window = field.window else { return }
+    /// Gives the field the keyboard, its text selected, as ⌘F and the arrows do in Arc's. The
+    /// first time, the field comes once SwiftUI lays the bar out, a moment after it shows.
+    func focus(tries: Int = 10) {
+        guard let field, let window = field.window else {
+            if tries > 0 {
+                DispatchQueue.main.async { [weak self] in self?.focus(tries: tries - 1) }
+            }
+            return
+        }
         window.makeFirstResponder(field)
         field.selectText(nil)
     }
