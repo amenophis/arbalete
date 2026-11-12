@@ -25,7 +25,6 @@ pub(super) fn peek_frame(size: &Size) -> Rect {
 
 /// Shows `url` in Peek, in the displayed Space's profile, instead of what it showed.
 pub(super) fn peek(url: &str) {
-    close_find();
     close_peek();
     let Some(window) = win().window.with_borrow(Clone::clone) else {
         return;

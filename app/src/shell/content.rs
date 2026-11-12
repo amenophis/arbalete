@@ -554,7 +554,7 @@ wrap_context_menu_handler! {
     }
 }
 
-// Tells the find bar the matches of the page it searches once the search ends: the updates before
+// Tells the page's find bar its matches once the search ends: the updates before
 // it count matches without an active one.
 wrap_find_handler! {
     struct ContentFindHandler {}
@@ -564,9 +564,7 @@ wrap_find_handler! {
             let Some(browser) = browser.filter(|_| final_update == 1) else {
                 return;
             };
-            if find_page().is_some_and(|mut page| browser.is_same(Some(&mut page)) == 1) {
-                found(browser, count, active_match_ordinal);
-            }
+            found(browser, count, active_match_ordinal);
         }
     }
 }
