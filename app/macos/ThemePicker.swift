@@ -150,6 +150,13 @@ final class ThemePickerModel: ObservableObject {
         theme = shown.theme
         wheel = wheelFor(shown.theme.colors)
         autoRange = wheel.range
+        // Like Arc's, a light or a dark appearance opens on its half of the lightness, widened to
+        // the leading color's.
+        if theme.mode != "auto", let lead = theme.colors.first {
+            let (low, high) = forcedRange(dark: theme.mode == "dark")
+            let lightness = toHsl(lead).l
+            wheel.range = (min(low, lightness), max(high, lightness))
+        }
         points = shown.theme.colors.map { pointOf(wheel, $0) }
     }
 
