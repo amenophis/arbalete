@@ -390,8 +390,8 @@ struct Win {
     /// shown.
     find_view: RefCell<Option<Panel>>,
     find: RefCell<Option<Spot>>,
-    /// The text last searched for, which ⌘G searches again.
-    find_text: RefCell<String>,
+    /// The page whose find bar the window shows, or would (find::sync_find), by its browser.
+    find_for: Cell<Option<i32>>,
     /// A Space's theme picker, beside the sidebar.
     theme_view: RefCell<Option<Panel>>,
     theme: RefCell<Option<Spot>>,
@@ -480,7 +480,7 @@ impl Win {
             split: RefCell::default(),
             find_view: RefCell::new(None),
             find: RefCell::new(None),
-            find_text: RefCell::new(String::new()),
+            find_for: Cell::new(None),
             theme_view: RefCell::new(None),
             theme: RefCell::new(None),
             theme_at: Cell::new(None),
@@ -1028,8 +1028,9 @@ fn native_surface(view: *const ()) -> Option<&'static str> {
 /// and the pages.
 #[cfg(target_os = "macos")]
 fn sync_native_surfaces() {
-    // As the bar above the page, a split or Peek shows or hides.
-    place_find();
+    // As another page comes to be searched, or the bar above the page, a split or Peek shows or
+    // hides.
+    sync_find();
     let current = win();
     for (view, overlay) in [
         (&current.overlay_view, &current.overlay),

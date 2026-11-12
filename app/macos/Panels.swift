@@ -12,6 +12,8 @@ final class FindBar: ObservableObject {
     @Published var text = ""
     @Published var found: (count: Int, active: Int)?
     weak var field: NSTextField?
+    /// Whether its surface takes the keyboard as it shows: from ⌘F, not as its page shows again.
+    var takesKeyboard: (Bool) -> Void = { _ in }
     private let app: AppModel
 
     init(app: AppModel) {
@@ -21,22 +23,32 @@ final class FindBar: ObservableObject {
     func handle(_ name: String, _ detail: Data) {
         switch name {
         case "arbalete:show":
-            text = (try? JSONDecoder().decode(String.self, from: detail)) ?? ""
-            field?.stringValue = text
-            found = nil
-            // Once the surface shows, which takes the keyboard for itself first.
-            DispatchQueue.main.async { self.focus() }
-        case "arbalete:found":
-            struct Found: Decodable {
-                var count: Int
-                var active: Int
+            // The page's own find bar: its text, its matches, and whether it takes the keyboard,
+            // as from ⌘F, or not, as its page shows again.
+            struct Show: Decodable {
+                var text: String
+                var found: Found?
+                var focus: Bool
             }
+            guard let show = try? JSONDecoder().decode(Show.self, from: detail) else { return }
+            text = show.text
+            field?.stringValue = text
+            found = show.found.map { ($0.count, $0.active) }
+            takesKeyboard(show.focus)
+            // Once the surface shows, which takes the keyboard for itself first.
+            if show.focus { DispatchQueue.main.async { self.focus() } }
+        case "arbalete:found":
             if let detail = try? JSONDecoder().decode(Found.self, from: detail), !text.isEmpty {
                 found = (detail.count, detail.active)
             }
         default:
             break
         }
+    }
+
+    private struct Found: Decodable {
+        var count: Int
+        var active: Int
     }
 
     /// Gives the field the keyboard, its text selected, as ⌘F and the arrows do in Arc's. The

@@ -1,4 +1,5 @@
-//! The find bar above the page, which finds text in it.
+//! The find bar above the page, which finds text in it. Each page has its own, shown or not, with
+//! its own text and matches: the window shows the one of the page it searches.
 
 use super::*;
 
@@ -10,29 +11,59 @@ const FIND_SIZE: Size = Size {
 };
 const FIND_MARGIN: i32 = 10;
 
+/// A page's find bar.
+#[derive(Default)]
+struct Find {
+    shown: bool,
+    /// The text last searched for, which ⌘G searches again.
+    text: String,
+    /// The matches found, and the active one.
+    found: Option<(i32, i32)>,
+}
+
 thread_local! {
     /// Whether the search last sent is a new one, which CEF ends without an active match.
     static NEW_SEARCH: Cell<bool> = const { Cell::new(false) };
+    /// Each page's find bar, by its browser: a tab's page's or Peek's.
+    static FINDS: RefCell<HashMap<i32, Find>> = RefCell::default();
 }
 
 /// Shows the find bar with the keyboard, the text last searched for selected and, like Arc's,
 /// searched for again.
 pub(super) fn show_find() {
-    make_find();
-    place_find();
-    let Some(controller) = win().find.with_borrow(Clone::clone) else {
+    let Some(browser) = find_page() else {
         return;
     };
-    controller.set_visible(1);
-    let text = win().find_text.with_borrow(Clone::clone);
-    let json = serde_json::to_string(&text).expect("a string");
-    dispatch(&win().find_view, "arbalete:show", &json);
+    let id = browser.identifier();
+    let text = FINDS.with_borrow_mut(|finds| {
+        let find = finds.entry(id).or_default();
+        find.shown = true;
+        find.found = None;
+        find.text.clone()
+    });
+    make_find();
+    win().find_for.set(Some(id));
+    place_find();
+    if let Some(controller) = win().find.with_borrow(Clone::clone) {
+        controller.set_visible(1);
+    }
+    send_find(&text, None, true);
     if !text.is_empty()
-        && let Some(host) = find_page().and_then(|browser| browser.host())
+        && let Some(host) = browser.host()
     {
         NEW_SEARCH.set(true);
         host.find(Some(&CefString::from(text.as_str())), 1, 0, 0);
     }
+}
+
+/// Tells the find bar what it shows: its text, its matches, and whether it takes the keyboard.
+fn send_find(text: &str, found: Option<(i32, i32)>, focus: bool) {
+    let detail = json!({
+        "text": text,
+        "found": found.map(|(count, active)| json!({ "count": count, "active": active })),
+        "focus": focus,
+    });
+    dispatch(&win().find_view, "arbalete:show", &detail.to_string());
 }
 
 /// Makes the find bar's place, once.
@@ -44,6 +75,28 @@ fn make_find() {
         win().find_view.set(Some(view));
         win().find.set(Some(controller));
     }
+}
+
+/// Shows the find bar of the page searched, or none, as another page comes to be searched: another
+/// tab, a split's other page, Peek's; and keeps it in place.
+pub(super) fn sync_find() {
+    let Some(controller) = win().find.with_borrow(Clone::clone) else {
+        return;
+    };
+    let page = find_page().map(|browser| browser.identifier());
+    if win().find_for.replace(page) != page {
+        let shown = page.and_then(|id| {
+            FINDS.with_borrow(|finds| {
+                let find = finds.get(&id).filter(|find| find.shown)?;
+                Some((find.text.clone(), find.found))
+            })
+        });
+        controller.set_visible(shown.is_some().into());
+        if let Some((text, found)) = shown {
+            send_find(&text, found, false);
+        }
+    }
+    place_find();
 }
 
 /// Keeps the find bar at the top right corner of the page it searches: Peek's, under its bar, or
@@ -87,49 +140,63 @@ pub(super) fn find_page() -> Option<Browser> {
 }
 
 /// Finds text in `browser`, find_page's; the same text again goes to the next match. `None`
-/// searches the last text again, or shows the find bar when there is none.
+/// searches the page's last text again, or shows the find bar when there is none.
 pub(super) fn find(browser: &Browser, text: Option<String>, forward: bool) {
-    let text = text.unwrap_or_else(|| win().find_text.with_borrow(Clone::clone));
-    if text.is_empty() {
-        if let Some(host) = browser.host() {
-            host.stop_finding(1);
+    let id = browser.identifier();
+    let (text, next) = FINDS.with_borrow_mut(|finds| {
+        let find = finds.entry(id).or_default();
+        let text = text.unwrap_or_else(|| find.text.clone());
+        let next = std::mem::replace(&mut find.text, text.clone()) == text;
+        if text.is_empty() {
+            find.found = None;
         }
-        win().find_text.with_borrow_mut(String::clear);
-        return show_find_if_hidden();
+        (text, next)
+    });
+    let Some(host) = browser.host() else {
+        return;
+    };
+    if text.is_empty() {
+        host.stop_finding(1);
+        return show_find_if_hidden(id);
     }
-    let next = win().find_text.replace(text.clone()) == text;
-    if let Some(host) = browser.host() {
-        NEW_SEARCH.set(!next);
-        host.find(
-            Some(&CefString::from(text.as_str())),
-            forward.into(),
-            0,
-            next.into(),
-        );
-    }
+    NEW_SEARCH.set(!next);
+    host.find(
+        Some(&CefString::from(text.as_str())),
+        forward.into(),
+        0,
+        next.into(),
+    );
 }
 
-/// Tells the find bar how many matches the search that ended found, and which one is active; a
-/// new search goes to its first match first, like Arc's, rather than leaving none active.
+/// Tells `browser`'s find bar how many matches the search that ended found, and which one is
+/// active; a new search goes to its first match first, like Arc's, rather than leaving none active.
 pub(super) fn found(browser: &Browser, count: i32, active: i32) {
-    if NEW_SEARCH.replace(false)
+    let id = browser.identifier();
+    let searched = win().find_for.get() == Some(id);
+    if searched
+        && NEW_SEARCH.replace(false)
         && count > 0
         && active == 0
         && let Some(host) = browser.host()
     {
-        let text = win().find_text.with_borrow(Clone::clone);
+        let text = FINDS.with_borrow(|finds| finds.get(&id).map(|find| find.text.clone()));
+        let text = text.unwrap_or_default();
         return host.find(Some(&CefString::from(text.as_str())), 1, 0, 1);
     }
-    let found = json!({ "count": count, "active": active });
-    dispatch(&win().find_view, "arbalete:found", &found.to_string());
+    FINDS.with_borrow_mut(|finds| {
+        if let Some(find) = finds.get_mut(&id).filter(|find| !find.text.is_empty()) {
+            find.found = Some((count, active));
+        }
+    });
+    if searched {
+        let found = json!({ "count": count, "active": active });
+        dispatch(&win().find_view, "arbalete:found", &found.to_string());
+    }
 }
 
 /// From ⌘G with nothing to search again.
-fn show_find_if_hidden() {
-    let hidden = win()
-        .find
-        .with_borrow(|find| find.as_ref().is_none_or(|find| find.is_visible() == 0));
-    if hidden {
+fn show_find_if_hidden(id: i32) {
+    if !FINDS.with_borrow(|finds| finds.get(&id).is_some_and(|find| find.shown)) {
         show_find();
     }
 }
@@ -145,12 +212,23 @@ pub(super) fn hide_find() {
     }
 }
 
-/// Hides the find bar and the highlights of the page it searches, as Peek opens or closes.
+/// Hides the find bar and the highlights of the page it searches, as Peek closes.
 pub(super) fn close_find() {
-    if let Some(controller) = win().find.with_borrow(Clone::clone) {
+    let Some(browser) = find_page() else {
+        return;
+    };
+    FINDS.with_borrow_mut(|finds| {
+        if let Some(find) = finds.get_mut(&browser.identifier()) {
+            find.shown = false;
+            find.found = None;
+        }
+    });
+    if win().find_for.get() == Some(browser.identifier())
+        && let Some(controller) = win().find.with_borrow(Clone::clone)
+    {
         controller.set_visible(0);
     }
-    if let Some(host) = find_page().and_then(|browser| browser.host()) {
+    if let Some(host) = browser.host() {
         host.stop_finding(0);
     }
 }
