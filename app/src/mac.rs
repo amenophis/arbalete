@@ -1811,6 +1811,23 @@ fn picture(jpeg: &str) -> Option<Retained<NSImage>> {
     NSImage::initWithData(NSImage::alloc(), &data)
 }
 
+/// Whether a picture of a page, a JPEG in base64, has the shape of a view CEF gives: taken at
+/// that view's size, it covers it as the page showed there.
+pub fn fits(view: *mut c_void, jpeg: &str) -> bool {
+    // SAFETY: CEF gives the page's NSView, which its window keeps alive.
+    let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
+        return false;
+    };
+    let (Some(image), bounds) = (picture(jpeg), view.bounds().size) else {
+        return false;
+    };
+    let size = image.size();
+    // Pixels against points: the shapes only, within a pixel or so of rounding.
+    size.height > 0.0
+        && bounds.height > 0.0
+        && (size.width / size.height - bounds.width / bounds.height).abs() < 0.01
+}
+
 /// Covers a view, which CEF gives, with a picture of its page, a JPEG in base64, until
 /// uncover_page; dimmed by an RGB `tint` when the page shows in another window, like Arc's.
 /// A picture taken at another size fills the view without being stretched.
@@ -1865,6 +1882,18 @@ pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>) {
         }
     }
     view.addSubview(&cover);
+}
+
+/// Whether a picture covers a page's view (cover_page).
+pub fn covered(view: *mut c_void) -> bool {
+    // SAFETY: CEF gives the page's NSView, which its window keeps alive.
+    unsafe { view.cast::<NSView>().as_ref() }.is_some_and(|view| {
+        view.subviews().iter().any(|subview| {
+            subview
+                .identifier()
+                .is_some_and(|id| id.to_string() == COVER)
+        })
+    })
 }
 
 /// Takes the picture covering a page's view away, if any.

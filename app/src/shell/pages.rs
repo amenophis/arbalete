@@ -222,6 +222,8 @@ pub fn page_snapshot(page: i32, jpeg: &str) {
     });
     if let Some(tab) = tab {
         SNAPSHOTS.with_borrow_mut(|snapshots| snapshots.insert(tab, jpeg.to_owned()));
+        #[cfg(target_os = "macos")]
+        keep_picture(tab, jpeg);
     }
 }
 
