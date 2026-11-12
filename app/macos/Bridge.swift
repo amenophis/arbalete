@@ -871,7 +871,14 @@ final class NativeWindow {
             let dark = mode == "auto" ? systemDark() : mode == "dark"
             let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             self.surfaces.values.forEach { $0.appearance = appearance }
+            // The focused window's Space decides, or, the app in the background, the last one to
+            // change.
+            if self.window?.isKeyWindow == true || NSApp.keyWindow == nil { showPages(of: app) }
         }
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+            ) { _ in MainActor.assumeIsolated { showPages(of: app) } })
     }
 
     /// Closes its panels, the window they belong to closing.

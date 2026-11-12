@@ -17,6 +17,22 @@ import SwiftUI
     NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
 }
 
+/// Like Arc's, the pages show light or dark (prefers-color-scheme) as the focused window's Space
+/// forces, and as the system is in automatic appearance; an incognito window's, dark. Chromium
+/// follows the app's appearance, which Arc sets too.
+@MainActor func showPages(of model: AppModel) {
+    let mode = model.state?.incognito == true ? "dark" : model.space?.theme.mode ?? "auto"
+    // Setting it again would tell its observers, which republish the state, again. AppKit gives
+    // back another appearance than the one set, so it remembers its own.
+    guard mode != pagesMode else { return }
+    pagesMode = mode
+    let name: NSAppearance.Name? = mode == "dark" ? .darkAqua : mode == "light" ? .aqua : nil
+    NSApp.appearance = name.flatMap(NSAppearance.init(named:))
+}
+
+/// The mode showPages last gave the app, automatic at launch.
+@MainActor private var pagesMode = "auto"
+
 /// A #rrggbb color's red, green and blue, from 0 to 1.
 func channels(_ hex: String) -> [Double] {
     let value = UInt32(hex.dropFirst(), radix: 16) ?? 0
