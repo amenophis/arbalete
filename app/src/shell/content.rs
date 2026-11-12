@@ -942,6 +942,9 @@ wrap_focus_handler! {
             }
             if win().shown.get() != Some(tab) && win().split.borrow().0.contains(&tab) {
                 select_tab(tab);
+                // Its find bar, as a command's.
+                #[cfg(target_os = "macos")]
+                sync_native_surfaces();
             }
         }
 
