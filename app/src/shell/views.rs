@@ -249,17 +249,22 @@ fn show_content(tab: NodeId) {
         return;
     }
     hide_content();
-    take_page(tab);
+    let taken = take_page(tab);
     win().shown.set(Some(tab));
     wake_page(tab);
     // Square in full screen, now that a page shows alone.
     place_card();
     shown_on_card(tab);
+    // A picture at this window's size, for when another window takes the page back: the one
+    // taken as this window goes to the background comes once the page has left it.
+    if taken {
+        snapshot_shown();
+    }
 }
 
 /// A page shows in one window at a time, like Arc's: this one takes a tab's page from another,
-/// which shows its picture instead, dimmed by its Space's color.
-pub(super) fn take_page(tab: NodeId) {
+/// which shows its picture instead, dimmed by its Space's color. Whether one showed it.
+pub(super) fn take_page(tab: NodeId) -> bool {
     let current = FOCUSED.get();
     let others: Vec<_> = WINDOWS.with_borrow(|windows| {
         windows
@@ -271,14 +276,50 @@ pub(super) fn take_page(tab: NodeId) {
             .cloned()
             .collect()
     });
+    let taken = !others.is_empty();
     for other in others {
         let shown = other.shown.take();
         *other.split.borrow_mut() = Default::default();
         #[cfg(target_os = "macos")]
-        if let (Some(card), Some(shown)) = (other.card_view.get(), shown)
-            && let Some(jpeg) = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&shown).cloned())
-        {
-            crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)));
+        if let (Some(card), Some(shown)) = (other.card_view.get(), shown) {
+            // The latest picture, unless it was taken at another window's size: the one taken
+            // there.
+            let latest = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&shown).cloned());
+            let own = other.picture.take().filter(|(tab, _)| *tab == shown);
+            let jpeg = match (latest, own) {
+                (Some(latest), _) if crate::mac::fits(card, &latest) => Some(latest),
+                (latest, own) => own.map(|(_, jpeg)| jpeg).or(latest),
+            };
+            if let Some(jpeg) = jpeg {
+                crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)));
+                other.picture.replace(Some((shown, jpeg)));
+            }
+        }
+    }
+    taken
+}
+
+/// Keeps a picture of a tab's page for the windows it was taken at the size of, which show the
+/// page or a picture of it. Taken as another window took the page, it covers the card at once.
+#[cfg(target_os = "macos")]
+pub(super) fn keep_picture(tab: NodeId, jpeg: &str) {
+    for window in WINDOWS.with_borrow(Clone::clone) {
+        let Some(card) = window.card_view.get() else {
+            continue;
+        };
+        let shows = window.shown.get() == Some(tab);
+        let covered = !shows
+            && window
+                .picture
+                .borrow()
+                .as_ref()
+                .is_some_and(|(of, _)| *of == tab)
+            && crate::mac::covered(card);
+        if (shows || covered) && crate::mac::fits(card, jpeg) {
+            if covered {
+                crate::mac::cover_page(card, jpeg, Some(space_tint(tab)));
+            }
+            window.picture.replace(Some((tab, jpeg.to_owned())));
         }
     }
 }

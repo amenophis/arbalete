@@ -360,6 +360,10 @@ struct Win {
     /// The native card holding its pages, once the card has shown (send_panes), which a picture of
     /// the page covers while another window shows it.
     card_view: Cell<Option<*mut std::ffi::c_void>>,
+    /// A picture of a tab's page at the card's size, taken while the window showed it, which
+    /// covers the card once another window takes the page (take_page).
+    #[cfg(target_os = "macos")]
+    picture: RefCell<Option<(NodeId, String)>>,
     window: RefCell<Option<MainWindow>>,
     /// Beside the card, at the window's left edge. It must not reach under the card: a web view
     /// below the overlays receives no real mouse event on macOS, only synthesized ones.
@@ -459,6 +463,8 @@ impl Win {
             incognito: Cell::new(None),
             fresh: Cell::new(false),
             card_view: Cell::new(None),
+            #[cfg(target_os = "macos")]
+            picture: RefCell::new(None),
             window: RefCell::new(None),
             sidebar: RefCell::new(None),
             sliding_card: RefCell::new(None),
