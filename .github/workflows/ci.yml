@@ -34,6 +34,13 @@ jobs:
           others=$(git diff --name-only "$BASE" HEAD | grep -v -E \
             -e '^(website|docs|packaging)/' -e '^[^/]+\.md$' \
             -e '^\.github/workflows/(website|release)\.yml$' || true)
+          # A release's version bump alone: only `version = "…"` lines of app/Cargo.toml and
+          # Cargo.lock. A dependency's update also changes its checksum or source in Cargo.lock.
+          if [ -n "$others" ] && ! echo "$others" | grep -q -v -x -E 'app/Cargo\.toml|Cargo\.lock' \
+            && ! git diff -U0 "$BASE" HEAD -- app/Cargo.toml Cargo.lock \
+              | grep -E '^[-+]' | grep -v -E '^(---|\+\+\+) ' | grep -q -v -E '^[-+]version = "'; then
+            others=
+          fi
           echo "app=$([ -n "$others" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   # macOS only for now: Linux and Windows are added when the app targets them.
