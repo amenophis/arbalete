@@ -55,6 +55,17 @@ unsafe impl RefEncode for CGColor {
     const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGColor", &[]));
 }
 
+/// Core Graphics' image, which only passes through here too.
+#[repr(C)]
+struct CGImage {
+    _private: [u8; 0],
+}
+
+// SAFETY: the encoding Objective-C gives a CGImageRef.
+unsafe impl RefEncode for CGImage {
+    const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGImage", &[]));
+}
+
 /// The width of the card's edge, in points: one pixel on a Retina display.
 const CARD_EDGE: f64 = 0.5;
 
@@ -1787,46 +1798,62 @@ fn corners(view: *mut c_void, bottom: bool) {
 /// (cover_page).
 const PLACEHOLDER_TINT: f64 = 0.45;
 
+/// Marks the view holding a picture that covers a page (cover_page).
+const COVER: &str = "arbalete.cover";
+
+/// A page's picture, a JPEG in base64.
+fn picture(jpeg: &str) -> Option<Retained<NSImage>> {
+    let data = NSData::initWithBase64EncodedString_options(
+        NSData::alloc(),
+        &NSString::from_str(jpeg),
+        NSDataBase64DecodingOptions::empty(),
+    )?;
+    NSImage::initWithData(NSImage::alloc(), &data)
+}
+
 /// Covers a view, which CEF gives, with a picture of its page, a JPEG in base64, until
 /// uncover_page; dimmed by an RGB `tint` when the page shows in another window, like Arc's.
+/// A picture taken at another size fills the view without being stretched.
 pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>) {
     // SAFETY: CEF gives the page's NSView, which its window keeps alive.
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
     };
     uncover_page((view as *const NSView).cast_mut().cast());
-    let Some(data) = NSData::initWithBase64EncodedString_options(
-        NSData::alloc(),
-        &NSString::from_str(jpeg),
-        NSDataBase64DecodingOptions::empty(),
-    ) else {
-        return;
-    };
-    let (Some(image), Some(class)) = (
-        NSImage::initWithData(NSImage::alloc(), &data),
-        AnyClass::get(c"NSImageView"),
-    ) else {
+    let Some(image) = picture(jpeg) else { return };
+    // SAFETY: on the main thread, which CEF calls the app on.
+    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+    let cover = NSView::initWithFrame(NSView::alloc(mtm), view.bounds());
+    cover.setIdentifier(Some(&NSString::from_str(COVER)));
+    cover.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
+    let Some(class) = AnyClass::get(c"CALayer") else {
         return;
     };
     unsafe {
-        let cover: Retained<NSView> = msg_send![class, imageViewWithImage: &*image];
-        // NSImageScaleAxesIndependently: the picture was the page's size.
-        let _: () = msg_send![&*cover, setImageScaling: 1usize];
-        cover.setFrame(view.bounds());
-        cover.setAutoresizingMask(
-            NSAutoresizingMaskOptions::ViewWidthSizable
-                | NSAutoresizingMaskOptions::ViewHeightSizable,
-        );
-        // Above the picture: a view drawing over the image view, which keeps its own layer.
+        // A layer of its own, which AppKit leaves alone, holds the picture.
+        let layer: Retained<AnyObject> = msg_send![class, layer];
+        let _: () = msg_send![&*cover, setLayer: &*layer];
+        cover.setWantsLayer(true);
+        let image: *const CGImage = msg_send![
+            &*image,
+            CGImageForProposedRect: std::ptr::null_mut::<NSRect>(),
+            context: std::ptr::null::<AnyObject>(),
+            hints: std::ptr::null::<AnyObject>()
+        ];
+        // A layer's contents is a CGImage, an object it keeps.
+        let _: () = msg_send![&*layer, setContents: image.cast::<AnyObject>()];
+        let gravity = NSString::from_str("resizeAspectFill");
+        let _: () = msg_send![&*layer, setContentsGravity: &*gravity];
+        let _: () = msg_send![&*layer, setMasksToBounds: true];
+        // Above the picture: a view drawing over the one holding it.
         if let Some(rgb) = tint {
             let [_, red, green, blue] = rgb.to_be_bytes().map(|c| f64::from(c) / 255.0);
             let color =
                 NSColor::colorWithSRGBRed_green_blue_alpha(red, green, blue, PLACEHOLDER_TINT);
             let color: *const CGColor = msg_send![&*color, CGColor];
-            let wash = NSView::initWithFrame(
-                NSView::alloc(MainThreadMarker::new_unchecked()),
-                cover.bounds(),
-            );
+            let wash = NSView::initWithFrame(NSView::alloc(mtm), cover.bounds());
             wash.setAutoresizingMask(
                 NSAutoresizingMaskOptions::ViewWidthSizable
                     | NSAutoresizingMaskOptions::ViewHeightSizable,
@@ -1836,8 +1863,8 @@ pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>) {
             let _: () = msg_send![&*layer, setBackgroundColor: color];
             cover.addSubview(&wash);
         }
-        view.addSubview(&cover);
     }
+    view.addSubview(&cover);
 }
 
 /// Takes the picture covering a page's view away, if any.
@@ -1846,13 +1873,11 @@ pub fn uncover_page(view: *mut c_void) {
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
     };
-    let Some(class) = AnyClass::get(c"NSImageView") else {
-        return;
-    };
-    // The page's view holds no other picture.
     for subview in view.subviews().iter() {
-        let picture: bool = unsafe { msg_send![&*subview, isKindOfClass: class] };
-        if picture {
+        if subview
+            .identifier()
+            .is_some_and(|id| id.to_string() == COVER)
+        {
             subview.removeFromSuperview();
         }
     }
