@@ -78,25 +78,53 @@ fn make_find() {
 }
 
 /// Shows the find bar of the page searched, or none, as another page comes to be searched: another
-/// tab, a split's other page, Peek's; and keeps it in place.
+/// tab, a split's other page, Peek's; and keeps it in place. The page left keeps its bar, which
+/// rests without highlights until it is searched again, as it shows.
 pub(super) fn sync_find() {
     let Some(controller) = win().find.with_borrow(Clone::clone) else {
         return;
     };
-    let page = find_page().map(|browser| browser.identifier());
-    if win().find_for.replace(page) != page {
-        let shown = page.and_then(|id| {
-            FINDS.with_borrow(|finds| {
-                let find = finds.get(&id).filter(|find| find.shown)?;
-                Some((find.text.clone(), find.found))
-            })
-        });
-        controller.set_visible(shown.is_some().into());
-        if let Some((text, found)) = shown {
-            send_find(&text, found, false);
+    let browser = find_page();
+    let page = browser.as_ref().map(Browser::identifier);
+    let left = win().find_for.replace(page);
+    if left == page {
+        return place_find();
+    }
+    if let Some(host) = left.and_then(page_browser).and_then(|left| left.host()) {
+        host.stop_finding(1);
+    }
+    let shown = page.and_then(|id| {
+        FINDS.with_borrow_mut(|finds| {
+            let find = finds.get_mut(&id).filter(|find| find.shown)?;
+            find.found = None;
+            Some(find.text.clone())
+        })
+    });
+    controller.set_visible(shown.is_some().into());
+    if let Some(text) = shown {
+        send_find(&text, None, false);
+        if !text.is_empty()
+            && let Some(host) = browser.and_then(|browser| browser.host())
+        {
+            NEW_SEARCH.set(true);
+            host.find(Some(&CefString::from(text.as_str())), 1, 0, 0);
         }
     }
     place_find();
+}
+
+/// The page whose browser is `id`: a tab's page or Peek's.
+fn page_browser(id: i32) -> Option<Browser> {
+    let peek = PEEK.with_borrow(|peek| peek.as_ref().map(|peek| peek.browser.clone()));
+    peek.filter(|browser| browser.identifier() == id)
+        .or_else(|| {
+            PAGES.with_borrow(|pages| {
+                pages
+                    .values()
+                    .map(|live| live.browser.clone())
+                    .find(|browser| browser.identifier() == id)
+            })
+        })
 }
 
 /// Keeps the find bar at the top right corner of the page it searches: Peek's, under its bar, or
