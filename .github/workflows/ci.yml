@@ -59,9 +59,9 @@ jobs:
           # runner. A pull request that changes Cargo.lock restores main's latest cache all the
           # same, and cargo rebuilds what changed. CEF's build (Cargo.toml) keys it whole: CEF's
           # C++ wrapper, the slowest dependency, is rebuilt for a new CEF anyway.
-          key: cef-${{ hashFiles('Cargo.toml') }}
-          # Named apart from the job, so that the release (release.yml) restores it too.
-          shared-key: app
+          # Named apart from the job, so that the release (release.yml) restores it too. With a
+          # shared key, rust-cache ignores `key`: CEF's hash goes in it.
+          shared-key: app-cef-${{ hashFiles('Cargo.toml') }}
           # A pull request reads its own cache, else main's (GitHub falls back to the base branch),
           # and saves one only when its key is new, when it changes what the key hashes: its next
           # runs then start from there rather than from main's.
@@ -80,5 +80,9 @@ jobs:
       - name: Export CEF
         if: steps.cef-cache.outputs.cache-hit != 'true'
         run: mise run cef
+
+      # Not needed by the check: installed here so that main's cache holds it for the release,
+      # which reads no cache of its own. A second run finds it installed.
+      - run: mise run cef-bundler
 
       - run: mise run check
