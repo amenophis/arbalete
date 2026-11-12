@@ -2139,6 +2139,73 @@ pub fn mock_keychain() -> bool {
     is_development_bundle(bundle_identifier().as_deref())
 }
 
+/// Makes sure Chromium can read its key in the keychain before it opens the profiles: without it,
+/// Chromium erases every cookie it cannot decrypt, signing the user out of every site, and keeps
+/// no new one. macOS asks for access again after each update of a self-signed release; when the
+/// user does not allow it, the app asks again or quits rather than start without the key.
+pub fn ensure_keychain_access() {
+    if mock_keychain() {
+        return;
+    }
+    while !can_read_safe_storage_key() {
+        let mtm = MainThreadMarker::new().expect("main thread");
+        let alert = NSAlert::new(mtm);
+        alert.setMessageText(ns_string!("Arbalete needs its key in the keychain"));
+        alert.setInformativeText(ns_string!(
+            "Your cookies and sign-ins are encrypted with a key kept in the keychain item \
+             “Chromium Safe Storage”. Without access to it, Arbalete would sign you out of every \
+             site. Choose Always Allow when macOS asks."
+        ));
+        alert.addButtonWithTitle(ns_string!("Try Again"));
+        alert.addButtonWithTitle(ns_string!("Quit"));
+        if alert.runModal() != NSAlertFirstButtonReturn {
+            std::process::exit(0);
+        }
+    }
+}
+
+/// Reads Chromium's key, as Chromium does, which asks the user when the app may not yet: whether it
+/// could, or there is no key yet, which Chromium then creates.
+fn can_read_safe_storage_key() -> bool {
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+    #[link(name = "Security", kind = "framework")]
+    unsafe extern "C" {
+        fn SecKeychainFindGenericPassword(
+            keychains: *const c_void,
+            service_length: u32,
+            service: *const std::ffi::c_char,
+            account_length: u32,
+            account: *const std::ffi::c_char,
+            password_length: *mut u32,
+            password: *mut *mut c_void,
+            item: *mut *mut c_void,
+        ) -> i32;
+        fn SecKeychainItemFreeContent(attributes: *mut c_void, data: *mut c_void) -> i32;
+    }
+    let (service, account) = (c"Chromium Safe Storage", c"Chromium");
+    let mut length = 0;
+    let mut password = std::ptr::null_mut();
+    // SAFETY: the names are C strings of the lengths given, and the key, when read, is freed
+    // right away, unused.
+    let status = unsafe {
+        let status = SecKeychainFindGenericPassword(
+            std::ptr::null(),
+            service.count_bytes() as u32,
+            service.as_ptr(),
+            account.count_bytes() as u32,
+            account.as_ptr(),
+            &raw mut length,
+            &raw mut password,
+            std::ptr::null_mut(),
+        );
+        if !password.is_null() {
+            SecKeychainItemFreeContent(std::ptr::null_mut(), password);
+        }
+        status
+    };
+    status == 0 || status == ERR_SEC_ITEM_NOT_FOUND
+}
+
 /// Whether the app runs as a release, under an identifier without a `dev` part: the one that
 /// keeps its data in "Arbalete" (main::default_data_dir). A bare binary is not one.
 pub fn release_bundle() -> bool {
