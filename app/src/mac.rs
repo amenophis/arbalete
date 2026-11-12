@@ -20,11 +20,12 @@ use objc2_app_kit::{
     NSEventModifierFlags, NSEventPhase, NSEventType, NSF12FunctionKey, NSImage,
     NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
     NSRightArrowFunctionKey, NSSharingServicePicker, NSText, NSTextField, NSUpArrowFunctionKey,
-    NSView, NSWindow, NSWindowButton, NSWorkspace,
+    NSView, NSWindow, NSWindowButton, NSWindowDidBecomeKeyNotification, NSWindowStyleMask,
+    NSWindowTitleVisibility, NSWorkspace,
 };
 use objc2_foundation::{
     NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSData, NSDataBase64DecodingOptions,
-    NSNotificationCenter, NSNumber, NSOperationQueue, NSProcessInfo,
+    NSNotification, NSNotificationCenter, NSNumber, NSOperationQueue, NSProcessInfo,
     NSProcessInfoPowerStateDidChangeNotification, NSRect, NSRectEdge, NSSize, NSString, NSURL,
     ns_string,
 };
@@ -78,6 +79,9 @@ thread_local! {
     static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     /// Watches Low Power Mode (watch_low_power).
     static POWER_OBSERVER: RefCell<Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>> =
+        const { RefCell::new(None) };
+    /// Watches the windows coming forward, for Chromium's lone dialogs (watch_dialogs).
+    static DIALOG_OBSERVER: RefCell<Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>> =
         const { RefCell::new(None) };
     /// The actions of the menu last shown, which its items' tags index.
     static MENU_ACTIONS: RefCell<Vec<Action>> = const { RefCell::new(Vec::new()) };
@@ -2094,6 +2098,44 @@ pub fn watch_low_power() {
         )
     };
     POWER_OBSERVER.set(Some(observer));
+}
+
+/// Hides the title bar of Chromium's window-modal dialogs, like the Web Store's "Add
+/// extension?", as each comes forward. Chromium makes them titled windows, to show as sheets of
+/// its own windows, which draw no title bar; the app's windows are not Chromium's, so they show
+/// alone, their title bar over their top. Made see-through, it shows the dialog, as a sheet would.
+pub fn watch_dialogs() {
+    let shown = RcBlock::new(|notification: NonNull<NSNotification>| {
+        // SAFETY: the center gives a live notification for the block's call.
+        let notification = unsafe { notification.as_ref() };
+        let Some(window) = notification
+            .object()
+            .and_then(|object| object.downcast::<NSWindow>().ok())
+        else {
+            return;
+        };
+        if is_lone_dialog(&window) {
+            window.setTitlebarAppearsTransparent(true);
+            window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+        }
+    });
+    // SAFETY: the main queue runs the block on the main thread, CEF's UI thread.
+    let observer = unsafe {
+        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+            Some(NSWindowDidBecomeKeyNotification),
+            None,
+            Some(&NSOperationQueue::mainQueue()),
+            &shown,
+        )
+    };
+    DIALOG_OBSERVER.set(Some(observer));
+}
+
+/// Whether `window` is one of Chromium's window-modal dialogs: its window class, with the style
+/// Chromium gives those alone (views' StyleMaskForParams).
+fn is_lone_dialog(window: &NSWindow) -> bool {
+    AnyClass::get(c"NativeWidgetMacNSWindow").is_some_and(|class| window.isKindOfClass(class))
+        && window.styleMask() == NSWindowStyleMask::Titled | NSWindowStyleMask::FullSizeContentView
 }
 
 /// The system's first preferred language as Chromium names its locales: the language alone, like

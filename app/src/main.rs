@@ -65,6 +65,8 @@ fn main() {
     mac::watch_events();
     #[cfg(target_os = "macos")]
     mac::watch_low_power();
+    #[cfg(target_os = "macos")]
+    mac::watch_dialogs();
 
     run_message_loop();
     shutdown();
