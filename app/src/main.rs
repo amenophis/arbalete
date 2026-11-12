@@ -33,6 +33,8 @@ fn main() {
         return;
     }
 
+    #[cfg(target_os = "macos")]
+    mac::ensure_keychain_access();
     let root = data_dir();
     // The global context, under `Default`, serves only the app's own UI: each profile's pages use
     // their own context (app/src/shell/profiles.rs).
