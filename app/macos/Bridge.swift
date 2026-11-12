@@ -748,10 +748,14 @@ final class NativeWindow {
         self.viewer = viewer
         app.viewingChanged = { [weak viewer] in viewer?.update() }
         // Like Arc's, the Command Bar and the other panels are light or dark as the displayed
-        // Space's theme is, as the sidebar is (SidebarHost), not as the system is.
+        // Space's appearance forces, and as the system is in automatic appearance, whatever the
+        // Space's colors, which only decide the sidebar's (isDark). The system's changing
+        // republishes the state (AppModel).
         appearance = app.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in
             guard let self else { return }
-            let appearance = NSAppearance(named: isDark(app.space?.theme) ? .darkAqua : .aqua)
+            let mode = app.space?.theme.mode ?? "auto"
+            let dark = mode == "auto" ? systemDark() : mode == "dark"
+            let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             self.surfaces.values.forEach { $0.appearance = appearance }
         }
     }
