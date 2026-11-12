@@ -218,10 +218,13 @@ struct ThemePickerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Like Arc's, frosted glass: the window, which shows the colors as they change, shows
         // through the panel's blur.
-        .foregroundStyle(.white)
-        .environment(\.colorScheme, .dark)
+        .foregroundStyle(pen)
     }
 }
+
+/// The picker's ink, like Arc's: white over its glass in a dark appearance, and a soft black in
+/// a light one, where white would not stand out.
+let pen = Color.ink((0x000000, 0.6), (0xFFFFFF, 1))
 
 /// The dots of `count` colors that go with a leading one at `lead`, like `harmony`: turned by
 /// their hues, as far from the center.
@@ -251,12 +254,12 @@ struct Pad: View {
                     y: (location.y - size.height / 2) / radius)
             }
             ZStack {
-                RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.05))
+                RoundedRectangle(cornerRadius: 16).fill(pen.opacity(0.05))
                 DotGrid().clipShape(RoundedRectangle(cornerRadius: 16))
                 if colors.isEmpty {
                     Text("Tap to pick a color for this space")
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(pen.opacity(0.7))
                 }
                 ForEach(Array(zip(colors, picker.points).enumerated()), id: \.offset) { index, dot in
                     let (hex, at) = dot
@@ -337,7 +340,7 @@ struct DotGrid: View {
                 while y < size.height {
                     context.fill(
                         Path(ellipseIn: CGRect(x: x - 0.8, y: y - 0.8, width: 1.6, height: 1.6)),
-                        with: .color(.white.opacity(0.2)))
+                        with: .color(pen.opacity(0.2)))
                     y += 6
                 }
                 x += 6
@@ -351,16 +354,22 @@ struct PickerButton: View {
     let label: String
     var pressed = false
     let action: () -> Void
+    private let hovered = State(initialValue: false)
 
     var body: some View {
+        // Like Arc's, a rounded square, shaded only as it is picked or the pointer is on it.
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.ink((0x000000, 0.5), (0xFFFFFF, 0.5)))
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(.white.opacity(pressed ? 0.3 : 0.12)))
-                .contentShape(Circle())
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.secondary.opacity(pressed || hovered.wrappedValue ? 0.2 : 0)))
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovered.wrappedValue = $0 }
         .help(label)
         .accessibilityLabel(label)
     }
@@ -403,7 +412,7 @@ struct Palette: View {
                     picker.change({ $0.colors = colors }, rewheel: true)
                 } label: {
                     Circle().fill(color(hex)).frame(width: 24, height: 24)
-                        .overlay(Circle().strokeBorder(.white.opacity(0.3)))
+                        .overlay(Circle().strokeBorder(pen.opacity(0.3)))
                 }
                 .buttonStyle(.plain)
                 .help(hex)
@@ -436,7 +445,7 @@ struct SineSlider: View {
             let track = Path(
                 roundedRect: CGRect(x: 0, y: size.height / 2 - 16, width: size.width, height: 32),
                 cornerRadius: 16)
-            context.fill(track, with: .color(.white.opacity(0.1)))
+            context.fill(track, with: .color(pen.opacity(0.1)))
             func wave(_ from: Double, _ to: Double) -> Path {
                 var path = Path()
                 var x = from
@@ -447,11 +456,11 @@ struct SineSlider: View {
                 }
                 return path
             }
-            context.stroke(wave(thumb, size.width - 12), with: .color(.white.opacity(0.25)), lineWidth: 3)
-            context.stroke(wave(12, thumb), with: .color(.white), lineWidth: 3)
+            context.stroke(wave(thumb, size.width - 12), with: .color(pen.opacity(0.25)), lineWidth: 3)
+            context.stroke(wave(12, thumb), with: .color(pen), lineWidth: 3)
             context.fill(
                 Path(roundedRect: CGRect(x: thumb - 14, y: 4, width: 28, height: size.height - 8), cornerRadius: 14),
-                with: .color(.white))
+                with: .color(pen))
         }
         .frame(width: size.width, height: size.height)
         .opacity(enabled ? 1 : 0.4)
@@ -493,10 +502,10 @@ struct Dial: View {
                 let at = CGPoint(x: center.x + cos(a) * ring, y: center.y + sin(a) * ring)
                 context.fill(
                     Path(ellipseIn: CGRect(x: at.x - 2.6, y: at.y - 2.6, width: 5.2, height: 5.2)),
-                    with: .color(.white.opacity(lit ? 1 : 0.25)))
+                    with: .color(pen.opacity(lit ? 1 : 0.25)))
             }
             let disk = CGRect(x: center.x - (ring - 12), y: center.y - (ring - 12), width: 2 * (ring - 12), height: 2 * (ring - 12))
-            context.fill(Path(ellipseIn: disk), with: .color(.white.opacity(0.12)))
+            context.fill(Path(ellipseIn: disk), with: .color(pen.opacity(0.12)))
             // The grain on the disk: specks, the more the grainier.
             var generator = SplitMix(seed: 7)
             for _ in 0..<Int(400 * value) {
@@ -504,13 +513,13 @@ struct Dial: View {
                 let t = Double(generator.next() % 1000) / 1000 * 2 * .pi
                 context.fill(
                     Path(CGRect(x: center.x + cos(t) * r, y: center.y + sin(t) * r, width: 1, height: 1)),
-                    with: .color(.white.opacity(0.5)))
+                    with: .color(pen.opacity(0.5)))
             }
             let handle = angle(value)
             var line = Path()
             line.move(to: CGPoint(x: center.x + cos(handle) * (ring - 6), y: center.y + sin(handle) * (ring - 6)))
             line.addLine(to: CGPoint(x: center.x + cos(handle) * (ring + 4), y: center.y + sin(handle) * (ring + 4)))
-            context.stroke(line, with: .color(.white), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            context.stroke(line, with: .color(pen), style: StrokeStyle(lineWidth: 3, lineCap: .round))
         }
         .frame(width: size, height: size)
         .opacity(enabled ? 1 : 0.4)

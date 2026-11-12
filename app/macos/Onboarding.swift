@@ -899,6 +899,7 @@ private struct SpacesStep: View {
             }
             .frame(width: 400)
             ThemePickerView(picker: model.picker)
+                .environment(\.colorScheme, .dark)
                 .frame(width: 365, height: 520)
                 .background(PanelBlur())
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.12)))
