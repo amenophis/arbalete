@@ -47,7 +47,7 @@ wrap_client! {
         }
 
         fn request_handler(&self) -> Option<RequestHandler> {
-            (!self.little).then(ContentRequestHandler::new)
+            Some(ContentRequestHandler::new(self.little))
         }
 
         fn permission_handler(&self) -> Option<PermissionHandler> {
@@ -193,13 +193,23 @@ fn shortcut_priority(id: &str) -> settings::Priority {
 }
 
 wrap_request_handler! {
-    struct ContentRequestHandler {}
+    struct ContentRequestHandler {
+        // A Little Arbalete window's page, which only another app's links concern.
+        little: bool,
+    }
 
     impl RequestHandler {
-        /// Like Arc's, a link from a pinned tab or a favorite to another site shows in Peek,
-        /// the tab staying on its site.
+        /// Another app's link, even one a sign-in redirects to, goes to macOS (app_links). Like
+        /// Arc's, a link from a pinned tab or a favorite to another site shows in Peek, the tab
+        /// staying on its site.
         fn on_before_browse(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, request: Option<&mut Request>, user_gesture: i32, is_redirect: i32) -> i32 {
             let (Some(browser), Some(frame), Some(request)) = (browser, frame, request) else { return 0 };
+            if leave_for_app(browser, frame, request) {
+                return 1;
+            }
+            if self.little {
+                return 0;
+            }
             let url = CefString::from(&request.url()).to_string();
             // A page going elsewhere no longer asks to sign in.
             if frame.is_main() == 1 {
@@ -228,7 +238,7 @@ wrap_request_handler! {
         /// where Chrome shows "Aw, Snap!", page_ended.
         fn on_render_process_terminated(&self, browser: Option<&mut Browser>, _status: TerminationStatus, _error_code: i32, _error_string: Option<&CefString>) {
             // Once Chromium is done telling it, which a reload now would disturb.
-            if let Some(browser) = browser {
+            if let Some(browser) = browser.filter(|_| !self.little) {
                 post_task(ThreadId::UI, Some(&mut PageEnded::new(browser.clone())));
             }
         }
@@ -236,7 +246,7 @@ wrap_request_handler! {
         /// Asks the user to sign in to a site, or a proxy, using HTTP authentication, in the
         /// sign-in prompt; on the IO thread.
         fn auth_credentials(&self, browser: Option<&mut Browser>, _origin_url: Option<&CefString>, is_proxy: i32, host: Option<&CefString>, _port: i32, realm: Option<&CefString>, _scheme: Option<&CefString>, callback: Option<&mut AuthCallback>) -> i32 {
-            let (Some(browser), Some(callback)) = (browser, callback) else { return 0 };
+            let (Some(browser), Some(callback)) = (browser.filter(|_| !self.little), callback) else { return 0 };
             let text = |text: Option<&CefString>| text.map(CefString::to_string).unwrap_or_default();
             let mut ask = AskAuth::new(browser.clone(), text(host), text(realm), is_proxy == 1, callback.clone());
             post_task(ThreadId::UI, Some(&mut ask));
@@ -246,7 +256,7 @@ wrap_request_handler! {
         /// A link clicked with ⇧ shows in Peek, one clicked with ⌘ opens in a tab behind the one
         /// shown, and one clicked with ⌘⇧ in a tab shown, like Arc's.
         fn on_open_urlfrom_tab(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, target_url: Option<&CefString>, target_disposition: WindowOpenDisposition, user_gesture: i32) -> i32 {
-            let Some(url) = target_url.map(CefString::to_string).filter(|_| user_gesture == 1) else { return 0 };
+            let Some(url) = target_url.map(CefString::to_string).filter(|_| user_gesture == 1 && !self.little) else { return 0 };
             if !page_may_open(&frame_url(frame), &url) {
                 return 1;
             }

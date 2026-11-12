@@ -942,6 +942,8 @@ final class PermissionPrompt: ObservableObject {
         var id: UInt64
         var site: String
         var asks: [Ask]
+        /// It asks to open another app, which the user does once, rather than to use something.
+        var app: Bool?
     }
 
     @Published var request: Request?
@@ -972,7 +974,7 @@ final class PermissionPrompt: ObservableObject {
 }
 
 /// The permission prompt, like Arc's: a small panel at the top of the page, with the site, what
-/// it asks to use, and Block and Allow.
+/// it asks to use, and Block and Allow; or Cancel and Open, for another app.
 struct PermissionView: View {
     @ObservedObject var prompt: PermissionPrompt
 
@@ -996,8 +998,9 @@ struct PermissionView: View {
                     }
                 }
                 HStack(spacing: 8) {
-                    PermissionButton(title: "Block", prominent: false) { prompt.answer(false) }
-                    PermissionButton(title: "Allow", prominent: true) { prompt.answer(true) }
+                    let app = request.app == true
+                    PermissionButton(title: app ? "Cancel" : "Block", prominent: false) { prompt.answer(false) }
+                    PermissionButton(title: app ? "Open" : "Allow", prominent: true) { prompt.answer(true) }
                 }
             }
             .padding(14)

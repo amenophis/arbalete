@@ -1,4 +1,5 @@
-//! The prompt asking the user before a site uses the camera, the microphone or the like.
+//! The prompt asking the user before a site uses the camera, the microphone or the like, or opens
+//! another app (shell::app_links).
 
 use super::*;
 
@@ -22,6 +23,12 @@ enum PermissionCallback {
     Media(MediaAccessCallback, u32),
     /// For anything else, Chromium's prompt by its id, and the permissions it asks for.
     Prompt(u64, u32, PermissionPromptCallback),
+    /// For another app's link: the link, the app's name, and whether its page opened only for it.
+    AppLink {
+        url: String,
+        app: String,
+        blank: bool,
+    },
 }
 
 thread_local! {
@@ -126,6 +133,21 @@ fn ask_permission(
     surfaces_changed();
 }
 
+/// Asks the user before `browser`'s page, from `origin`, opens `url` in `app`: once at a time per
+/// page, which a page asking again and again cannot pile up.
+pub(super) fn ask_app_link(browser: &Browser, origin: &str, url: String, app: String, blank: bool) {
+    let asking = PERMISSION_REQUESTS.with_borrow(|requests| {
+        requests
+            .iter()
+            .any(|request| request.browser.identifier() == browser.identifier())
+    });
+    if asking {
+        return;
+    }
+    let callback = PermissionCallback::AppLink { url, app, blank };
+    ask_permission(browser, origin, Vec::new(), callback);
+}
+
 /// Gives the site the user's answer to its request `id`, from the permission prompt.
 pub(super) fn answer_permission(id: u64, allow: bool) {
     let request = PERMISSION_REQUESTS.with_borrow_mut(|requests| {
@@ -146,6 +168,15 @@ pub(super) fn answer_permission(id: u64, allow: bool) {
                 PermissionRequestResult::DENY
             });
             ANSWERING.set(None);
+        }
+        PermissionCallback::AppLink { url, blank, .. } => {
+            #[cfg(target_os = "macos")]
+            if allow {
+                crate::mac::open_in_app(&url);
+            }
+            if blank {
+                close_blank_page(&request.browser);
+            }
         }
     }
     surfaces_changed();
@@ -211,6 +242,12 @@ pub(super) fn sync_permission_prompt() {
     });
     let shown = PERMISSION_REQUESTS.with_borrow(|requests| {
         let request = requests.iter().find(|request| shows_request(request))?;
+        if let PermissionCallback::AppLink { app, .. } = &request.callback {
+            let asks = [json!({ "text": format!("Open {app}"), "symbol": "arrow.up.forward.app" })];
+            let site = Some(request.site.as_str()).filter(|site| !site.is_empty());
+            let site = site.unwrap_or("A page");
+            return Some(json!({ "id": request.id, "site": site, "asks": asks, "app": true }));
+        }
         let asks: Vec<_> = request
             .asks
             .iter()
