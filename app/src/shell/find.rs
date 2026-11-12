@@ -78,17 +78,13 @@ fn make_find() {
 }
 
 /// Shows the find bar of the page searched, or none, as another page comes to be searched: another
-/// tab, Peek's; a split's other page takes its bar along; and keeps it in place.
+/// tab, a split's other page, Peek's; and keeps it in place.
 pub(super) fn sync_find() {
     let Some(controller) = win().find.with_borrow(Clone::clone) else {
         return;
     };
     let page = find_page().map(|browser| browser.identifier());
-    let previous = win().find_for.replace(page);
-    if previous != page {
-        if let (Some(from), Some(to)) = (previous, page) {
-            follow_pane(from, to);
-        }
+    if win().find_for.replace(page) != page {
         let shown = page.and_then(|id| {
             FINDS.with_borrow(|finds| {
                 let find = finds.get(&id).filter(|find| find.shown)?;
@@ -101,50 +97,6 @@ pub(super) fn sync_find() {
         }
     }
     place_find();
-}
-
-/// Moves a split's find bar from its page `from` to `to`, both browsers, as `to` gets focused,
-/// like Arc's: one bar for the split, on its focused page, which it searches for its text.
-fn follow_pane(from: i32, to: i32) {
-    let split = win().split.borrow().0.clone();
-    let pane = |id: i32| {
-        PAGES.with_borrow(|pages| {
-            split.iter().find_map(|tab| {
-                let browser = &pages.get(tab)?.browser;
-                (browser.identifier() == id).then(|| browser.clone())
-            })
-        })
-    };
-    let (Some(old), Some(new)) = (pane(from), pane(to)) else {
-        return;
-    };
-    let text = FINDS.with_borrow_mut(|finds| {
-        let find = finds.get_mut(&from).filter(|find| find.shown)?;
-        find.shown = false;
-        find.found = None;
-        let text = find.text.clone();
-        finds.insert(
-            to,
-            Find {
-                shown: true,
-                text: text.clone(),
-                found: None,
-            },
-        );
-        Some(text)
-    });
-    let Some(text) = text else {
-        return;
-    };
-    if let Some(host) = old.host() {
-        host.stop_finding(0);
-    }
-    if !text.is_empty()
-        && let Some(host) = new.host()
-    {
-        NEW_SEARCH.set(true);
-        host.find(Some(&CefString::from(text.as_str())), 1, 0, 0);
-    }
 }
 
 /// Keeps the find bar at the top right corner of the page it searches: Peek's, under its bar, or
