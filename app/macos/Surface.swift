@@ -305,6 +305,12 @@ final class Surface {
         var content = bounds
         if beak != nil { content.size.height -= Self.beakHeight }
         host.frame = content
+        // Its content too, whose own background, like the Command Bar's light veil, would square
+        // its corners: the blur's mask leaves its subviews out. Both start at the bottom left.
+        host.wantsLayer = true
+        let clip = CAShapeLayer()
+        clip.path = outline
+        host.layer?.mask = clip
     }
 
     /// Its outline in `bounds`: a rounded rectangle, with its beak on top if it has one, a bump
