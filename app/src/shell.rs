@@ -36,6 +36,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod app_links;
 mod archive;
 mod auth_prompt;
 mod boosts;
@@ -69,6 +70,7 @@ mod toasts;
 mod views;
 mod windows;
 
+use app_links::*;
 use archive::*;
 use auth_prompt::*;
 pub use boosts::{page_closed as boosts_page_closed, page_created as boosts_page_created};

@@ -1647,6 +1647,19 @@ fn native_menu(
     menu
 }
 
+/// Asks the user before `site` opens `app`, like Chrome's "Open Zoom?".
+pub fn confirm_open_app(site: &str, app: &str) -> bool {
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let alert = NSAlert::new(mtm);
+    alert.setMessageText(&NSString::from_str(&format!("Open {app}?")));
+    alert.setInformativeText(&NSString::from_str(&format!(
+        "{site} wants to open this app."
+    )));
+    alert.addButtonWithTitle(&NSString::from_str(&format!("Open {app}")));
+    alert.addButtonWithTitle(ns_string!("Cancel"));
+    alert.runModal() == NSAlertFirstButtonReturn
+}
+
 /// Asks the user to confirm an action named by `button`, which may destroy data.
 pub fn confirm(question: &str, detail: &str, button: &str) -> bool {
     let mtm = MainThreadMarker::new().expect("main thread");
@@ -1679,6 +1692,22 @@ pub fn prompt(question: &str, detail: &str, value: &str, button: &str) -> Option
 /// Opens a file with its default app.
 pub fn open_file(path: &std::path::Path) {
     NSWorkspace::sharedWorkspace().openURL(&file_url(path));
+}
+
+/// The name of the app macOS opens `url` with, like "Claude" for a `claude://` link; none
+/// without one.
+pub fn app_for_url(url: &str) -> Option<String> {
+    let url = NSURL::URLWithString(&NSString::from_str(url))?;
+    let app = NSWorkspace::sharedWorkspace().URLForApplicationToOpenURL(&url)?;
+    let name = objc2_foundation::NSFileManager::defaultManager().displayNameAtPath(&*app.path()?);
+    Some(name.to_string().trim_end_matches(".app").to_string())
+}
+
+/// Hands `url` to the app macOS opens it with.
+pub fn open_in_app(url: &str) {
+    if let Some(url) = NSURL::URLWithString(&NSString::from_str(url)) {
+        NSWorkspace::sharedWorkspace().openURL(&url);
+    }
 }
 
 /// Shows a file selected in a Finder window.
