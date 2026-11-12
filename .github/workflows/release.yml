@@ -53,6 +53,14 @@ jobs:
         if: steps.cef-cache.outputs.cache-hit != 'true'
         run: mise run cef
 
+      # main's cache from CI, for bundle-cef-app in ~/.cargo/bin: its install then skips compiling
+      # CEF. A tag reads only its own caches and main's, so the release saves none.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: cef-${{ hashFiles('Cargo.toml') }}
+          shared-key: app
+          save-if: false
+
       - name: Install the CEF bundling tool
         run: mise run cef-bundler
 
