@@ -1888,22 +1888,39 @@ struct Frame: View {
 /// at least 22 points and the others 8, past which they scroll.
 struct SpaceIcons: View {
     @ObservedObject var model: AppModel
+    /// The Space dragged along the footer, and how far, like Arc's.
+    private let _dragged = State<(id: Int, shift: CGFloat)?>(initialValue: nil)
+    /// The order shown while a drag goes on and until the app sends the one it left, so that
+    /// the icons only slide aside meanwhile, nothing jumping.
+    private let _held = State<[Int]?>(initialValue: nil)
 
     var body: some View {
-        let spaces = model.state?.spaces ?? []
+        let sent = model.state?.spaces ?? []
         GeometryReader { geometry in
-            let count = CGFloat(spaces.count)
+            let count = CGFloat(sent.count)
             let room = geometry.size.width
             let roomy = count * 34 <= room
             let even = min(34, room / max(count, 1))
             let displayed = roomy ? even : max(even, 22)
             let other = roomy ? even : max(8, (room - displayed) / max(count - 1, 1))
+            let spaces = shown(sent)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(spaces) { space in
+                    ForEach(Array(spaces.enumerated()), id: \.element.id) { index, space in
                         let shown = space.id == model.state?.space
-                        SpaceIcon(model: model, space: space, displayed: shown, slot: shown ? displayed : other)
-                            .transition(.scale.combined(with: .opacity))
+                        let dragging = _dragged.wrappedValue?.id == space.id
+                        SpaceIcon(
+                            model: model, space: space, displayed: shown,
+                            slot: shown ? displayed : other, dragged: dragging
+                        ) { shift in
+                            drag(space.id, shift, in: spaces, step: other)
+                        }
+                        // Like Arc's, the dragged one follows the pointer along the row, right
+                        // under it, the ones it passes sliding a step aside.
+                        .offset(x: offset(index, in: spaces, step: other))
+                        .transaction { if dragging { $0.animation = nil } }
+                        .zIndex(dragging ? 1 : 0)
+                        .transition(.scale.combined(with: .opacity))
                     }
                 }
                 .frame(minWidth: room, minHeight: geometry.size.height)
@@ -1914,9 +1931,85 @@ struct SpaceIcons: View {
             // Like Arc's, measured: a quick start settling without overshoot.
             .animation(.spring(response: spaceSlide, dampingFraction: 1), value: spaces.map(\.id))
             .animation(.spring(response: spaceSlide, dampingFraction: 1), value: model.state?.space)
+            .onChange(of: sent.map(\.id)) { _, ids in
+                if _dragged.wrappedValue == nil, ids == _held.wrappedValue { unhold() }
+            }
         }
         .frame(height: 32)
-        .opacity(spaces.count > 1 ? 1 : 0)
+        .opacity(sent.count > 1 ? 1 : 0)
+    }
+
+    /// The Spaces in the order shown: the one held, if any.
+    private func shown(_ sent: [Space]) -> [Space] {
+        guard let held = _held.wrappedValue else { return sent }
+        let spaces = held.compactMap { id in sent.first { $0.id == id } }
+        return spaces.count == sent.count ? spaces : sent
+    }
+
+    /// Where the dragged Space would go, and where it was.
+    private func places(in spaces: [Space], step: CGFloat) -> (from: Int, to: Int)? {
+        guard let dragged = _dragged.wrappedValue,
+            let from = spaces.firstIndex(where: { $0.id == dragged.id })
+        else { return nil }
+        let to = from + Int((dragged.shift / max(step, 1)).rounded())
+        return (from, min(max(0, to), spaces.count - 1))
+    }
+
+    /// How far the icon at `index` stands from its place: the dragged one under the pointer, the
+    /// ones it passed a step aside.
+    private func offset(_ index: Int, in spaces: [Space], step: CGFloat) -> CGFloat {
+        guard let (from, to) = places(in: spaces, step: step) else { return 0 }
+        if index == from { return _dragged.wrappedValue?.shift ?? 0 }
+        if from < to, index > from, index <= to { return -step }
+        if to < from, index >= to, index < from { return step }
+        return 0
+    }
+
+    /// Shows the order the app sent, at once.
+    private func unhold() {
+        var quiet = Transaction()
+        quiet.disablesAnimations = true
+        withTransaction(quiet) { _held.wrappedValue = nil }
+    }
+
+    /// The Space `id` is dragged `shift` along, or dropped with nil: like Arc's, it shows as it
+    /// starts, and takes its place once dropped, sliding into it.
+    private func drag(_ id: Int, _ shift: CGFloat?, in spaces: [Space], step: CGFloat) {
+        guard let shift else {
+            guard let (from, to) = places(in: spaces, step: step) else { return }
+            withAnimation(.spring(response: spaceSlide, dampingFraction: 1)) {
+                _dragged.wrappedValue = (id, CGFloat(to - from) * step)
+            }
+            var ids = spaces.map(\.id)
+            ids.insert(ids.remove(at: from), at: to)
+            if to != from { model.run("move-space", id, to) }
+            // Once it slid there, the order it left takes the offsets' place, unseen.
+            DispatchQueue.main.asyncAfter(deadline: .now() + spaceSlide) {
+                var quiet = Transaction()
+                quiet.disablesAnimations = true
+                withTransaction(quiet) {
+                    _dragged.wrappedValue = nil
+                    _held.wrappedValue = ids
+                }
+                if model.state?.spaces.map(\.id) == ids { unhold() }
+            }
+            return
+        }
+        if _dragged.wrappedValue == nil {
+            _held.wrappedValue = spaces.map(\.id)
+            if id != model.state?.space { model.slide(to: id) }
+        }
+        // The ones it passes slide aside, as it comes to another place; it follows the pointer
+        // unanimated meanwhile (its transaction).
+        let step = max(step, 1)
+        let before = _dragged.wrappedValue.map { ($0.shift / step).rounded() }
+        if before != (shift / step).rounded() {
+            withAnimation(.spring(response: spaceSlide, dampingFraction: 1)) {
+                _dragged.wrappedValue = (id, shift)
+            }
+        } else {
+            _dragged.wrappedValue = (id, shift)
+        }
     }
 }
 
@@ -1928,6 +2021,10 @@ struct SpaceIcon: View {
     let displayed: Bool
     /// The room it takes along the footer.
     let slot: CGFloat
+    /// It is dragged along the footer, under the pointer.
+    var dragged = false
+    /// Tells how far it is dragged along the footer, or nil once dropped.
+    var drag: (CGFloat?) -> Void = { _ in }
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
         get { _hovered.wrappedValue }
@@ -1967,6 +2064,12 @@ struct SpaceIcon: View {
         .help(space.title)
         .onHover { hovered = $0 }
         .rightClick { model.run("menu", ["space": space.id]) }
+        // Like Arc's, dragged along the footer, it stays on it under the pointer while the others
+        // make room, and takes that place once dropped.
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                .onChanged { drag($0.translation.width) }
+                .onEnded { _ in drag(nil) })
         // Like Arc's, a drag resting on a Space's icon slides to that Space, to drop there.
         .onDrop(of: [sidebarNode], delegate: SpaceIconDrop(model: model, space: space.id))
         // Like Arc's, Change Space Icon… opens its picker above the Space's icon.

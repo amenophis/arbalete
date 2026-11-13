@@ -1015,12 +1015,12 @@ struct SpaceColumn: View {
         .contentShape(shape)
         .background(Frame(frame: _frame.projectedValue))
         .rightClick { model.run("menu", ["space": space.id]) }
-        // Dragged onto another, it takes that one's place.
-        .draggable("space:\(space.id)")
-        .dropDestination(for: String.self) { ids, _ in
-            guard let id = ids.first?.split(separator: ":").last.flatMap({ Int($0) }),
-                ids.first?.hasPrefix("space:") == true, id != space.id
-            else { return false }
+        // Dragged onto another, it takes that one's place; under a type of its own, as on the
+        // footer, which no page or other app reads.
+        .onDrag { model.startSpaceDrag(space.id) }
+        .onDrop(of: [sidebarSpace], isTargeted: nil) { _ in
+            guard let id = AppModel.draggedSpace, id != space.id else { return false }
+            AppModel.draggedSpace = nil
             model.run("move-space", id, index)
             return true
         }

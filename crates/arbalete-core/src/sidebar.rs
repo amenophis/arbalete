@@ -1197,7 +1197,7 @@ impl Sidebar {
             .iter()
             .position(|s| s.id == id)
             .ok_or(Error::UnknownSpace)?;
-        if self.is_incognito(id) {
+        if self.is_apart(id) {
             return Err(Error::UnknownSpace);
         }
         let space = self.spaces.remove(from);

@@ -15,6 +15,22 @@ extension NSPasteboard.PasteboardType {
 
 let sidebarNode = UTType(exportedAs: NSPasteboard.PasteboardType.sidebarNode.rawValue)
 
+/// What a Space's column in the library carries, dragged to reorder the Spaces: its id, under a
+/// type of Arbalete's own too (mise run app).
+let sidebarSpace = UTType(exportedAs: "io.github.amenophis.arbalete.space")
+
+extension AppModel {
+    /// The Space the library's columns drag, to reorder the Spaces.
+    static var draggedSpace: Int?
+
+    /// A Space's column starts a drag.
+    func startSpaceDrag(_ space: Int) -> NSItemProvider {
+        Self.draggedSpace = space
+        return NSItemProvider(
+            item: Data(String(space).utf8) as NSData, typeIdentifier: sidebarSpace.identifier)
+    }
+}
+
 /// Whether the user chose not to be asked again before tabs move to another profile's Space.
 private let otherProfileMoveAsked = "otherProfileMoveNotAsked"
 
