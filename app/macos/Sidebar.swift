@@ -39,7 +39,7 @@ struct SidebarView: View {
                                 if !(model.state?.toolbar ?? false) {
                                     AddressRow(model: model, sidebarHovered: hovered)
                                 }
-                                if model.state?.incognito == true, let page = model.page {
+                                if model.apart, let page = model.page {
                                     IncognitoSections(model: model, page: page)
                                 } else if let page = model.page, model.space != nil {
                                     // Like Arc's, the profile's favorites stay while the Spaces slide
@@ -66,16 +66,7 @@ struct SidebarView: View {
                 // toolbar and the footer, 40 points each.
                 .modifier(FlyoutMask(recent: model.recent, outside: 80))
                 // Hidden until it shows on hover, like Arc's.
-                if model.state?.incognito == true {
-                    // Like Arc's, only a button for a new tab.
-                    HStack {
-                        Spacer()
-                        IconButton(symbol: "plus", label: "New Tab") { model.run("show-overlay") }
-                    }
-                    .frame(height: 40)
-                } else {
-                    Footer(model: model)
-                }
+                Footer(model: model)
             }
             .padding(.horizontal, Measure.inset)
             .foregroundStyle(.primary)
@@ -557,7 +548,8 @@ struct SpaceSections: View {
     }
 }
 
-/// An incognito window's tabs, like Arc's: under their heading, New Tab and today's tabs only.
+/// An incognito or a blank window's tabs, like Arc's: under the profile it browses in, New Tab
+/// and today's tabs only.
 struct IncognitoSections: View {
     @ObservedObject var model: AppModel
     let page: SpacePage
@@ -565,13 +557,9 @@ struct IncognitoSections: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
-                HStack {
-                    Text("Incognito Tabs").font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                }
-                .padding(.horizontal, 6)
-                .frame(height: 32)
-                .foregroundStyle(.secondary)
+                ProfileTag(model: model)
+                    .padding(.leading, 4)
+                    .frame(height: 32)
                 NewTabRow(model: model)
                 ItemRows(
                     model: model, items: page.today, parent: page.roots.today,
@@ -582,6 +570,30 @@ struct IncognitoSections: View {
         }
         .scrollIndicators(.never)
         .background(WindowDragArea())
+    }
+}
+
+/// The profile a window of its own browses in, like Arc's: its face and name in a faint tag, or
+/// an eye struck out for an incognito window.
+struct ProfileTag: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        let incognito = model.state?.incognito == true
+        let profile = model.space.flatMap { space in
+            model.state?.profiles.first { $0.id == space.profile }?.name
+        }
+        HStack(spacing: 4) {
+            Image(systemName: incognito ? "eye.slash" : "face.smiling.inverse")
+                .font(.system(size: 11))
+            Text(incognito ? "Incognito" : profile ?? "").font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .frame(height: 21)
+        .background(
+            RoundedRectangle(cornerRadius: 4).fill(Color.ink((0x0E0F10, 0.04), (0xFAFBFF, 0.04))))
     }
 }
 
@@ -1758,13 +1770,19 @@ struct Footer: View {
             LibraryEntry(model: model, recent: model.recent, width: _frame.wrappedValue.width)
             .opacity(drafting ? 0 : 1)
             .disabled(drafting)
-            SpaceIcons(model: model)
-            // Like Arc's, the "+" opens its own menu, turning into a "×" while it shows.
-            PlusButton(shown: menuShown, active: model.active) { setMenu(!menuShown) }
-                .help(menuShown ? "" : "New")
-                .opacity(drafting ? 0 : 1)
-                .disabled(drafting)
-                .background(Frame(frame: _plusFrame.projectedValue))
+            if model.apart {
+                // Like Arc's, a window of its own has no other Space, and its "+" opens a tab.
+                Spacer()
+                IconButton(symbol: "plus", label: "New Tab") { model.run("show-overlay") }
+            } else {
+                SpaceIcons(model: model)
+                // Like Arc's, the "+" opens its own menu, turning into a "×" while it shows.
+                PlusButton(shown: menuShown, active: model.active) { setMenu(!menuShown) }
+                    .help(menuShown ? "" : "New")
+                    .opacity(drafting ? 0 : 1)
+                    .disabled(drafting)
+                    .background(Frame(frame: _plusFrame.projectedValue))
+            }
         }
         .frame(height: 40)
         .background(Frame(frame: _frame.projectedValue))

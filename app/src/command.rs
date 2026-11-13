@@ -288,6 +288,8 @@ pub enum Command {
     NewWindow,
     /// Opens an incognito window, whose browsing leaves nothing behind.
     NewIncognitoWindow,
+    /// Opens a blank window, on a Space of its own, like Arc's.
+    NewBlankWindow,
     /// Acts in a Little Arbalete window, by its id, from its bar.
     Little(u32, LittleAction),
     /// Moves the page of the Little Arbalete window that has the keyboard into the displayed

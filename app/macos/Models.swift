@@ -16,6 +16,8 @@ struct AppState: Decodable {
     var mediaSources: [String]?
     /// The window is an incognito one, showing only its Space.
     var incognito: Bool?
+    /// The window is a blank one, like Arc's standalone windows: it too shows only its Space.
+    var standalone: Bool?
     /// The displayed Space's profile's pinned extensions, whose buttons show by the address.
     var extensions: [Extension]
     /// The tabs closed since launch, the last closed first.

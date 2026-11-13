@@ -192,6 +192,9 @@ final class AppModel: ObservableObject {
         command.withCString { send(window, $0) }
     }
 
+    /// The window is an incognito or a blank one, which shows only its Space.
+    var apart: Bool { state?.incognito == true || state?.standalone == true }
+
     /// The displayed Space's page.
     var page: SpacePage? {
         guard let state else { return nil }
@@ -273,8 +276,8 @@ final class AppModel: ObservableObject {
     /// A swipe pages between the Spaces, like Arc's: past a third of the sidebar, it shows the
     /// next or the previous one; before the first, the library.
     private func swiped(_ phase: String, _ dx: Double) {
-        // An incognito window has no other Space to swipe to.
-        guard state?.incognito != true else { return }
+        // An incognito or a blank window has no other Space to swipe to.
+        guard !apart else { return }
         switch phase {
         case "begin":
             swipe = 0

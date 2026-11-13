@@ -17,6 +17,49 @@ pub(super) fn new_incognito_window() {
     open_incognito_window(None);
 }
 
+/// Opens a blank window, like Arc's Blank Window: on a Space of its own, without a tab, in the
+/// displayed Space's profile, with its sign-ins and extensions; the first profile from an
+/// incognito window. No other Space shows there, nor its Space elsewhere.
+pub(super) fn new_blank_window() {
+    let view = update_sidebar(|sidebar| {
+        let displayed = sidebar.displayed();
+        let profile = if sidebar.is_incognito(displayed.id) {
+            sidebar.profiles()[0].id
+        } else {
+            displayed.profile
+        };
+        let space = sidebar.open_standalone(profile).expect("a known profile");
+        sidebar.view_showing(space)
+    });
+    open_window(view, true);
+}
+
+/// Archives a blank window's tabs and forgets its Space as the focused window closes, like Arc's;
+/// any other window keeps its own.
+fn close_standalone() {
+    let closed = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let space = sidebar.displayed();
+        space.standalone.then(|| {
+            let tabs: Vec<_> = sidebar
+                .tabs()
+                .filter(|(tab, _)| sidebar.space_of(*tab) == Some(space.id))
+                .map(|(tab, _)| tab)
+                .collect();
+            (space.id, tabs)
+        })
+    });
+    let Some((space, tabs)) = closed else {
+        return;
+    };
+    for tab in tabs {
+        close_page(tab);
+    }
+    let now = now().try_into().unwrap_or_default();
+    let _ = update_sidebar(|sidebar| sidebar.close_standalone(space, now));
+    send_archive();
+}
+
 /// Opens an incognito window as `new_incognito_window` does, on a tab showing `url` if any.
 pub(super) fn open_incognito_window(url: Option<&str>) {
     let space = update_sidebar(Sidebar::open_incognito);
@@ -417,6 +460,7 @@ pub fn window_can_close(id: u32) -> bool {
     focus(id);
     if !CLOSING.get() && WINDOWS.with_borrow(Vec::len) > 1 {
         close_incognito(id);
+        close_standalone();
         hand_pages_over(id);
         return true;
     }
