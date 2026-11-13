@@ -718,10 +718,6 @@ impl UiState {
         } else {
             self.sidebar.spaces()
         };
-        let index = spaces
-            .iter()
-            .position(|s| s.id == displayed)
-            .expect("a known Space");
         json!({
             "page": self.page,
             "toolbar": app_settings().show_toolbar,
@@ -737,14 +733,9 @@ impl UiState {
                 "profile": s.profile,
                 "pinned": self.overview(s.pinned, s.profile),
             })).collect::<Vec<_>>(),
-            // The displayed Space's page and its neighbors', two on each side, which quick swipes
-            // pass before the next state comes (SpacePager in app/macos/Sidebar.swift).
-            "pages": spaces
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| i.abs_diff(index) <= 2)
-                .map(|(_, s)| self.page_json(s))
-                .collect::<Vec<_>>(),
+            // Every Space's page, which quick swipes may reach before the next state comes; the
+            // sidebar draws only those they reach (SpacePager in app/macos/Sidebar.swift).
+            "pages": spaces.iter().map(|s| self.page_json(s)).collect::<Vec<_>>(),
             "profiles": self.sidebar.profiles().iter().map(|p| json!({
                 "id": p.id,
                 "name": p.name,
@@ -1201,6 +1192,35 @@ mod tests {
     };
 
     #[test]
+    fn sends_the_pages_of_every_space() {
+        let mut state = UiState::default();
+        let profile = state.sidebar.profiles()[0].id;
+        let ids: Vec<_> = (1..5)
+            .map(|n| {
+                state
+                    .sidebar
+                    .add_space(&format!("Space {n}"), profile)
+                    .unwrap()
+            })
+            .collect();
+        state.sidebar.display(ids[3]).unwrap();
+        let json = state.to_json();
+        let pages: Vec<_> = json["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|page| page["space"].clone())
+            .collect();
+        let spaces: Vec<_> = state
+            .sidebar
+            .spaces()
+            .iter()
+            .map(|s| serde_json::json!(s.id))
+            .collect();
+        assert_eq!(pages, spaces);
+    }
+
+    #[test]
     fn tells_the_site_of_a_url() {
         assert_eq!(
             site("https://www.wikipedia.org/wiki/Arrow"),
@@ -1495,34 +1515,6 @@ mod tests {
         assert_eq!(page["today"].as_array().unwrap().len(), 1);
         assert_eq!(page["selected"], serde_json::json!(tab));
         assert_eq!(json["pages"][0]["today"][0]["url"], "https://example.com/");
-    }
-
-    #[test]
-    fn sends_only_the_pages_of_the_displayed_space_and_two_neighbors_on_each_side() {
-        let mut state = UiState::default();
-        let profile = state.sidebar.profiles()[0].id;
-        let ids: Vec<_> = (1..7)
-            .map(|n| {
-                state
-                    .sidebar
-                    .add_space(&format!("Space {n}"), profile)
-                    .unwrap()
-            })
-            .collect();
-        let pages = |state: &UiState| {
-            let json = state.to_json();
-            let pages = json["pages"].as_array().unwrap();
-            pages
-                .iter()
-                .map(|page| page["space"].clone())
-                .collect::<serde_json::Value>()
-        };
-        let home = state.sidebar.spaces()[0].id;
-        assert_eq!(pages(&state), serde_json::json!([home, ids[0], ids[1]]));
-        state.sidebar.display(ids[2]).unwrap();
-        assert_eq!(pages(&state), serde_json::json!(ids[..5]));
-        state.sidebar.display(ids[5]).unwrap();
-        assert_eq!(pages(&state), serde_json::json!(ids[3..]));
     }
 
     #[test]
