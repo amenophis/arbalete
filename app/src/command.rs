@@ -350,6 +350,8 @@ pub enum Command {
     /// Creates a folder for the UI to rename, at the end of the displayed Space's pinned tabs,
     /// or of a folder, from its menu.
     NewFolder(Option<NodeId>),
+    /// Puts selected tabs in a new folder for the UI to rename (Sidebar::folder_with).
+    FolderWith(Vec<NodeId>),
     /// Opens a new Easel in "Today", from the "+" menu or the Command Bar (decision 0009).
     NewEasel,
     /// Saves an Easel's board, by its number, as its view sends it after each change.
