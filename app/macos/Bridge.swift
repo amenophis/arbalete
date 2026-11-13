@@ -270,9 +270,11 @@ final class AppModel: ObservableObject {
             struct Gesture: Decodable {
                 var phase: String
                 var dx: Double
+                /// In milliseconds.
+                var time: Double
             }
             if let gesture = try? JSONDecoder().decode(Gesture.self, from: detail) {
-                swiped(gesture.phase, gesture.dx)
+                swiped(gesture.phase, gesture.dx, at: gesture.time)
             }
         case "arbalete:new-profile":
             newProfile(for: try? JSONDecoder().decode(Int.self, from: detail))
@@ -293,15 +295,17 @@ final class AppModel: ObservableObject {
 
     /// A swipe pages between the Spaces, like Arc's: past a third of the sidebar, it shows the
     /// next or the previous one; before the first, the library.
-    private func swiped(_ phase: String, _ dx: Double) {
+    private func swiped(_ phase: String, _ dx: Double, at time: Double) {
         // An incognito or a blank window has no other Space to swipe to.
         guard !apart else { return }
         switch phase {
         case "begin":
             // Begun before the app shows the Space the last swipe slid to, it goes on from there.
             if swipedTo == nil { swipe = 0 }
+            swipeMoves = []
         case "move":
             swipe += dx
+            swipeMoves.append((time, dx))
         default:
             let threshold = swipeThreshold
             // Like Arc's, the library, which a swipe rightward opens, closes leftward.
@@ -326,10 +330,14 @@ final class AppModel: ObservableObject {
             let index = swipedTo.flatMap { to in state.spaces.firstIndex { $0.id == to } } ?? shown
             let rest = CGFloat(shown - index) * pageWidth
             let moved = swipe - rest
+            // Like a page swiped on the system's, a quick flick pages too, short of the threshold.
+            let flick = fingerSpeed(at: time)
+            let left = moved < -threshold || (flick < -flickSpeed && moved < -flickDistance)
+            let right = moved > threshold || (flick > flickSpeed && moved > flickDistance)
             let (previous, next) = (index > 0, index < state.spaces.count - 1)
-            if (moved > threshold && previous) || (moved < -threshold && next) {
+            if (right && previous) || (left && next) {
                 // Like Arc's, the page carries on to its neighbor, which the app then shows.
-                let forward = moved < 0
+                let forward = left
                 let target = state.spaces[index + (forward ? 1 : -1)].id
                 swipedTo = target
                 withAnimation(.easeOut(duration: 0.25)) {
@@ -353,9 +361,9 @@ final class AppModel: ObservableObject {
                 // Short of another Space, the pages go back to the one slid to.
                 withAnimation(.spring(duration: 0.3)) { swipe = rest }
             } else {
-                if moved > threshold, index == 0 { openLibrary(nil) }
+                if right, index == 0 { openLibrary(nil) }
                 // Like Arc's, past the last Space, the swipe creates one.
-                if moved < -threshold, !next { newSpace() }
+                if left, !next { newSpace() }
                 withAnimation(.spring(duration: 0.3)) { swipe = 0 }
             }
         }
@@ -400,6 +408,19 @@ final class AppModel: ObservableObject {
 
     /// How far a swipe goes before it pages, or opens the library or a new Space.
     var swipeThreshold: CGFloat { 80 }
+
+    /// How fast, in points a millisecond, and how far at least a flick goes to page as well.
+    private let flickSpeed = 0.4
+    private let flickDistance: CGFloat = 20
+
+    /// The fingers' last moves of the swipe going on, when and how far, to tell a flick.
+    private var swipeMoves: [(time: Double, dx: Double)] = []
+
+    /// How fast the fingers moved over the last 80 milliseconds before `time`, when they
+    /// lifted: in points a millisecond, negative leftward; nothing once they rested.
+    private func fingerSpeed(at time: Double) -> Double {
+        swipeMoves.filter { $0.time >= time - 80 }.map(\.dx).reduce(0, +) / 80
+    }
 
     /// Whether a swipe goes past the first Space, rightward, or the last one, leftward.
     private var swipePastEdge: Bool {
