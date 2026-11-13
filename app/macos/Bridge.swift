@@ -384,9 +384,6 @@ final class AppModel: ObservableObject {
     /// Space, where they resist like Arc's.
     var pagerShift: CGFloat { swipePastEdge ? swipe / 5 : swipe }
 
-    /// How far a swipe past the first or the last Space moves the whole sidebar's content.
-    var edgeShift: CGFloat { swipePastEdge ? pagerShift : 0 }
-
     /// How far a swipe past the last Space has gone toward creating one, from 0 to 1.
     var creatingShare: CGFloat {
         // A new Space's form creates nothing more, like Arc's.

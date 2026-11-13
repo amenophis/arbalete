@@ -41,13 +41,7 @@ struct SidebarView: View {
                                 }
                                 if model.apart, let page = model.page {
                                     IncognitoSections(model: model, page: page)
-                                } else if let page = model.page, model.space != nil {
-                                    // Like Arc's, the profile's favorites stay while the Spaces slide
-                                    // below.
-                                    Favorites(model: model, page: page)
-                                        // Past the first or the last Space, like Arc's, the
-                                        // favorites go along with the tabs.
-                                        .offset(x: model.edgeShift)
+                                } else if model.page != nil, model.space != nil {
                                     SpacePager(model: model)
                                 } else {
                                     Spacer()
@@ -601,34 +595,91 @@ struct ProfileTag: View {
 /// neighbor coming in beside it, and past a threshold carries on to it.
 struct SpacePager: View {
     @ObservedObject var model: AppModel
+    /// How tall each profile's favorites are, which its Spaces' tabs start below.
+    private let _heights = State<[Int: CGFloat]>(initialValue: [:])
 
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             // Like Arc's, a click on a Space a few away carries the page across those between.
             let carousel = model.carousel
-            let pages = carousel ?? model.neighbors()
+            let pages = (carousel ?? model.neighbors()).map { neighbor in
+                // The app's latest page, once it sends the one a carousel goes to.
+                (id: neighbor.id, shown: model.livePage(neighbor.id) ?? neighbor.shown)
+            }
             let shift =
                 carousel.map { -model.carouselShare * CGFloat($0.count - 1) * width }
                 ?? model.pagerShift - width
-            HStack(spacing: 0) {
-                ForEach(pages, id: \.id) { neighbor in
-                    Group {
-                        // The app's latest page, once it sends the one a carousel goes to.
-                        if let (page, space) = model.livePage(neighbor.id) ?? neighbor.shown {
-                            SpaceSections(model: model, page: page, space: space)
-                        } else {
-                            Color.clear
+            let heights = _heights.wrappedValue
+            ZStack(alignment: .topLeading) {
+                HStack(spacing: 0) {
+                    ForEach(pages, id: \.id) { neighbor in
+                        Group {
+                            if let (page, space) = neighbor.shown {
+                                SpaceSections(model: model, page: page, space: space)
+                                    .padding(.top, heights[space.profile] ?? 0)
+                            } else {
+                                Color.clear
+                            }
                         }
+                        .frame(width: width)
                     }
-                    .frame(width: width)
+                }
+                .offset(x: shift)
+                // Like Arc's, each profile's favorites stay still while its Spaces slide below
+                // them, and go along with them otherwise: toward another profile's Spaces, and
+                // past the first or the last Space.
+                ForEach(Self.trays(pages.map(\.shown), shown: model.state?.space), id: \.key) {
+                    tray in
+                    Favorites(model: model, page: tray.page)
+                        .frame(width: width)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                            _heights.wrappedValue[tray.profile] = $0
+                        }
+                        .offset(
+                            x: max(
+                                shift + CGFloat(tray.first) * width,
+                                min(0, shift + CGFloat(tray.last) * width)))
                 }
             }
-            .offset(x: shift)
             .onAppear { model.pageWidth = width }
             .onChange(of: width) { _, now in model.pageWidth = now }
         }
         .clipped()
+    }
+
+    /// One profile's favorites over a run of side by side pages of its Spaces.
+    struct Tray {
+        /// The profile, and how many runs of its Spaces come before, among the pages.
+        var key: String
+        var profile: Int
+        /// The run's first and last pages.
+        var first: Int
+        var last: Int
+        /// The page whose favorites show: the displayed Space's, or the run's first.
+        var page: SpacePage
+    }
+
+    /// The runs of side by side pages of one profile's Spaces, among `pages`.
+    static func trays(_ pages: [(SpacePage, Space)?], shown: Int?) -> [Tray] {
+        var trays: [Tray] = []
+        var runs: [Int: Int] = [:]
+        for (index, page) in pages.enumerated() {
+            guard let (page, space) = page else { continue }
+            if var tray = trays.last, tray.profile == space.profile, tray.last == index - 1 {
+                tray.last = index
+                if page.space == shown { tray.page = page }
+                trays[trays.count - 1] = tray
+            } else {
+                let run = runs[space.profile, default: 0]
+                runs[space.profile] = run + 1
+                trays.append(
+                    Tray(
+                        key: "\(space.profile)-\(run)", profile: space.profile, first: index,
+                        last: index, page: page))
+            }
+        }
+        return trays
     }
 }
 
