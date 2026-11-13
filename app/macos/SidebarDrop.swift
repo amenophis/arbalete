@@ -489,7 +489,7 @@ struct TailDrop: DropDelegate {
         let x = info.location.x
         model.edge(x <= edgeBand ? true : x >= width - edgeBand ? false : nil)
         model.hover(shown)
-        return DropProposal(operation: .move)
+        return DropProposal(operation: NSEvent.modifierFlags.contains(.option) ? .copy : .move)
     }
 
     func dropExited(info: DropInfo) {
@@ -610,7 +610,7 @@ struct SectionDrop: DropDelegate {
         }
         guard model.joinDrag() else { return DropProposal(operation: .forbidden) }
         model.hover(shown)
-        return DropProposal(operation: .move)
+        return DropProposal(operation: NSEvent.modifierFlags.contains(.option) ? .copy : .move)
     }
 
     func dropExited(info: DropInfo) { model.hover(nil) }
