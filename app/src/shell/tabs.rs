@@ -276,12 +276,15 @@ pub(super) fn clear_today() {
     });
 }
 
-/// Closes the rows after a tab's, as clear_today closes "Today" tabs, but like closing a tab,
-/// telling nothing.
-pub(super) fn close_tabs_below(tab: NodeId) {
+/// Closes rows beside a tab's, taken out with `remove` (Sidebar::remove_below, for one), as
+/// clear_today closes "Today" tabs, but like closing a tab, telling nothing.
+pub(super) fn close_tabs_beside(
+    tab: NodeId,
+    remove: fn(&mut Sidebar, NodeId) -> Result<Vec<Tab>, Error>,
+) {
     close_rows(None, |sidebar| {
         let profile = sidebar.profile_of(tab).ok_or(Error::UnknownNode)?;
-        Ok((sidebar.remove_below(tab)?, profile))
+        Ok((remove(sidebar, tab)?, profile))
     });
 }
 

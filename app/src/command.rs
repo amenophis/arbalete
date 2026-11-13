@@ -396,6 +396,10 @@ pub enum Command {
     DuplicateRow(NodeId),
     /// Closes the rows after a tab's, which may be reopened, from its menu.
     CloseTabsBelow(NodeId),
+    /// Closes the rows before a tab's, which may be reopened, from its menu.
+    CloseTabsAbove(NodeId),
+    /// Closes the rows beside a tab's, which may be reopened, from its menu.
+    CloseOtherTabs(NodeId),
     /// Removes a folder and closes its tabs, which may be reopened, from its menu.
     DeleteFolder(NodeId),
     /// Makes a folder a Space of its own and shows it, from its menu.

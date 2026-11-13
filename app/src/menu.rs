@@ -282,15 +282,39 @@ fn tab_menu(sidebar: &Sidebar, id: NodeId, tab: &Tab) -> Vec<Entry> {
         Entry::Separator,
         item("close", close, Action::Run(Command::Close(Some(tab)))),
     ]);
-    // Pinned tabs stay: only "Today" tabs close those below them.
+    // Pinned tabs stay: only "Today" tabs close those beside them, in Arc's order.
     if !pinned {
-        menu.push(Entry::Item(Item {
-            id: "close-below".to_string(),
-            title: "Archive Tabs Below".to_string(),
-            checked: false,
-            enabled: has_rows_below(sidebar, sidebar.row_of(tab)),
-            action: Action::Run(Command::CloseTabsBelow(tab)),
-        }));
+        let row = sidebar.row_of(tab);
+        let (above, below) = (has_rows_above(sidebar, row), has_rows_below(sidebar, row));
+        let close_beside = |id: &str, title: &str, enabled, command| {
+            Entry::Item(Item {
+                id: id.to_string(),
+                title: title.to_string(),
+                checked: false,
+                enabled,
+                action: Action::Run(command),
+            })
+        };
+        menu.extend([
+            close_beside(
+                "close-others",
+                "Archive Other Tabs",
+                above || below,
+                Command::CloseOtherTabs(tab),
+            ),
+            close_beside(
+                "close-below",
+                "Archive Tabs Below",
+                below,
+                Command::CloseTabsBelow(tab),
+            ),
+            close_beside(
+                "close-above",
+                "Archive Tabs Above",
+                above,
+                Command::CloseTabsAbove(tab),
+            ),
+        ]);
     }
     menu
 }
@@ -436,9 +460,18 @@ fn duplicate(id: NodeId) -> Entry {
 
 /// Rows follow `row` in its parent.
 fn has_rows_below(sidebar: &Sidebar, row: NodeId) -> bool {
-    let parent = sidebar.node(row).and_then(|node| node.parent);
-    let siblings = parent.and_then(|parent| sidebar.node(parent));
-    siblings.is_some_and(|parent| parent.children.last() != Some(&row))
+    siblings(sidebar, row).is_some_and(|siblings| siblings.last() != Some(&row))
+}
+
+/// Rows come before `row` in its parent.
+fn has_rows_above(sidebar: &Sidebar, row: NodeId) -> bool {
+    siblings(sidebar, row).is_some_and(|siblings| siblings.first() != Some(&row))
+}
+
+/// The rows of `row`'s parent, itself included.
+fn siblings(sidebar: &Sidebar, row: NodeId) -> Option<&[NodeId]> {
+    let parent = sidebar.node(row)?.parent?;
+    Some(&sidebar.node(parent)?.children)
 }
 
 fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
@@ -792,7 +825,9 @@ mod tests {
                 "  New Space…",
                 "-",
                 "Archive Easel",
+                "(Archive Other Tabs)",
                 "(Archive Tabs Below)",
+                "(Archive Tabs Above)",
             ]
         );
     }
@@ -823,7 +858,9 @@ mod tests {
                 "  New Space…",
                 "-",
                 "Archive Tab",
+                "(Archive Other Tabs)",
                 "(Archive Tabs Below)",
+                "(Archive Tabs Above)",
             ]
         );
         let work_id = serde_json::to_string(&work).unwrap();
@@ -862,16 +899,41 @@ mod tests {
     }
 
     #[test]
-    fn a_today_tab_closes_the_tabs_below_it_when_there_are_some() {
+    fn a_today_tab_closes_the_tabs_beside_it_when_there_are_some() {
         let mut sidebar = Sidebar::default();
         let home = sidebar.spaces()[0].id;
         let tab = sidebar.open_tab(home, "https://a.test/").unwrap();
-        sidebar.open_tab(home, "https://b.test/").unwrap();
+        let below = sidebar.open_tab(home, "https://b.test/").unwrap();
         let menu = build(&sidebar, Target::Node(tab)).unwrap();
-        assert_eq!(titles(&menu).last().unwrap(), "Archive Tabs Below");
+        let end = titles(&menu).len() - 3;
+        assert_eq!(
+            titles(&menu)[end..],
+            [
+                "Archive Other Tabs",
+                "Archive Tabs Below",
+                "(Archive Tabs Above)"
+            ]
+        );
+        let menu = build(&sidebar, Target::Node(below)).unwrap();
+        assert_eq!(
+            titles(&menu)[end..],
+            [
+                "Archive Other Tabs",
+                "(Archive Tabs Below)",
+                "Archive Tabs Above"
+            ]
+        );
+        assert_eq!(
+            choose(&sidebar, tab, "close-others"),
+            Some(Action::Run(Command::CloseOtherTabs(tab)))
+        );
         assert_eq!(
             choose(&sidebar, tab, "close-below"),
             Some(Action::Run(Command::CloseTabsBelow(tab)))
+        );
+        assert_eq!(
+            choose(&sidebar, below, "close-above"),
+            Some(Action::Run(Command::CloseTabsAbove(below)))
         );
     }
 

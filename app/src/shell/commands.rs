@@ -208,7 +208,9 @@ fn run_command(command: Command) {
         (Command::DuplicateRow(id), _) => {
             let _ = update_sidebar(|sidebar| sidebar.duplicate_below(id));
         }
-        (Command::CloseTabsBelow(tab), _) => close_tabs_below(tab),
+        (Command::CloseTabsBelow(tab), _) => close_tabs_beside(tab, Sidebar::remove_below),
+        (Command::CloseTabsAbove(tab), _) => close_tabs_beside(tab, Sidebar::remove_above),
+        (Command::CloseOtherTabs(tab), _) => close_tabs_beside(tab, Sidebar::remove_others),
         (Command::DeleteFolder(folder), _) => delete_folder(folder),
         (Command::FolderToSpace(folder), _) => {
             if update_sidebar(|sidebar| sidebar.folder_to_space(folder)).is_ok() {
