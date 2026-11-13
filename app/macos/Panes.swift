@@ -397,6 +397,9 @@ final class PagePlacer {
         guard mount() else { return nil }
         let container = PageContainer(model: model)
         container.isHidden = true
+        // As large as the card, even before it shows: a page never shown, like a tab shared
+        // while hidden, draws at that size rather than none.
+        container.frame = stage.bounds
         stage.addSubview(container)
         pageContainers[tab] = container
         // Laid out before it was made, as a window opens: it shows where it was laid out.
