@@ -211,6 +211,9 @@ thread_local! {
     /// The last picture of each tab's page, a JPEG in base64, which covers the page while it
     /// loads again once unloaded.
     static SNAPSHOTS: RefCell<HashMap<NodeId, String>> = RefCell::default();
+    /// The tab a drag carries from the sidebar, whose picture the drag shows out of the
+    /// windows once taken (Command::TabPicture).
+    static PICTURE_WANTED: Cell<Option<NodeId>> = const { Cell::new(None) };
     /// The link Peek shows over the window, if it shows one.
     static PEEK: RefCell<Option<Peek>> = RefCell::default();
     /// Peek's page closing, and the window it showed in.
