@@ -963,9 +963,13 @@ final class PermissionPrompt: ObservableObject {
         var asks: [Ask]
         /// It asks to open another app, which the user does once, rather than to use something.
         var app: Bool?
+        /// It asks to share the screen, a window or a tab, which the picker asks (ScreenShare.swift).
+        var screen: ScreenRequest?
     }
 
     @Published var request: Request?
+    /// The pictures of the tabs the screen sharing picker offers, by tab, sent once as it opens.
+    @Published var snapshots: [Int: NSImage] = [:]
     /// When the request showed, before which its answers do nothing, like Chromium's: a page
     /// cannot have a click it asked for land on Allow as the prompt appears under it.
     private var shown = Date.distantPast
@@ -976,6 +980,15 @@ final class PermissionPrompt: ObservableObject {
     }
 
     func handle(_ name: String, _ detail: Data) {
+        if name == "arbalete:share-snapshots" {
+            let jpegs = (try? JSONDecoder().decode([String: String].self, from: detail)) ?? [:]
+            snapshots = Dictionary(
+                uniqueKeysWithValues: jpegs.compactMap { id, jpeg in
+                    guard let id = Int(id), let image = thumbnail(jpeg) else { return nil }
+                    return (id, image)
+                })
+            return
+        }
         guard name == "arbalete:permission" else { return }
         let request = try? JSONDecoder().decode(Request.self, from: detail)
         // The app sends it again after each command: only a new one changes the view.
@@ -999,27 +1012,12 @@ struct PermissionView: View {
 
     var body: some View {
         if let request = prompt.request {
-            VStack(alignment: .leading, spacing: 12) {
-                // Cut at the head, a long site keeps its end, the domain it belongs to, in view.
-                (Text(request.site).fontWeight(.semibold) + Text(" wants to"))
-                    .font(.system(size: 14))
-                    .lineLimit(2)
-                    .truncationMode(.head)
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(request.asks, id: \.self) { ask in
-                        HStack(spacing: 9) {
-                            Image(systemName: ask.symbol)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 20)
-                            Text(ask.text).font(.system(size: 13))
-                        }
-                    }
-                }
-                HStack(spacing: 8) {
-                    let app = request.app == true
-                    PermissionButton(title: app ? "Cancel" : "Block", prominent: false) { prompt.answer(false) }
-                    PermissionButton(title: app ? "Open" : "Allow", prominent: true) { prompt.answer(true) }
+            Group {
+                if let screen = request.screen {
+                    ScreenPicker(prompt: prompt, id: request.id, site: request.site, request: screen)
+                        .id(request.id)
+                } else {
+                    asks(request)
                 }
             }
             .padding(14)
@@ -1031,6 +1029,33 @@ struct PermissionView: View {
                         .onChange(of: geometry.size.height) { _, height in report(height) }
                 })
             .frame(maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    /// What the site asks to use, with Block and Allow.
+    private func asks(_ request: PermissionPrompt.Request) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Cut at the head, a long site keeps its end, the domain it belongs to, in view.
+            (Text(request.site).fontWeight(.semibold) + Text(" wants to"))
+                .font(.system(size: 14))
+                .lineLimit(2)
+                .truncationMode(.head)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(request.asks, id: \.self) { ask in
+                    HStack(spacing: 9) {
+                        Image(systemName: ask.symbol)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20)
+                        Text(ask.text).font(.system(size: 13))
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                let app = request.app == true
+                PermissionButton(title: app ? "Cancel" : "Block", prominent: false) { prompt.answer(false) }
+                PermissionButton(title: app ? "Open" : "Allow", prominent: true) { prompt.answer(true) }
+            }
         }
     }
 

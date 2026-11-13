@@ -95,6 +95,8 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=WebKit");
     // The certificate sheet (showCertificate in macos/Panels.swift).
     println!("cargo:rustc-link-lib=framework=SecurityInterface");
+    // The windows and screens a site may share, and their pictures (macos/ScreenShare.swift).
+    println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
     // Sparkle ships in the bundle's Frameworks. Weak, since the helpers and the tests, which
     // never update, run without it.
     println!("cargo:rustc-link-search=framework={sparkle}");

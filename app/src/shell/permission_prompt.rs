@@ -19,8 +19,11 @@ pub(super) struct PermissionRequest {
 
 /// What learns the user's answer to a permission request.
 enum PermissionCallback {
-    /// For the camera, the microphone or the screen: the media types asked for.
+    /// For the camera or the microphone: the media types asked for.
     Media(MediaAccessCallback, u32),
+    /// For sharing the screen, a window or a tab, which the picker asks (screen_share): the media
+    /// types asked for, the screen's sound among them.
+    Screen(MediaAccessCallback, u32),
     /// For anything else, Chromium's prompt by its id, and the permissions it asks for.
     Prompt(u64, u32, PermissionPromptCallback),
     /// For another app's link: the link, the app's name, and whether its page opened only for it.
@@ -56,6 +59,13 @@ wrap_permission_handler! {
             let asks = permissions::media(requested_permissions);
             if asks.is_empty() {
                 return 0;
+            }
+            // Sharing the screen asks what to share, each time.
+            if requested_permissions & MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE.get_raw() != 0 {
+                let callback = PermissionCallback::Screen(callback.clone(), requested_permissions);
+                send_share_snapshots(browser);
+                ask_permission(browser, &origin, asks, callback);
+                return 1;
             }
             // Chromium keeps no decision for media requests: the profile's content settings do,
             // where the page's permission queries read it too.
@@ -160,6 +170,8 @@ pub(super) fn answer_permission(id: u64, allow: bool) {
             keep_decision(&request.browser, &request.origin, &request.asks, allow);
             callback.cont(if allow { requested } else { 0 });
         }
+        // Shared only once picked (share_screen).
+        PermissionCallback::Screen(callback, _) => callback.cont(0),
         PermissionCallback::Prompt(_, requested, callback) => {
             ANSWERING.set(Some((request.origin, requested)));
             callback.cont(if allow {
@@ -179,6 +191,52 @@ pub(super) fn answer_permission(id: u64, allow: bool) {
             }
         }
     }
+    surfaces_changed();
+}
+
+/// Gives each window's picker the pictures of the tabs it offers to share, once as it opens: the
+/// prompt's state, sent again and again, leaves them out.
+fn send_share_snapshots(asking: &Browser) {
+    let ids: Vec<NodeId> = screen_share::shareable_tabs(asking)
+        .iter()
+        .filter_map(|tab| serde_json::from_value(tab["id"].clone()).ok())
+        .collect();
+    let snapshots: serde_json::Map<_, _> = SNAPSHOTS.with_borrow(|snapshots| {
+        ids.iter()
+            .filter_map(|id| {
+                let jpeg = snapshots.get(id)?;
+                Some((serde_json::to_string(id).ok()?, json!(jpeg)))
+            })
+            .collect()
+    });
+    let detail = serde_json::Value::Object(snapshots).to_string();
+    in_each_window(|| send_surface("permission", "arbalete:share-snapshots", &detail));
+}
+
+/// Gives the site the source the user picked to share for its request `id`, from the picker, and
+/// whether with its sound; or turns the request down, without a source.
+pub(super) fn share_screen(id: u64, source: Option<String>, sound: bool) {
+    let request = PERMISSION_REQUESTS.with_borrow_mut(|requests| {
+        let index = requests.iter().position(|request| {
+            request.id == id && matches!(request.callback, PermissionCallback::Screen(..))
+        })?;
+        Some(requests.remove(index))
+    });
+    let Some(PermissionRequest {
+        browser,
+        callback: PermissionCallback::Screen(callback, requested),
+        ..
+    }) = request
+    else {
+        return;
+    };
+    let chosen = source.is_some_and(|source| screen_share::choose(&browser, &source));
+    let sound_off = if sound {
+        0
+    } else {
+        MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE.get_raw()
+    };
+    callback.cont(if chosen { requested & !sound_off } else { 0 });
     surfaces_changed();
 }
 
@@ -248,6 +306,15 @@ pub(super) fn sync_permission_prompt() {
             let site = site.unwrap_or("A page");
             return Some(json!({ "id": request.id, "site": site, "asks": asks, "app": true }));
         }
+        if let PermissionCallback::Screen(_, requested) = &request.callback {
+            let sound =
+                requested & MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE.get_raw() != 0;
+            let tabs = screen_share::shareable_tabs(&request.browser);
+            let screen = json!({ "tabs": tabs, "sound": sound });
+            return Some(
+                json!({ "id": request.id, "site": request.site, "asks": [], "screen": screen }),
+            );
+        }
         let asks: Vec<_> = request
             .asks
             .iter()
@@ -256,10 +323,23 @@ pub(super) fn sync_permission_prompt() {
         Some(json!({ "id": request.id, "site": request.site, "asks": asks }))
     });
     let card = card_rect().unwrap_or_default();
+    // The picker of what to share, wider, shows in the middle.
+    let picker = shown
+        .as_ref()
+        .is_some_and(|shown| shown.get("screen").is_some());
+    let width = if picker {
+        SCREEN_PICKER_WIDTH.min(card.width - 2 * PERMISSION_INSET)
+    } else {
+        PERMISSION_WIDTH
+    };
     let frame = Rect {
-        x: card.x + PERMISSION_INSET,
+        x: if picker {
+            card.x + (card.width - width) / 2
+        } else {
+            card.x + PERMISSION_INSET
+        },
         y: card.y + PERMISSION_INSET,
-        width: PERMISSION_WIDTH,
+        width,
         height: win().permission_height.get(),
     };
     let detail = shown.clone().unwrap_or_default();
@@ -275,3 +355,5 @@ pub(super) fn sync_permission_prompt() {
 /// The permission prompt's width, and how far inside the card's top left corner it shows.
 pub(super) const PERMISSION_WIDTH: i32 = 300;
 pub(super) const PERMISSION_INSET: i32 = 10;
+/// The width of the picker of what to share.
+const SCREEN_PICKER_WIDTH: i32 = 640;
