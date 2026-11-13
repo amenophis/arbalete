@@ -290,7 +290,7 @@ pub fn page_playing(page: i32, playing: bool) {
 /// Freezes a page through Chromium's DevTools, or makes it run again.
 pub(super) fn set_frozen(host: Option<&BrowserHost>, frozen: bool) {
     let state = if frozen { "frozen" } else { "active" };
-    let message = serde_json::json!({ "id": 0, "method": "Page.setWebLifecycleState", "params": { "state": state } });
+    let message = serde_json::json!({ "id": unanswered_id(), "method": "Page.setWebLifecycleState", "params": { "state": state } });
     if let Some(host) = host {
         host.send_dev_tools_message(Some(message.to_string().as_bytes()));
     }
