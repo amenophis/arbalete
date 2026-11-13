@@ -636,7 +636,8 @@ wrap_display_handler! {
             change_favicon(self.profile, tab, source, browser.host());
         }
 
-        /// A page capturing is never suspended. A page sharing its screen shows the bar to end it.
+        /// A page capturing is never suspended, and its row shows the recording dot. A page
+        /// sharing its screen shows the bar to end it.
         fn on_media_access_change(&self, browser: Option<&mut Browser>, has_video_access: i32, has_audio_access: i32) {
             let Some(browser) = browser else { return };
             media_changed(browser);
@@ -646,6 +647,8 @@ wrap_display_handler! {
                     live.capturing = has_video_access == 1 || has_audio_access == 1;
                 }
             });
+            // Its row shows the recording dot, or no longer.
+            send_state();
         }
 
         /// The hovered link's address, or none.

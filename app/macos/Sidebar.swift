@@ -1284,6 +1284,8 @@ struct TabRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            // Like Arc's, before the icon while its page records.
+            if tab.recording == true { RecordingDot() }
             // A 16-point icon in a 24-point slot, like Arc's.
             Favicon(url: tab.favicon, size: 16).opacity(tab.asleep == true ? 0.55 : 1)
                 .frame(width: 24, height: 24)
@@ -1335,6 +1337,13 @@ struct TabRow: View {
                         ? model.selectedInk
                         : model.marked.contains(tab.id) ? Ink.marked : hovered ? Ink.item : .clear)
                 .shadow(color: active ? model.selectedShadow : .clear, radius: 1, y: 1))
+        // Like Arc's, a tab a site shares is framed in yellow.
+        .overlay {
+            if tab.shared == true {
+                RoundedRectangle(cornerRadius: Measure.radius)
+                    .strokeBorder(Color(nsColor: .systemYellow), lineWidth: 2.5)
+            }
+        }
         .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
         .contentShape(Rectangle())
         .onTapGesture {
