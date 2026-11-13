@@ -396,12 +396,52 @@ const SEARCH_IMAGE: i32 = OPEN_LINK + 11;
 const SEARCH_SELECTION: i32 = OPEN_LINK + 12;
 const INSPECT: i32 = OPEN_LINK + 13;
 const COPY_HIGHLIGHT: i32 = OPEN_LINK + 14;
+const OPEN_LINK_SPACE: i32 = OPEN_LINK + 15;
+const OPEN_LINK_NEW_SPACE: i32 = OPEN_LINK + 16;
+/// Open Link in Space's Spaces, by their rank in the sidebar from this id.
+const OPEN_LINK_IN_SPACE: i32 = OPEN_LINK + 100;
 /// Chromium's Copy, which the menu has on selected text.
 const CHROMIUM_COPY: i32 = 113;
 
 thread_local! {
     /// The addresses Save Link As… or Save Image As… asked to download, which ask where.
     static SAVE_AS: RefCell<HashSet<String>> = RefCell::default();
+    /// The Spaces Open Link in Space listed, by rank, as the menu showed them.
+    static MENU_SPACES: RefCell<Vec<SpaceId>> = RefCell::default();
+}
+
+/// Open Link in Space's submenu, after Open Link in Little Arbalete, like the sidebar's Move to:
+/// the Spaces, the displayed one checked, and a new one. An incognito window reaches no other.
+fn add_space_submenu(model: &mut MenuModel) {
+    let (spaces, displayed, incognito) = STATE.with_borrow(|state| {
+        let sidebar = &state.sidebar;
+        let displayed = sidebar.displayed().id;
+        let spaces: Vec<_> = sidebar
+            .spaces()
+            .iter()
+            .map(|space| (space.id, menu::space_title(space)))
+            .collect();
+        (spaces, displayed, sidebar.is_incognito(displayed))
+    });
+    if incognito {
+        return;
+    }
+    let Ok(at) = usize::try_from(model.index_of(OPEN_LINK_LITTLE) + 1) else {
+        return;
+    };
+    let label = chromium_with("Open Link in $1", &["Space"]);
+    let Some(submenu) =
+        model.insert_sub_menu_at(at, OPEN_LINK_SPACE, Some(&CefString::from(label.as_str())))
+    else {
+        return;
+    };
+    for (rank, (id, title)) in (OPEN_LINK_IN_SPACE..).zip(&spaces) {
+        submenu.add_check_item(rank, Some(&CefString::from(title.as_str())));
+        submenu.set_checked(rank, i32::from(*id == displayed));
+    }
+    submenu.add_separator();
+    submenu.add_item(OPEN_LINK_NEW_SPACE, Some(&CefString::from("New Space…")));
+    MENU_SPACES.with_borrow_mut(|listed| *listed = spaces.into_iter().map(|(id, _)| id).collect());
 }
 
 /// The search engine of the displayed Space's profile.
@@ -447,6 +487,7 @@ wrap_context_menu_handler! {
             // Groups of items, separated.
             let mut groups: Vec<Vec<(i32, String)>> = Vec::new();
             let item = |id: i32, english: &str| (id, chromium(english));
+            let mut link = false;
             if !CefString::from(&params.link_url()).to_string().is_empty() {
                 groups.push(vec![
                     item(OPEN_LINK, "Open Link in New &Tab"),
@@ -456,6 +497,7 @@ wrap_context_menu_handler! {
                     item(OPEN_LINK_INCOGNITO, "Open Link in Inco&gnito Window"),
                 ]);
                 groups.push(vec![item(SAVE_LINK, "Save Lin&k As…"), item(COPY_LINK, "Copy Link Addr&ess")]);
+                link = true;
             }
             if params.media_type() == ContextMenuMediaType::IMAGE {
                 groups.push(vec![
@@ -481,6 +523,9 @@ wrap_context_menu_handler! {
                 for (id, label) in group.into_iter().rev() {
                     model.insert_item_at(0, id, Some(&CefString::from(label.as_str())));
                 }
+            }
+            if link {
+                add_space_submenu(model);
             }
             // Like Arc's, a link to the selected text after Chromium's Copy.
             if !selection.trim().is_empty() {
@@ -525,6 +570,14 @@ wrap_context_menu_handler! {
                 OPEN_LINK_SPLIT => open_in_pane(&link),
                 OPEN_LINK_LITTLE => open_little(Some(link)),
                 OPEN_LINK_INCOGNITO => open_incognito_window(Some(&link)),
+                OPEN_LINK_NEW_SPACE => open_in_new_space(&link),
+                rank if rank >= OPEN_LINK_IN_SPACE => {
+                    let index = usize::try_from(rank - OPEN_LINK_IN_SPACE).unwrap_or(usize::MAX);
+                    match MENU_SPACES.with_borrow(|spaces| spaces.get(index).copied()) {
+                        Some(space) => open_in_space(&link, space),
+                        None => return 0,
+                    }
+                }
                 SAVE_LINK => download(link),
                 COPY_LINK => perform(Action::CopyLink(link)),
                 OPEN_IMAGE => perform(Action::Run(Command::Open(image))),

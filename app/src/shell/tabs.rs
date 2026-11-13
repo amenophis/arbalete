@@ -65,6 +65,29 @@ pub(super) fn open_background_tab(url: &str) {
     }
 }
 
+/// Opens a tab in a Space and shows it there, the window going to that Space, its page in the
+/// Space's profile. Like a selection, an unknown Space from a menu is ignored.
+pub(super) fn open_in_space(url: &str, space: SpaceId) {
+    hide_site_controls();
+    let opened = update_sidebar(|sidebar| {
+        let tab = sidebar.open_tab(space, url)?;
+        sidebar.select(space, tab)?;
+        sidebar.display(space)
+    });
+    if opened.is_ok() {
+        show_selected();
+    }
+}
+
+/// Opens a tab and asks the sidebar for a new Space to take it, as Move to's New Space… does.
+pub(super) fn open_in_new_space(url: &str) {
+    let tab = update_sidebar(|sidebar| {
+        let space = sidebar.displayed().id;
+        sidebar.open_tab(space, url).expect("the displayed Space")
+    });
+    ask("arbalete:new-space", &json!(tab));
+}
+
 /// Shows a tab, with its Space; a favorite is shown in the displayed Space.
 pub(super) fn select_tab(id: NodeId) {
     let selected = update_sidebar(|sidebar| {
