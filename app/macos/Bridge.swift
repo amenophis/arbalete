@@ -464,9 +464,15 @@ final class AppModel: ObservableObject {
     }
 
     /// Moves a dragged node before the child `index` of `parent`, or after its last one: the app
-    /// counts the index once the node has left its place.
+    /// counts the index once the node has left its place; a tab, copies it with Option held.
     func move(_ id: Int, to parent: Int, _ index: Int) {
         guard id != parent else { return }
+        // Like Arc's, with Option held a tab dropped is copied there, the tab staying where it
+        // was, as the drag's "+" says.
+        if NSEvent.modifierFlags.contains(.option), case .tab = item(id) {
+            run("duplicate", id, parent, index)
+            return
+        }
         // From another Space, which a drag switched from.
         guard let from = place(of: id) else {
             run("move", id, parent, index)
