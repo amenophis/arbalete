@@ -259,6 +259,8 @@ extension AppModel {
         draggedItem = item
         if case .tab = item { draggedTab = true } else { draggedTab = false }
         draggedTabs = draggedTab ? acting(on: item.id) : [item.id]
+        // Like Arc's, the other windows take it at once: their sidebars, favorites and pages.
+        for other in Self.all.allObjects where other !== self { _ = other.joinDrag() }
         return NSItemProvider(
             item: Data(String(item.id).utf8) as NSData, typeIdentifier: sidebarNode.identifier)
     }
@@ -330,7 +332,7 @@ extension AppModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + edgeDelay, execute: wait)
     }
 
-    /// A drag from another window's sidebar reaches this one's, which carries it too, like Arc's:
+    /// A drag from another window's sidebar reaches this window, which carries it too, like Arc's:
     /// whether this window carries a drag now. Nothing goes in or out of an incognito window.
     func joinDrag() -> Bool {
         guard dragged == nil else { return true }
