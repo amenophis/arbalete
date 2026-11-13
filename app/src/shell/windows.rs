@@ -372,7 +372,11 @@ fn window_ready(window: MainWindow) {
     // The welcome flow shows alone: the window comes once it ends.
     let onboarding = ONBOARD_AT_LAUNCH.take();
     if !onboarding {
+        let id = win().id;
         window.show();
+        // Showing it can tell of another window leaving the front, which focuses that one: what
+        // follows is this window's.
+        focus(id);
     }
     #[cfg(target_os = "macos")]
     {
