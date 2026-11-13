@@ -657,12 +657,6 @@ wrap_display_handler! {
             status(browser, &readable_address(&address), false);
         }
 
-        fn on_loading_progress_change(&self, browser: Option<&mut Browser>, progress: f64) {
-            if is_shown(browser) {
-                update_page(|page| page.progress = progress);
-            }
-        }
-
         /// Like Arc's, a page going full screen, like a video, fills the screen and tells how to
         /// leave it.
         fn on_fullscreen_mode_change(&self, browser: Option<&mut Browser>, fullscreen: i32) {

@@ -24,7 +24,6 @@ struct AppState: Decodable {
 
 /// The loading state of the shown page.
 struct PageState: Decodable {
-    var progress: Double
     var loading: Bool
     var canGoBack: Bool
     var canGoForward: Bool
