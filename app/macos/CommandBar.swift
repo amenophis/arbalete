@@ -250,7 +250,9 @@ final class CommandBar: ObservableObject {
             // Only the answer to what is typed now counts.
             guard var detail = try? decoder.decode(Results.self, from: detail), detail.text == text
             else { return }
-            if results?.text == text { detail.suggestions = results?.suggestions }
+            // Like Arc's, the suggestions shown stay until the new ones come, rather than the bar
+            // shrinking then growing back at each key typed.
+            detail.suggestions = results?.suggestions
             results = detail
             showCompletion()
         case "arbalete:suggestions":

@@ -364,6 +364,9 @@ fn suggest(profile: ProfileId, text: &str, surface: &'static str) {
         return;
     };
     if typed.is_empty() || typed.contains("://") {
+        // None to wait for: the Command Bar drops the ones it kept from what was typed before.
+        let detail = json!({ "text": text, "suggestions": [] });
+        send_surface(surface, "arbalete:suggestions", &detail.to_string());
         return;
     }
     let Some(request) = request_create() else {
