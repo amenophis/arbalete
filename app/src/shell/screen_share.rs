@@ -66,7 +66,7 @@ pub(super) fn choose(page: &Browser, site: &str, source: &str) -> bool {
         }
     };
     let Some(profile) =
-        page_tab(page).and_then(|tab| STATE.with_borrow(|state| state.sidebar.profile_of(tab)))
+        owning_tab(page).and_then(|tab| STATE.with_borrow(|state| state.sidebar.profile_of(tab)))
     else {
         return false;
     };
@@ -142,7 +142,7 @@ fn is_web(url: &str) -> bool {
 /// Space, but the asking one's; the loaded ones first, then by title. A page asleep loads once
 /// picked.
 pub(super) fn shareable_tabs(asking: &Browser) -> Vec<serde_json::Value> {
-    let asking = page_tab(asking);
+    let asking = owning_tab(asking);
     let mut tabs: Vec<_> = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
         let own = asking.and_then(|tab| sidebar.profile_of(tab));
@@ -237,7 +237,7 @@ pub(super) fn offers_instead(tab: NodeId, url: &str, profile: ProfileId) -> bool
             matches!(sharing.shared, Shared::Tab(shared) if shared != tab)
                 && sharing.movable
                 && sharing.profile == profile
-                && page_tab(&sharing.page) != Some(tab)
+                && owning_tab(&sharing.page) != Some(tab)
         })
         .unwrap_or(false)
 }
@@ -307,7 +307,8 @@ pub(super) fn sync_sharing_bar() {
         tab_page(shown)?;
         let instead = offers_instead_of(shown);
         started(|sharing| {
-            let sharing_shown = page_tab(&sharing.page) == Some(shown);
+            // The page sharing, or its Picture in Picture window's opener.
+            let sharing_shown = owning_tab(&sharing.page) == Some(shown);
             let shared_shown = sharing.shared == Shared::Tab(shown);
             if sharing.hidden || !(sharing_shown || shared_shown || instead) {
                 return None;

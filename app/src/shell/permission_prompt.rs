@@ -60,8 +60,13 @@ wrap_permission_handler! {
             if asks.is_empty() {
                 return 0;
             }
-            // Sharing the screen asks what to share, each time.
+            // Sharing the screen asks what to share, each time, over the asking tab, in front: from
+            // a Picture in Picture window, like Google Meet's button, the user is back on the call.
             if requested_permissions & MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE.get_raw() != 0 {
+                #[cfg(target_os = "macos")]
+                if let Some(tab) = owning_tab(browser) {
+                    back_to_tab(tab, browser);
+                }
                 let callback = PermissionCallback::Screen(callback.clone(), requested_permissions);
                 send_share_snapshots(browser);
                 ask_permission(browser, &origin, asks, callback);
@@ -295,7 +300,7 @@ fn shows_request(request: &PermissionRequest) -> bool {
 /// Whether the window shows `browser`'s page: its tab's, shown alone or in a split; else, a page
 /// that is no tab's, like Peek's, in the window `window`.
 pub(super) fn shows_page(browser: &Browser, window: u32) -> bool {
-    match page_tab(browser) {
+    match owning_tab(browser) {
         Some(tab) => win().shown.get() == Some(tab) || win().split.borrow().0.contains(&tab),
         None => win().id == window,
     }

@@ -219,6 +219,27 @@ pub fn picture_back(id: u32) {
     }
 }
 
+/// Shows a tab in front and closes its Picture in Picture windows, like their back to tab button;
+/// but the one showing `asking`'s page, whose request would go with it.
+#[cfg(target_os = "macos")]
+pub(super) fn back_to_tab(tab: NodeId, asking: &Browser) {
+    crate::mac::activate();
+    select_tab(tab);
+    focus_page(tab);
+    let hosts: Vec<_> = PICTURES.with_borrow(|pictures| {
+        pictures
+            .iter()
+            .filter(|p| p.tab == tab)
+            .filter_map(|p| p.browser.as_ref())
+            .filter(|browser| browser.identifier() != asking.identifier())
+            .filter_map(Browser::host)
+            .collect()
+    });
+    for host in hosts {
+        host.close_browser(0);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn picture_host(id: u32) -> Option<BrowserHost> {
     PICTURES.with_borrow(|pictures| {
@@ -242,7 +263,52 @@ wrap_client! {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             Some(PictureLifeSpan::new(self.id))
         }
+
+        /// Its page asks like its opener's, like Google Meet's button to share the screen.
+        fn permission_handler(&self) -> Option<PermissionHandler> {
+            Some(ContentPermissions::new())
+        }
+
+        fn display_handler(&self) -> Option<DisplayHandler> {
+            Some(PictureDisplay::new())
+        }
     }
+}
+
+#[cfg(target_os = "macos")]
+wrap_display_handler! {
+    struct PictureDisplay {}
+
+    impl DisplayHandler {
+        /// Its page sharing the screen shows the bar to end it, like its opener's.
+        fn on_media_access_change(&self, browser: Option<&mut Browser>, _has_video_access: i32, _has_audio_access: i32) {
+            if let Some(browser) = browser {
+                media_changed(browser);
+            }
+        }
+    }
+}
+
+/// The tab whose page opened the Picture in Picture window showing `browser`'s page, if it
+/// shows in one.
+#[cfg(target_os = "macos")]
+pub(super) fn picture_opener(browser: &Browser) -> Option<NodeId> {
+    let id = browser.identifier();
+    PICTURES.with_borrow(|pictures| {
+        pictures
+            .iter()
+            .find(|p| p.browser.as_ref().is_some_and(|b| b.identifier() == id))
+            .map(|p| p.tab)
+    })
+}
+
+/// A tab's page's, or, for a Picture in Picture window's page, its opener's tab.
+pub(super) fn owning_tab(browser: &Browser) -> Option<NodeId> {
+    #[cfg(target_os = "macos")]
+    if let Some(tab) = picture_opener(browser) {
+        return Some(tab);
+    }
+    page_tab(browser)
 }
 
 #[cfg(target_os = "macos")]
