@@ -217,9 +217,29 @@ final class AppModel: ObservableObject {
 
     /// The displayed Space's selected tab, a favorite, a pinned tab or one of today's.
     var activeTab: Tab? {
-        guard let page else { return nil }
-        let all = (page.favorites + page.pinned + page.today).flatMap(\.tabs)
-        return all.first { $0.id == page.selected }
+        page.flatMap(selectedTab)
+    }
+
+    /// A page's selected tab.
+    private func selectedTab(_ page: SpacePage) -> Tab? {
+        (page.favorites + page.pinned + page.today).flatMap(\.tabs).first { $0.id == page.selected }
+    }
+
+    /// The selected tab of the Space the pages are closest to as they slide, which the address
+    /// row shows, like Arc's, and the side its address comes in from: 1 for the right.
+    func slidTab() -> (space: Int?, tab: Tab?, step: Int) {
+        guard let state, let index = displayedIndex else { return (state?.space, activeTab, 1) }
+        var position = Double(index) - (pageWidth > 0 ? Double(pagerShift / pageWidth) : 0)
+        if let carousel, let last = carousel.last,
+            let to = state.spaces.firstIndex(where: { $0.id == last.id })
+        {
+            position = Double(index) + Double(carouselShare) * Double(to - index)
+        }
+        let at = min(max(Int(position.rounded()), 0), state.spaces.count - 1)
+        let tab = at == index ? activeTab : livePage(state.spaces[at].id).flatMap { selectedTab($0.0) }
+        // From the side it lies on, past the middle of the slide, or toward which a click goes.
+        let lean = Double(at) - position
+        return (state.spaces[at].id, tab, lean == 0 ? (at < index ? -1 : 1) : lean > 0 ? 1 : -1)
     }
 
     /// The window's colors last sent, so as to send them only when they change.
@@ -234,9 +254,6 @@ final class AppModel: ObservableObject {
                 state = try JSONDecoder().decode(AppState.self, from: detail)
             } catch {
                 NSLog("arbalete: cannot read the state: \(error)")
-            }
-            if let shown, let now = displayedIndex, now != shown {
-                spaceStep = now > shown ? 1 : -1
             }
             paintWindow()
             followDraft()
@@ -373,10 +390,6 @@ final class AppModel: ObservableObject {
     }
 
     /// Where the displayed Space is among the Spaces.
-    /// Which way the displayed Space last went among the Spaces: 1 to a later one, -1 to an
-    /// earlier one.
-    private(set) var spaceStep = 1
-
     private var displayedIndex: Int? {
         guard let state else { return nil }
         return state.spaces.firstIndex { $0.id == state.space }
