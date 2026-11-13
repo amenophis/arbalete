@@ -630,7 +630,8 @@ struct SpacePager: View {
             }
             let shift =
                 carousel.map { -model.carouselShare * CGFloat($0.count - 1) * width }
-                ?? model.pagerShift - width
+                ?? model.pagerShift
+                - width * CGFloat(pages.firstIndex { $0.id == model.state?.space } ?? 1)
             let heights = _heights.wrappedValue
             ZStack(alignment: .topLeading) {
                 HStack(spacing: 0) {

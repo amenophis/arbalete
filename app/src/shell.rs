@@ -737,10 +737,12 @@ impl UiState {
                 "profile": s.profile,
                 "pinned": self.overview(s.pinned, s.profile),
             })).collect::<Vec<_>>(),
+            // The displayed Space's page and its neighbors', two on each side, which quick swipes
+            // pass before the next state comes (SpacePager in app/macos/Sidebar.swift).
             "pages": spaces
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| i.abs_diff(index) <= 1)
+                .filter(|(i, _)| i.abs_diff(index) <= 2)
                 .map(|(_, s)| self.page_json(s))
                 .collect::<Vec<_>>(),
             "profiles": self.sidebar.profiles().iter().map(|p| json!({
@@ -1496,10 +1498,10 @@ mod tests {
     }
 
     #[test]
-    fn sends_only_the_pages_of_the_displayed_space_and_its_neighbors() {
+    fn sends_only_the_pages_of_the_displayed_space_and_two_neighbors_on_each_side() {
         let mut state = UiState::default();
         let profile = state.sidebar.profiles()[0].id;
-        let ids: Vec<_> = (1..5)
+        let ids: Vec<_> = (1..7)
             .map(|n| {
                 state
                     .sidebar
@@ -1516,11 +1518,11 @@ mod tests {
                 .collect::<serde_json::Value>()
         };
         let home = state.sidebar.spaces()[0].id;
-        assert_eq!(pages(&state), serde_json::json!([home, ids[0]]));
-        state.sidebar.display(ids[1]).unwrap();
-        assert_eq!(pages(&state), serde_json::json!(ids[..3]));
-        state.sidebar.display(ids[3]).unwrap();
-        assert_eq!(pages(&state), serde_json::json!(ids[2..]));
+        assert_eq!(pages(&state), serde_json::json!([home, ids[0], ids[1]]));
+        state.sidebar.display(ids[2]).unwrap();
+        assert_eq!(pages(&state), serde_json::json!(ids[..5]));
+        state.sidebar.display(ids[5]).unwrap();
+        assert_eq!(pages(&state), serde_json::json!(ids[3..]));
     }
 
     #[test]
