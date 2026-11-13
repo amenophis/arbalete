@@ -260,6 +260,26 @@ fn show_content(tab: NodeId) {
     if taken {
         snapshot_shown();
     }
+    // A picture of the page once drawn, for the pickers that show the tabs, like the screen
+    // sharing's: a tab shown a few seconds has one.
+    post_delayed_task(
+        ThreadId::UI,
+        Some(&mut SnapshotShown::new()),
+        SNAPSHOT_AFTER_MS,
+    );
+}
+
+/// How long after a tab shows its picture is taken.
+const SNAPSHOT_AFTER_MS: i64 = 1_500;
+
+wrap_task! {
+    struct SnapshotShown {}
+
+    impl Task {
+        fn execute(&self) {
+            snapshot_shown();
+        }
+    }
 }
 
 /// A page shows in one window at a time, like Arc's: this one takes a tab's page from another,
