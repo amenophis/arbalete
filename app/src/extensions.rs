@@ -957,7 +957,7 @@ impl Caller {
         match self {
             Self::Worker(session) => send_in(session, "Runtime.evaluate", params, None),
             Self::Popup(host, _) => {
-                let message = json!({ "id": 0, "method": "Runtime.evaluate", "params": params });
+                let message = json!({ "id": crate::shell::unanswered_id(), "method": "Runtime.evaluate", "params": params });
                 host.send_dev_tools_message(Some(message.to_string().as_bytes()));
             }
         }

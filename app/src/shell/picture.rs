@@ -33,8 +33,8 @@ pub(super) fn picture_page_created(browser: &Browser) {
     // New documents run the scripts added for them only while the Page domain is enabled.
     let params = json!({ "source": KEEP_ENTER_PICTURE, "runImmediately": true });
     for message in [
-        json!({ "id": 0, "method": "Page.enable" }),
-        json!({ "id": 0, "method": "Page.addScriptToEvaluateOnNewDocument", "params": params }),
+        json!({ "id": unanswered_id(), "method": "Page.enable" }),
+        json!({ "id": unanswered_id(), "method": "Page.addScriptToEvaluateOnNewDocument", "params": params }),
     ] {
         host.send_dev_tools_message(Some(message.to_string().as_bytes()));
     }
@@ -109,7 +109,7 @@ wrap_task! {
             let Some((host, call)) = page else { return };
             let expression = ENTER_PICTURE.replace("(CALL)", &format!("({call})"));
             let params = json!({ "expression": expression, "userGesture": true });
-            let message = json!({ "id": 0, "method": "Runtime.evaluate", "params": params });
+            let message = json!({ "id": unanswered_id(), "method": "Runtime.evaluate", "params": params });
             host.send_dev_tools_message(Some(message.to_string().as_bytes()));
         }
     }

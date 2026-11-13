@@ -9,13 +9,6 @@ use super::*;
 const BINDING: &str = "__arbaleteSound";
 const WORLD: &str = "arbalete-sound";
 
-/// The ids of the messages sent to pages here, apart from the others' (boosts.rs).
-const FIRST_MESSAGE: i32 = 28_000_000;
-
-thread_local! {
-    static NEXT_MESSAGE: Cell<i32> = const { Cell::new(FIRST_MESSAGE) };
-}
-
 /// Tells, as it changes, whether a media element of the frame plays with sound, and that it no
 /// longer does as the frame's document goes.
 const WATCH_SOUND: &str = r#"(() => {
@@ -59,10 +52,7 @@ fn watch(host: &BrowserHost, session: Option<&str>) {
         ("Page.addScriptToEvaluateOnNewDocument", script),
         ("Target.setAutoAttach", attach),
     ] {
-        // Chromium refuses a message whose id another one waiting for its answer has.
-        let id = NEXT_MESSAGE.get();
-        NEXT_MESSAGE.set(id.checked_add(1).unwrap_or(FIRST_MESSAGE));
-        let mut message = json!({ "id": id, "method": method, "params": params });
+        let mut message = json!({ "id": unanswered_id(), "method": method, "params": params });
         if let Some(session) = session {
             message["sessionId"] = json!(session);
         }

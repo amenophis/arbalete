@@ -1108,6 +1108,19 @@ struct Live {
     audible: HashSet<String>,
 }
 
+/// An id for a DevTools message whose answer nobody reads: Chromium refuses a message whose id
+/// another one waiting for its answer has, so each gets its own, apart from the ids the answers
+/// are told by (extensions.rs, boosts.rs).
+pub fn unanswered_id() -> i32 {
+    thread_local! {
+        static NEXT: Cell<i32> = const { Cell::new(FIRST_UNANSWERED) };
+    }
+    const FIRST_UNANSWERED: i32 = 28_000_000;
+    let id = NEXT.get();
+    NEXT.set(id.checked_add(1).unwrap_or(FIRST_UNANSWERED));
+    id
+}
+
 fn now() -> i64 {
     let since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
