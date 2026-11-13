@@ -200,6 +200,12 @@ pub enum Command {
     /// Shares, for a site's request by its id, what the picker picked: "screen:<id>:0",
     /// "window:<id>:0" or "tab:<tab id>", with its sound or without; or nothing.
     ShareScreen(u64, Option<String>, bool),
+    /// Moves the screen sharing to this tab, like Arc's "Share this tab instead".
+    ShareThisTab(NodeId),
+    /// Ends the screen sharing.
+    StopSharing,
+    /// Hides the bar over the page telling of the screen sharing.
+    HideSharingBar,
     /// Allows or blocks a permission for the selected tab's site, from its site controls, by the
     /// content setting that keeps it.
     SetSitePermission(u32, bool),

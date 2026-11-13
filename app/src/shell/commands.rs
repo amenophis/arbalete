@@ -476,6 +476,9 @@ fn run_command(command: Command) {
             set_site_permissions(None, ContentSettingValues::DEFAULT);
         }
         (Command::ShareScreen(id, source, sound), _) => share_screen(id, source, sound),
+        (Command::ShareThisTab(tab), _) => share_instead(tab),
+        (Command::StopSharing, _) => stop_sharing(),
+        (Command::HideSharingBar, _) => hide_sharing_bar(),
         (Command::PermissionPromptHeight(height), _) => {
             win().permission_height.set(height);
             surfaces_changed();

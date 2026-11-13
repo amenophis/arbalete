@@ -1,5 +1,5 @@
-// Sharing the screen, like Arc's: the picker of what a site shares, its tabs, windows and screens
-// (app/src/shell/screen_share.rs).
+// Sharing the screen, like Arc's: the picker of what a site shares, its tabs, windows and screens,
+// and the bar over the page during the sharing (app/src/shell/screen_share.rs).
 
 import ScreenCaptureKit
 import SwiftUI
@@ -369,6 +369,87 @@ private struct CardView: View {
         .contentShape(Rectangle())
         .onHover { _hovered.wrappedValue = $0 }
         .help(card.title)
+    }
+}
+
+/// The screen sharing the bar tells of, on the page shown (sync_sharing_bar in
+/// app/src/shell/screen_share.rs).
+@MainActor
+final class SharingBar: ObservableObject {
+    struct Detail: Decodable, Equatable {
+        var text: String
+        /// The tab shown, which the bar offers to share instead.
+        var tab: Int
+        var instead: Bool
+    }
+
+    @Published var detail: Detail?
+    let app: AppModel
+
+    init(app: AppModel) {
+        self.app = app
+    }
+
+    func handle(_ name: String, _ detail: Data) {
+        guard name == "arbalete:sharing" else { return }
+        let detail = try? JSONDecoder().decode(Detail.self, from: detail)
+        if detail != self.detail { self.detail = detail }
+    }
+}
+
+/// The bar over the page during a screen sharing, like Arc's: what is shared and with whom, Share
+/// This Tab Instead on another tab, Stop Sharing, and a button to hide it.
+struct SharingBarView: View {
+    @ObservedObject var bar: SharingBar
+
+    var body: some View {
+        if let detail = bar.detail {
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.inset.filled.and.person.filled")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.accentColor)
+                Text(detail.text)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 4)
+                if detail.instead {
+                    SharingButton(title: "Share This Tab Instead", prominent: true) {
+                        bar.app.run("share-this-tab", detail.tab)
+                    }
+                }
+                SharingButton(title: "Stop Sharing", prominent: !detail.instead) {
+                    bar.app.run("stop-sharing")
+                }
+                CloseButton(symbol: "xmark", help: "Hide") { bar.app.run("hide-sharing-bar") }
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+/// One of the sharing bar's buttons, as wide as its title.
+private struct SharingButton: View {
+    let title: String
+    let prominent: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(prominent ? Color.white : Color.primary)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary.opacity(0.08))))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
     }
 }
 

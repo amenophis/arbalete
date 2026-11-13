@@ -613,6 +613,7 @@ final class NativeWindow {
     let themePicker: ThemePickerModel
     let permissionPrompt: PermissionPrompt
     let authPrompt: AuthPrompt
+    let sharingBar: SharingBar
     let importModel: ImportModel
     let splitHandles: SplitHandles
     let pages: PagePlacer
@@ -720,6 +721,11 @@ final class NativeWindow {
         let permissionSurface = Surface(in: window, radius: 14) { PermissionView(prompt: permission) }
         permissionSurface.pops = true
         surfaces["permission"] = permissionSurface
+        let sharing = SharingBar(app: app)
+        sharingBar = sharing
+        let sharingSurface = Surface(in: window, radius: 12) { SharingBarView(bar: sharing) }
+        sharingSurface.pops = true
+        surfaces["sharing"] = sharingSurface
         let auth = AuthPrompt(app: app)
         authPrompt = auth
         let authSurface = Surface(in: window, radius: 14) { AuthView(prompt: auth) }
@@ -785,6 +791,7 @@ final class NativeWindow {
         case "boost": boostEditor.handle(name, detail)
         case "theme": themePicker.handle(name, detail)
         case "permission": permissionPrompt.handle(name, detail)
+        case "sharing": sharingBar.handle(name, detail)
         case "auth": authPrompt.handle(name, detail)
         case "import": importModel.handle(name, detail)
         default: break

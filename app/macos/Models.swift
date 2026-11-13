@@ -107,6 +107,8 @@ struct Tab: Decodable, Identifiable {
     var developer: Bool?
     /// A Boost is on for its site.
     var boosted: Bool?
+    /// A tab shared moves to it from its row, like Arc's Share This Tab Instead.
+    var shareInstead: Bool?
 
     /// Its title, or its address without one.
     var label: String { title.isEmpty ? url : title }

@@ -861,6 +861,7 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "open": has_page(id),
         "developer": developer_mode(&tab.url),
         "boosted": boosts::boosted(profile, &tab.url),
+        "shareInstead": offers_instead(id, &tab.url, profile),
     })
 }
 
@@ -1045,6 +1046,7 @@ fn sync_native_surfaces() {
         }
     }
     sync_permission_prompt();
+    sync_sharing_bar();
     sync_auth_prompt();
     boosts::place_boost_editor();
     if let Some(overlay) = IMPORT.with_borrow(Clone::clone) {
@@ -1459,7 +1461,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "theme": { "colors": ["#a352ff", "#5289ff", "#ff5252"], "mode": "auto", "intensity": 0.8, "noise": 0.4 }, "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false, "boosted": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false, "boosted": false, "shareInstead": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);
