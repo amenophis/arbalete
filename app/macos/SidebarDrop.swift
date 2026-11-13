@@ -155,6 +155,9 @@ enum DropTarget: Equatable {
     case split(Int, leading: Bool)
     /// Into a split, at an index among its tabs.
     case join(Int, Int)
+    /// On a section's row, New Tab or the Space's name, lit like a folder: first in its
+    /// container, by its id.
+    case on(Int)
 }
 
 /// How long the pointer rests on a tab's middle before the tab offers a split, as in Arc.
@@ -316,7 +319,8 @@ extension AppModel {
     /// The pointer leaves the row `id`: its feedback goes, unless another row's took over.
     func leave(_ id: Int) {
         switch dropTarget {
-        case .before(id), .after(id), .into(id), .split(id, _), .join(id, _): dropTarget = nil
+        case .before(id), .after(id), .into(id), .split(id, _), .join(id, _), .on(id):
+            dropTarget = nil
         default: break
         }
         if case .split(id, _) = pendingSplit {
@@ -448,9 +452,8 @@ struct DropRow<Content: View>: View {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { _size.wrappedValue = $0 }
             .background {
                 if model.dropTarget == .into(item.id) {
-                    // Like Arc's, across the whole sidebar.
-                    Rectangle().fill(model.themeColor.opacity(0.5))
-                        .padding(.horizontal, -Measure.inset)
+                    // Rounded like a tab's row.
+                    DropHighlight(tint: model.themeColor)
                 }
             }
             .overlay(alignment: .top) {
@@ -699,7 +702,7 @@ private struct RowDrop: DropDelegate {
         model.land {
             switch target {
             // Several tabs keep their order: each goes before the row, or after it from the last.
-            case .before: ids.forEach { place($0, 0) }
+            case .before, .on: ids.forEach { place($0, 0) }
             case .after:
                 // After an open folder is before what it holds.
                 if case .folder(let folder, _, true, _) = item {
@@ -715,15 +718,18 @@ private struct RowDrop: DropDelegate {
             case .join(_, let index):
                 guard case .split(_, let tabs) = item, !tabs.isEmpty else { return }
                 if index == 0 {
-                    model.split(id, onto: tabs[0].id, before: true)
+                    model.split(first, onto: tabs[0].id, before: true)
                 } else {
-                    model.split(id, onto: tabs[min(index, tabs.count) - 1].id)
+                    model.split(first, onto: tabs[min(index, tabs.count) - 1].id)
                 }
+                let joining = ids.filter { id in !tabs.contains { $0.id == id } }
+                guard let first = joining.first else { return }
             }
         }
         return true
     }
 
+                zip(joining, joining.dropFirst()).forEach { model.split($1, onto: $0) }
     /// Like Arc's, measured: a band at the top inserts before; at the bottom, after a folder;
     /// elsewhere, into a folder, or beside a tab in a split once it waited (splitDelay).
     private func target(at point: CGPoint) -> DropTarget? {
@@ -756,6 +762,18 @@ struct InsertionLine: View {
     let tint: Color
 
     var body: some View {
+/// A row lit as a drop lands into it, a folder or a section's row: rounded like a tab's.
+struct DropHighlight: View {
+    let tint: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Measure.radius).fill(tint.opacity(0.5))
+            .frame(height: Measure.rowFill)
+            .frame(maxHeight: .infinity)
+            .allowsHitTesting(false)
+    }
+}
+
         HStack(spacing: 0) {
             Circle().strokeBorder(tint, lineWidth: 2).frame(width: 8, height: 8)
             Rectangle().fill(tint).frame(height: 2)

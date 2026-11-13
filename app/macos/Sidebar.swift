@@ -491,14 +491,14 @@ struct SpaceSections: View {
                                     model: model, parent: page.roots.pinned, index: page.pinned.count,
                                     shown: lastShown(page.pinned).map { .after($0) }
                                         ?? .into(page.roots.pinned)))
-                        // Dropped on, New Tab puts the node first among today's tabs.
+                        // Dropped on, New Tab puts the node first among today's tabs, lit
+                        // meanwhile like a folder.
                         NewTabRow(model: model, root: page.roots.today)
                             .onDrop(
                                 of: [sidebarNode, .url],
                                 delegate: SectionDrop(
                                     model: model, parent: page.roots.today, index: 0,
-                                    shown: page.today.first.map { .before($0.id) }
-                                        ?? .into(page.roots.today)))
+                                    shown: .on(page.roots.today)))
                         ItemRows(
                             model: model, items: page.today, parent: page.roots.today,
                             selected: page.selected)
@@ -1052,9 +1052,20 @@ struct SpaceHeader: View {
         // Like Arc's, the whole row lights up under the pointer.
         .background(
             RoundedRectangle(cornerRadius: Measure.radius).fill(hovered ? Ink.item : .clear))
+        .background {
+            if model.dropTarget == .on(page.roots.pinned) {
+                RoundedRectangle(cornerRadius: Measure.radius).fill(model.themeColor.opacity(0.5))
+            }
+        }
         .animation(.easeInOut(duration: 0.12), value: hovered)
         .onHover { hovered = $0 }
         .rightClick { model.run("menu", ["space": page.space]) }
+        // Dropped on, the Space's name puts the node first among its pinned tabs, under it, lit
+        // meanwhile like a folder.
+        .onDrop(
+            of: [sidebarNode, .url],
+            delegate: SectionDrop(
+                model: model, parent: page.roots.pinned, index: 0, shown: .on(page.roots.pinned)))
     }
 }
 
@@ -1163,6 +1174,9 @@ struct NewTabRow: View {
             .frame(height: Measure.rowFill)
             .background(
                 RoundedRectangle(cornerRadius: Measure.radius).fill(hovered ? Ink.item : .clear))
+            .background {
+                if let root, model.dropTarget == .on(root) { DropHighlight(tint: model.themeColor) }
+            }
             .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
             .contentShape(Rectangle())
         }
