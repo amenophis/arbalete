@@ -708,9 +708,9 @@ impl UiState {
     /// left out, as they would weigh on every update.
     fn to_json(&self) -> serde_json::Value {
         let displayed = self.sidebar.displayed().id;
-        // An incognito window shows only its Space.
+        // An incognito or a blank window shows only its Space.
         let incognito = self.sidebar.is_incognito(displayed);
-        let spaces = if incognito {
+        let spaces = if self.sidebar.is_apart(displayed) {
             std::slice::from_ref(self.sidebar.displayed())
         } else {
             self.sidebar.spaces()
@@ -724,6 +724,7 @@ impl UiState {
             "toolbar": app_settings().show_toolbar,
             "mediaSources": app_settings().media_sources,
             "incognito": incognito,
+            "standalone": self.sidebar.displayed().standalone,
             "space": displayed,
             "spaces": spaces.iter().map(|s| json!({
                 "id": s.id,

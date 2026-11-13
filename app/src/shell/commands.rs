@@ -324,6 +324,7 @@ fn run_command(command: Command) {
         (Command::NewLittle(url), _) => open_link(url),
         (Command::NewWindow, _) => new_window(),
         (Command::NewIncognitoWindow, _) => new_incognito_window(),
+        (Command::NewBlankWindow, _) => new_blank_window(),
         (Command::Little(id, action), _) => little_action(id, action),
         (Command::OpenLittleInSpace, _) => {
             if let Some(id) = focused_little() {

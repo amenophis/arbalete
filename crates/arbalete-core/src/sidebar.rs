@@ -202,6 +202,10 @@ pub struct Space {
     /// The sidebar hides the Space's pinned tabs, like Arc's; "Today" tabs stay.
     #[serde(default)]
     pub collapsed: bool,
+    /// A blank window's own Space, like Arc's standalone windows: listed nowhere, on an existing
+    /// profile, saved with the window (`Sidebar::open_standalone`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub standalone: bool,
 }
 
 impl Space {
@@ -516,7 +520,7 @@ impl Sidebar {
         &self.profiles[..self.listed_profiles()]
     }
 
-    /// Spaces in sidebar order, but the incognito windows'.
+    /// Spaces in sidebar order, but the incognito and blank windows'.
     pub fn spaces(&self) -> &[Space] {
         &self.spaces[..self.listed_spaces()]
     }
@@ -529,12 +533,19 @@ impl Sidebar {
             .unwrap_or(self.profiles.len())
     }
 
-    /// How many Spaces are listed: the incognito ones come after them.
+    /// How many Spaces are listed: the blank windows' come after them, then the incognito
+    /// windows'.
     fn listed_spaces(&self) -> usize {
         self.spaces
             .iter()
-            .position(|s| self.is_incognito(s.id))
+            .position(|s| self.is_apart(s.id))
             .unwrap_or(self.spaces.len())
+    }
+
+    /// Whether a Space is a window's own, an incognito or a blank one, which no other window
+    /// shows.
+    pub fn is_apart(&self, space: SpaceId) -> bool {
+        self.is_incognito(space) || self.space(space).is_ok_and(|s| s.standalone)
     }
 
     /// Whether a Space is an incognito window's.
@@ -561,9 +572,74 @@ impl Sidebar {
     }
 
     /// Whether a window showing the Space `shown` may show the tab or Space `space`: an
-    /// incognito window only its own, another none of the incognito windows'.
+    /// incognito or blank window only its own, another none of theirs.
     pub fn reaches(&self, shown: SpaceId, space: SpaceId) -> bool {
-        space == shown || !(self.is_incognito(shown) || self.is_incognito(space))
+        space == shown || !(self.is_apart(shown) || self.is_apart(space))
+    }
+
+    /// Opens a blank window's Space, like Arc's Blank Window: on `profile`, with its web
+    /// data, its extensions and its sign-ins, but no other Space to switch to, and the app's own
+    /// colors. Listed nowhere, it is saved while its window is open (`close_standalone`).
+    pub fn open_standalone(&mut self, profile: ProfileId) -> Result<SpaceId, Error> {
+        self.profile_mut(profile)?;
+        let space = SpaceId(self.next_id());
+        let pinned = self.insert(None, NodeKind::Container);
+        let today = self.insert(None, NodeKind::Container);
+        // After the listed Spaces and the other blank windows', before the incognito ones.
+        let index = self
+            .spaces
+            .iter()
+            .position(|s| self.is_incognito(s.id))
+            .unwrap_or(self.spaces.len());
+        self.spaces.insert(
+            index,
+            Space {
+                id: space,
+                title: "Blank Window".to_string(),
+                emoji: None,
+                theme: Theme::default(),
+                profile,
+                pinned,
+                today,
+                selected: None,
+                collapsed: false,
+                standalone: true,
+            },
+        );
+        Ok(space)
+    }
+
+    /// Forgets a blank window's Space as the window closes, its tabs archived, like Arc's: they
+    /// can be restored, into the displayed Space.
+    pub fn close_standalone(&mut self, space: SpaceId, now: u64) -> Result<(), Error> {
+        if !self.space(space)?.standalone {
+            return Err(Error::UnknownSpace);
+        }
+        let index = self.spaces.iter().position(|s| s.id == space);
+        let space = self.spaces.remove(index.expect("a known Space"));
+        if self.displayed == Some(space.id) {
+            self.displayed = None;
+        }
+        let mut pending = vec![space.pinned, space.today];
+        while let Some(id) = pending.pop() {
+            if let Some(node) = self.nodes.remove(&id) {
+                self.splits.remove(&id);
+                if let NodeKind::Tab(tab) = node.kind {
+                    self.archive.insert(
+                        0,
+                        Archived {
+                            tab,
+                            space: space.id,
+                            archived_at: now,
+                            manual: true,
+                        },
+                    );
+                }
+                pending.extend(node.children);
+            }
+        }
+        self.archive.truncate(ARCHIVE_SIZE);
+        Ok(())
     }
 
     /// Opens an incognito window's profile and Space, after the others: the profile's web data
@@ -602,6 +678,7 @@ impl Sidebar {
             today,
             selected: None,
             collapsed: false,
+            standalone: false,
         });
         space
     }
@@ -635,8 +712,10 @@ impl Sidebar {
         if let Some(draft) = saved.draft.take() {
             let _ = saved.delete_space(draft);
         }
-        let incognito: Vec<_> = saved.spaces[saved.listed_spaces()..]
+        let incognito: Vec<_> = saved
+            .spaces
             .iter()
+            .filter(|s| saved.is_incognito(s.id))
             .map(|s| s.id)
             .collect();
         for space in incognito {
@@ -1002,6 +1081,7 @@ impl Sidebar {
                 today,
                 selected: None,
                 collapsed: false,
+                standalone: false,
             },
         );
         Ok(id)
@@ -1093,7 +1173,7 @@ impl Sidebar {
             .iter()
             .position(|s| s.id == id)
             .ok_or(Error::UnknownSpace)?;
-        if self.is_incognito(id) {
+        if self.is_apart(id) {
             return Err(Error::UnknownSpace);
         }
         if self.listed_spaces() == 1 {
@@ -4308,6 +4388,57 @@ mod tests {
         let first = sidebar.view();
         sidebar.set_view(&first);
         assert_eq!(sidebar.space(home).unwrap().selected, Some(favorite));
+    }
+
+    #[test]
+    fn keeps_a_blank_window_space_unlisted_saved_and_apart() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let profile = sidebar.profiles()[0].id;
+        let tab = sidebar.open_tab(home, "https://a.test").unwrap();
+        let incognito = sidebar.open_incognito();
+        let blank = sidebar.open_standalone(profile).unwrap();
+        assert!(sidebar.open_standalone(ProfileId(9999)).is_err());
+        let page = sidebar.open_tab(blank, "https://b.test").unwrap();
+        assert!(sidebar.is_apart(blank));
+        assert!(!sidebar.is_incognito(blank));
+        assert_eq!(sidebar.profile_of(page), Some(profile));
+        // Listed nowhere, before the incognito Spaces, and a Space created later is listed first.
+        let work = sidebar.create_space("Work", profile).unwrap();
+        assert_eq!(
+            sidebar.spaces().iter().map(|s| s.id).collect::<Vec<_>>(),
+            [home, work]
+        );
+        // Its window shows only it, and no other window shows it.
+        sidebar.display(blank).unwrap();
+        assert_eq!(sidebar.next_space(false), None);
+        assert!(!sidebar.reaches(blank, home));
+        assert!(!sidebar.reaches(home, blank));
+        assert!(sidebar.reaches(blank, blank));
+        assert!(sidebar.delete_space(blank).is_err());
+        // Its tabs move to and from the other Spaces.
+        let today = sidebar.space(home).unwrap().today;
+        sidebar.move_node(page, today, 0).unwrap();
+        let into = sidebar.space(blank).unwrap().today;
+        sidebar.move_node(page, into, 0).unwrap();
+        sidebar.move_node(tab, into, 1).unwrap();
+        // Saved with its window, unlike the incognito one.
+        let saved = sidebar.saved();
+        assert!(saved.space(blank).unwrap().standalone);
+        assert!(saved.space(incognito).is_err());
+        // Gone with its window, its tabs archived.
+        sidebar.close_standalone(blank, 7).unwrap();
+        assert!(sidebar.space(blank).is_err());
+        assert!(sidebar.node(page).is_none());
+        let archived: Vec<_> = sidebar
+            .archive()
+            .iter()
+            .map(|a| a.tab.url.as_str())
+            .collect();
+        assert_eq!(archived.len(), 2);
+        assert!(archived.contains(&"https://b.test"));
+        assert!(sidebar.close_standalone(home, 7).is_err());
+        sidebar.check_invariants().unwrap();
     }
 
     #[test]

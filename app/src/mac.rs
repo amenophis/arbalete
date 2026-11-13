@@ -320,6 +320,11 @@ define_class!(
             crate::shell::run(Command::NewIncognitoWindow);
         }
 
+        #[unsafe(method(arbaleteNewBlank:))]
+        fn new_blank(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::NewBlankWindow);
+        }
+
         #[unsafe(method(arbaleteNewLittle:))]
         fn new_little(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::NewLittle(None));
@@ -740,6 +745,19 @@ pub fn setup_menu() {
                     sel!(arbaleteNewWindow:),
                     ns_string!("n"),
                 ),
+                // ⌃⌘N, like Arc's.
+                {
+                    let item = item(
+                        mtm,
+                        ns_string!("Blank Window"),
+                        sel!(arbaleteNewBlank:),
+                        ns_string!("n"),
+                    );
+                    item.setKeyEquivalentModifierMask(
+                        NSEventModifierFlags::Command | NSEventModifierFlags::Control,
+                    );
+                    item
+                },
                 // An uppercase key equivalent adds ⇧.
                 item(
                     mtm,
