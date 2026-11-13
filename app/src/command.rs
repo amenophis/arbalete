@@ -290,6 +290,9 @@ pub enum Command {
     NewIncognitoWindow,
     /// Opens a blank window, on a Space of its own, like Arc's.
     NewBlankWindow,
+    /// Sends the interface a tab's page picture, the one kept and a fresh one if it shows, for a
+    /// drag carrying it out of the windows, like Arc's.
+    TabPicture(NodeId),
     /// Opens a link dragged onto the sidebar from a page or another app as a tab at `index` in
     /// `parent`, and shows it, like Arc's.
     DropLink {

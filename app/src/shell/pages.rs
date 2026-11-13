@@ -213,6 +213,24 @@ fn css_hex(color: &str) -> Option<String> {
     Some(format!("#{r:02x}{g:02x}{b:02x}"))
 }
 
+/// Sends the interface a tab's page picture, the one kept, then a fresh one if its page shows in
+/// the focused window, as it comes (page_snapshot).
+pub(super) fn tab_picture(tab: NodeId) {
+    if let Some(jpeg) = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&tab).cloned()) {
+        send_picture(tab, &jpeg);
+    }
+    PICTURE_WANTED.set(Some(tab));
+    if win().shown.get() == Some(tab) {
+        snapshot_shown();
+    }
+}
+
+/// Tells each window's interface of a tab's page picture.
+fn send_picture(tab: NodeId, jpeg: &str) {
+    let detail = serde_json::json!({ "tab": tab, "jpeg": jpeg }).to_string();
+    in_each_window(|| dispatch(&win().sidebar, "arbalete:picture", &detail));
+}
+
 /// Keeps a page's picture, a JPEG in base64, for its tab.
 pub fn page_snapshot(page: i32, jpeg: &str) {
     let tab = PAGES.with_borrow(|pages| {
@@ -222,6 +240,10 @@ pub fn page_snapshot(page: i32, jpeg: &str) {
     });
     if let Some(tab) = tab {
         SNAPSHOTS.with_borrow_mut(|snapshots| snapshots.insert(tab, jpeg.to_owned()));
+        if PICTURE_WANTED.get() == Some(tab) {
+            PICTURE_WANTED.set(None);
+            send_picture(tab, jpeg);
+        }
         #[cfg(target_os = "macos")]
         keep_picture(tab, jpeg);
     }

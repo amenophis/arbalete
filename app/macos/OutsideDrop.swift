@@ -11,6 +11,17 @@ private let cardSide: CGFloat = 180
 /// Where the blank window opens, from the pointer: its sidebar's top under it, like Arc's.
 private let windowOffset = CGPoint(x: 120, y: 20)
 
+/// A tab's page picture, a JPEG in base64, which the app sends for a drag (Command::TabPicture).
+struct TabPicture: Decodable {
+    let tab: Int
+    let jpeg: String
+}
+
+/// How wide the card is with the page's picture, like Arc's: as tall as the page is, in
+/// proportion, within these bounds.
+private let pictureWidth: CGFloat = 240
+private let pictureHeights: ClosedRange<CGFloat> = 135...200
+
 /// The panel under the pointer while a drag from the sidebar is out of every window, which takes
 /// its drop: one for the app.
 @MainActor
@@ -20,6 +31,8 @@ final class OutsideDrop {
     private let panel: NSPanel
     private let view = CatchView()
     private var timer: Timer?
+    /// The tab the drag carries, whose picture the card shows once the app sends it.
+    private var tab: Tab?
 
     private init() {
         panel = NSPanel(
@@ -45,7 +58,10 @@ final class OutsideDrop {
             !(model.page?.favorites.contains { $0.id == item.id } ?? false)
         else { return }
         if case .folder = item { return }
-        view.card = card(item.tabs.first)
+        tab = item.tabs.first
+        show(card(tab))
+        // Like Arc's, a picture of its page instead, as soon as the app has one.
+        if let tab { model.run("tab-picture", tab.id) }
         timer?.invalidate()
         // A drop takes a moment after the buttons come up, which must still find the panel.
         var released: Date?
@@ -69,6 +85,7 @@ final class OutsideDrop {
     private func stop() {
         timer?.invalidate()
         timer = nil
+        tab = nil
         panel.orderOut(nil)
     }
 
@@ -85,7 +102,8 @@ final class OutsideDrop {
             panel.orderOut(nil)
             return
         }
-        panel.setFrameOrigin(NSPoint(x: point.x - cardSide / 2, y: point.y - cardSide / 2))
+        let size = panel.frame.size
+        panel.setFrameOrigin(NSPoint(x: point.x - size.width / 2, y: point.y - size.height / 2))
         if !panel.isVisible { panel.orderFront(nil) }
     }
 
@@ -112,6 +130,37 @@ final class OutsideDrop {
             ])
         // Once AppKit is done with the drag: a window made within it shows nothing.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { model.run(command: command) }
+    }
+
+    /// Shows the page's picture the app sent for the tab `id`, if the drag carries it.
+    func picture(_ id: Int, jpeg: String) {
+        guard tab?.id == id, let data = Data(base64Encoded: jpeg), let image = NSImage(data: data),
+            image.size.width > 0
+        else { return }
+        let height = min(
+            max(pictureWidth * image.size.height / image.size.width, pictureHeights.lowerBound),
+            pictureHeights.upperBound)
+        let size = CGSize(width: pictureWidth, height: height)
+        show(
+            NSImage(size: size, flipped: false) { rect in
+                let shape = NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12)
+                shape.addClip()
+                image.draw(in: rect)
+                NSColor.white.withAlphaComponent(0.25).setStroke()
+                shape.lineWidth = 1
+                shape.stroke()
+                return true
+            })
+    }
+
+    /// Shows `card` on the panel, sized to it, still centered under the pointer.
+    private func show(_ card: NSImage) {
+        let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        view.card = card
+        panel.setFrame(
+            NSRect(
+                x: center.x - card.size.width / 2, y: center.y - card.size.height / 2,
+                width: card.size.width, height: card.size.height), display: true)
     }
 
     /// The card the drag shows out of the windows, like Arc's: the tab's icon over its title.

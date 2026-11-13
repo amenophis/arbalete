@@ -242,6 +242,10 @@ final class AppModel: ObservableObject {
                 still.disablesAnimations = true
                 withTransaction(still) { swipe = 0 }
             }
+        case "arbalete:picture":
+            if let picture = try? JSONDecoder().decode(TabPicture.self, from: detail) {
+                OutsideDrop.shared.picture(picture.tab, jpeg: picture.jpeg)
+            }
         case "arbalete:rename":
             renaming = try? JSONDecoder().decode(Int.self, from: detail)
         case "arbalete:new-space":
