@@ -261,6 +261,8 @@ extension AppModel {
         draggedTabs = draggedTab ? acting(on: item.id) : [item.id]
         // Like Arc's, the other windows take it at once: their sidebars, favorites and pages.
         for other in Self.all.allObjects where other !== self { _ = other.joinDrag() }
+        // Like Arc's, out of every window the drag opens a blank window (OutsideDrop.swift).
+        OutsideDrop.shared.start(from: self)
         return NSItemProvider(
             item: Data(String(item.id).utf8) as NSData, typeIdentifier: sidebarNode.identifier)
     }

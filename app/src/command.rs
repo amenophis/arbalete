@@ -290,6 +290,12 @@ pub enum Command {
     NewIncognitoWindow,
     /// Opens a blank window, on a Space of its own, like Arc's.
     NewBlankWindow,
+    /// Opens a blank window at `place` holding the tabs or splits dragged out of the windows,
+    /// like Arc's.
+    DropOutside {
+        tabs: Vec<NodeId>,
+        place: arbalete_core::store::Place,
+    },
     /// Acts in a Little Arbalete window, by its id, from its bar.
     Little(u32, LittleAction),
     /// Moves the page of the Little Arbalete window that has the keyboard into the displayed

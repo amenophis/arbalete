@@ -106,8 +106,13 @@ public func openWindow(
     }
 }
 
+/// The main windows that show, which a drag from the sidebar may reach.
+@MainActor func shownMainWindows() -> [NSWindow] {
+    mainWindows.values.map(\.window).filter { $0.isVisible && !$0.isMiniaturized }
+}
+
 /// The UUID of the display showing `screen`, which outlives reconnecting it, unlike its number.
-@MainActor private func uuid(of screen: NSScreen) -> String? {
+@MainActor func uuid(of screen: NSScreen) -> String? {
     guard
         let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
         let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue()
