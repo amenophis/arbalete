@@ -151,15 +151,22 @@ final class PageDrop {
         view.tint = NSColor(model.accent)
         view.show(nil)
         let left = sidebar?.maxX ?? 0
+        // A drag from another window's sidebar takes only this one's.
         panel.place(
             in: parent,
-            NSRect(
-                x: left, y: 0, width: max(0, content.bounds.width - left),
-                height: content.bounds.height))
+            model.joined
+                ? nil
+                : NSRect(
+                    x: left, y: 0, width: max(0, content.bounds.width - left),
+                    height: content.bounds.height))
         edgePanel.place(
             in: parent,
-            sidebar.map {
-                NSRect(x: $0.minX - leadingEdge, y: $0.minY, width: leadingEdge, height: $0.height)
+            sidebar.flatMap {
+                model.joined
+                    ? nil
+                    : NSRect(
+                        x: $0.minX - leadingEdge, y: $0.minY, width: leadingEdge,
+                        height: $0.height)
             })
         // A drag that ends anywhere else leaves the mouse's buttons up; a drop takes a moment
         // after they come up, which must still find the drag.

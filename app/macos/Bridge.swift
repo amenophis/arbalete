@@ -76,8 +76,20 @@ final class AppModel: ObservableObject {
     /// The node a drag in the sidebar carries, whether a tab, and where it would land
     /// (SidebarDrop.swift); once the drag ends, nowhere shows where it would land.
     @Published var dragged: Int? {
-        didSet { if dragged == nil { dropTarget = nil } }
+        didSet {
+            guard dragged == nil else { return }
+            dropTarget = nil
+            joined = false
+            if Self.sidebarDrag === self { Self.sidebarDrag = nil }
+        }
     }
+    /// The window whose sidebar a drag started from, which the other windows' sidebars take too,
+    /// like Arc's (joinDrag).
+    static weak var sidebarDrag: AppModel?
+    /// The drag came from another window's sidebar.
+    var joined = false
+    /// The tab a drop from another window shows here once it lands, like Arc's (showLanded).
+    var landing: Int?
     var draggedTab = false
     /// The tabs a drag carries, several when they were selected at once.
     var draggedTabs: [Int] = []

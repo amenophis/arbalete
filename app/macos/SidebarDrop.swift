@@ -140,6 +140,7 @@ extension AppModel {
 
     /// A row starts a drag: the node it carries, and whether it is a tab, which may split.
     func startDrag(_ item: Item) -> NSItemProvider {
+        Self.sidebarDrag = self
         dragged = item.id
         draggedItem = item
         if case .tab = item { draggedTab = true } else { draggedTab = false }
@@ -215,8 +216,35 @@ extension AppModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + edgeDelay, execute: wait)
     }
 
+    /// A drag from another window's sidebar reaches this one's, which carries it too, like Arc's:
+    /// whether this window carries a drag now. Nothing goes in or out of an incognito window.
+    func joinDrag() -> Bool {
+        guard dragged == nil else { return true }
+        guard let source = Self.sidebarDrag, source !== self, let item = source.draggedItem,
+            source.dragged != nil, source.state?.incognito == state?.incognito
+        else { return false }
+        draggedItem = item
+        draggedTab = source.draggedTab
+        draggedTabs = source.draggedTabs
+        joined = true
+        dragged = source.dragged
+        return true
+    }
+
+    /// Once a drop from another window lands, this window shows the tab it carried, like Arc's.
+    func showLanded() {
+        guard let landing else { return }
+        self.landing = nil
+        run("select", landing)
+    }
+
     /// The drag ends: what it carried, and where it landed, if anywhere.
     func endDrag() -> (Int, DropTarget)? {
+        // A folder from another window lands without showing a tab.
+        landing = nil
+        if joined, let item = draggedItem {
+            if case .folder = item {} else { landing = item.tabs.first?.id }
+        }
         edge(nil)
         splitWait?.cancel()
         splitWait = nil
@@ -276,6 +304,7 @@ struct TailDrop: DropDelegate {
     let width: CGFloat
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard model.joinDrag() else { return DropProposal(operation: .forbidden) }
         let x = info.location.x
         model.edge(x <= edgeBand ? true : x >= width - edgeBand ? false : nil)
         // Without today's tabs, the line shows under New Tab.
@@ -294,6 +323,7 @@ struct TailDrop: DropDelegate {
         model.marked = []
         _ = model.endDrag()
         ids.enumerated().forEach { model.move($1, to: page.roots.today, page.today.count + $0) }
+        model.showLanded()
         return true
     }
 }
@@ -348,7 +378,7 @@ struct SpaceIconDrop: DropDelegate {
     let space: Int
 
     func dropEntered(info: DropInfo) {
-        guard model.dragged != nil else { return }
+        guard model.joinDrag() else { return }
         model.spaceWait?.cancel()
         let go = DispatchWorkItem { [model, space] in
             if model.dragged != nil { model.slide(to: space) }
@@ -378,6 +408,7 @@ struct SectionDrop: DropDelegate {
     let shown: DropTarget?
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard model.joinDrag() else { return DropProposal(operation: .forbidden) }
         model.hover(shown)
         return DropProposal(operation: .move)
     }
@@ -390,6 +421,7 @@ struct SectionDrop: DropDelegate {
         model.marked = []
         _ = model.endDrag()
         ids.enumerated().forEach { model.move($1, to: parent, index + $0) }
+        model.showLanded()
         return true
     }
 }
@@ -404,6 +436,7 @@ private struct RowDrop: DropDelegate {
     let place: (Int, Int) -> Void
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard model.joinDrag() else { return DropProposal(operation: .forbidden) }
         // The row is inset from the sidebar's edges.
         let band = edgeBand - Measure.inset
         let x = info.location.x
@@ -443,6 +476,7 @@ private struct RowDrop: DropDelegate {
                 model.split(id, onto: tabs[min(index, tabs.count) - 1].id)
             }
         }
+        model.showLanded()
         return true
     }
 
@@ -578,7 +612,8 @@ struct FavoritesTarget: NSViewRepresentable {
 
         /// Like Arc's, the favorites take tabs and splits, not folders.
         private func takes(_ sender: any NSDraggingInfo) -> Bool {
-            guard let id = carried(sender), let item = model?.item(id) else { return false }
+            guard model?.joinDrag() == true, let id = carried(sender), let item = model?.item(id)
+            else { return false }
             if case .folder = item { return false }
             return true
         }

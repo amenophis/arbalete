@@ -787,6 +787,7 @@ struct Favorites: View {
         _ = model.endDrag()
         guard let slot else { return false }
         model.move(dragged, to: page.roots.favorites, slot)
+        model.showLanded()
         return true
     }
 }
