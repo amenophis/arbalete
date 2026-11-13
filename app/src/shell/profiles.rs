@@ -113,10 +113,10 @@ pub(super) fn create_profile(name: &str, spaces: &[SpaceId]) {
     }
 }
 
-/// Creates a Space in the displayed Space's profile and shows it, with `tab` moved into it and
-/// selected. Like a rename, a blank title from the UI is ignored, and like a selection, an unknown
-/// tab.
-pub(super) fn create_space(title: &str, emoji: &str, color: Color, tab: Option<NodeId>) {
+/// Creates a Space in the displayed Space's profile and shows it, with `tabs`, or folders, moved
+/// into it, the first tab selected. Like a rename, a blank title from the UI is ignored, and like a selection,
+/// unknown tabs.
+pub(super) fn create_space(title: &str, emoji: &str, color: Color, tabs: &[NodeId]) {
     let created = update_sidebar(|sidebar| {
         let displayed = sidebar.displayed();
         let (profile, current) = (displayed.profile, displayed.id);
@@ -127,11 +127,12 @@ pub(super) fn create_space(title: &str, emoji: &str, color: Color, tab: Option<N
         }
         sidebar.set_space_emoji(space, emoji)?;
         sidebar.set_space_theme(space, color.into())?;
-        // A tab moved there is selected; a folder moved there is not a tab to select.
-        if let Some(tab) = tab
-            && sidebar.move_to_space(tab, space).is_ok()
-        {
-            let _ = sidebar.select(space, tab);
+        // Like Arc's, pinned tabs stay pinned there. The first tab moved is selected; a folder
+        // is not a tab to select.
+        if let Ok(moved) = sidebar.move_all_to_space(tabs, space) {
+            let _ = moved
+                .into_iter()
+                .any(|id| sidebar.select(space, id).is_ok());
         }
         Ok::<_, arbalete_core::sidebar::Error>(())
     });

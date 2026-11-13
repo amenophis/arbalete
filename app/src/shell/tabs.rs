@@ -85,7 +85,7 @@ pub(super) fn open_in_new_space(url: &str) {
         let space = sidebar.displayed().id;
         sidebar.open_tab(space, url).expect("the displayed Space")
     });
-    ask("arbalete:new-space", &json!(tab));
+    ask("arbalete:new-space", &json!([tab]));
 }
 
 /// Shows a tab, with its Space; a favorite is shown in the displayed Space.

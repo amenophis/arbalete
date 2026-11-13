@@ -388,10 +388,10 @@ fn run_command(command: Command) {
                 title,
                 emoji,
                 color,
-                tab,
+                tabs,
             },
             _,
-        ) => create_space(&title, &emoji, color, tab),
+        ) => create_space(&title, &emoji, color, &tabs),
         // Like a profile, an unknown Space or a blank title from the UI is ignored.
         (Command::RenameSpace(id, title), _) => {
             let _ = update_sidebar(|sidebar| sidebar.rename_space(id, &title));

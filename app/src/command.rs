@@ -543,12 +543,13 @@ pub enum Command {
     NextSpace,
     PreviousSpace,
     /// Creates a Space to fill in, in the displayed Space's profile, and displays it, an empty
-    /// emoji for none, moving a tab into it if given: only renaming it keeps it past a quit.
+    /// emoji for none, moving tabs into it if given: only renaming it keeps it past a quit.
     CreateSpace {
         title: String,
         emoji: String,
         color: Color,
-        tab: Option<NodeId>,
+        #[serde(default)]
+        tabs: Vec<NodeId>,
     },
     RenameSpace(SpaceId, String),
     /// Sets a Space's emoji, or removes it when empty.
@@ -792,7 +793,7 @@ mod tests {
         );
         assert!(matches!(
             parse(r#"{"name":"create-space","args":{"title":"Work","emoji":"","color":"purple"}}"#),
-            Some(Command::CreateSpace { tab: None, .. })
+            Some(Command::CreateSpace { tabs, .. }) if tabs.is_empty()
         ));
     }
 

@@ -276,7 +276,7 @@ final class AppModel: ObservableObject {
         case "arbalete:rename":
             renaming = try? JSONDecoder().decode(Int.self, from: detail)
         case "arbalete:new-space":
-            newSpace(moving: try? JSONDecoder().decode(Int.self, from: detail))
+            newSpace(moving: (try? JSONDecoder().decode([Int].self, from: detail)) ?? [])
         case "arbalete:edit-space":
             editingSpace = try? JSONDecoder().decode(SpaceEdit.self, from: detail)
         case "arbalete:downloads":
