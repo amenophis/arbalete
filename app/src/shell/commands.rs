@@ -335,6 +335,26 @@ fn run_command(command: Command) {
                 select_tab(tab);
             }
         }
+        (Command::DropLinkBeside { url, tab, before }, _) => {
+            let web = url.starts_with("https://") || url.starts_with("http://");
+            let split = web.then(|| {
+                update_sidebar(|sidebar| {
+                    // A tab after the target's row, which joins it in a split.
+                    let (parent, index) = sidebar
+                        .place_of(sidebar.row_of(tab))
+                        .ok_or(Error::UnknownNode)?;
+                    let new = sidebar.add_tab_at(parent, index + 1, &url, &url)?;
+                    sidebar.split_beside(new, tab, before).inspect_err(|_| {
+                        let _ = sidebar.remove(new);
+                    })
+                })
+            });
+            match split {
+                Some(Ok(_)) => show_selected(),
+                Some(Err(Error::SplitFull)) => tell_split_full(),
+                _ => {}
+            }
+        }
         (Command::DropOutside { tabs, place }, _) => drop_outside(&tabs, place),
         (Command::Little(id, action), _) => little_action(id, action),
         (Command::OpenLittleInSpace, _) => {
