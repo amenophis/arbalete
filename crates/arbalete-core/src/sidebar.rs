@@ -2007,12 +2007,30 @@ impl Sidebar {
 
     /// Removes the rows after `tab`'s among its parent's, as `clear_today` removes them.
     pub fn remove_below(&mut self, tab: NodeId) -> Result<Vec<Tab>, Error> {
+        let (_, below) = self.rows_around(tab)?;
+        self.remove_rows(&below)
+    }
+
+    /// Removes the rows before `tab`'s among its parent's, as `clear_today` removes them.
+    pub fn remove_above(&mut self, tab: NodeId) -> Result<Vec<Tab>, Error> {
+        let (above, _) = self.rows_around(tab)?;
+        self.remove_rows(&above)
+    }
+
+    /// Removes every row but `tab`'s among its parent's, as `clear_today` removes them.
+    pub fn remove_others(&mut self, tab: NodeId) -> Result<Vec<Tab>, Error> {
+        let (above, below) = self.rows_around(tab)?;
+        self.remove_rows(&[above, below].concat())
+    }
+
+    /// The rows before `tab`'s among its parent's, and those after it.
+    fn rows_around(&self, tab: NodeId) -> Result<(Vec<NodeId>, Vec<NodeId>), Error> {
         self.check_tab(tab)?;
         let row = self.row_of(tab);
         let siblings = &self.nodes[&self.movable(row)?].children;
         let index = siblings.iter().position(|&id| id == row);
-        let rows = siblings[index.expect("a child of its parent") + 1..].to_vec();
-        self.remove_rows(&rows)
+        let (above, below) = siblings.split_at(index.expect("a child of its parent"));
+        Ok((above.to_vec(), below[1..].to_vec()))
     }
 
     /// Removes a split with its tabs, as `clear_today` removes rows.
@@ -2512,6 +2530,33 @@ mod tests {
         assert!(sidebar.node(b).is_none());
         assert_eq!(sidebar.remove_below(a).unwrap(), []);
         assert_eq!(sidebar.remove_below(folder), Err(Error::UnknownNode));
+    }
+
+    #[test]
+    fn removes_the_rows_above_a_tab_or_around_it_and_returns_their_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_folder(home.today, "Above").unwrap();
+        sidebar.add_tab(folder, "https://a.test/", "A").unwrap();
+        let b = sidebar.open_tab(home.id, "https://b.test/").unwrap();
+        let c = sidebar.open_tab(home.id, "https://c.test/").unwrap();
+        let d = sidebar.open_tab(home.id, "https://d.test/").unwrap();
+        let urls = |removed: Vec<Tab>| removed.into_iter().map(|tab| tab.url).collect::<Vec<_>>();
+        assert_eq!(
+            urls(sidebar.remove_above(c).unwrap()),
+            ["https://a.test/", "https://b.test/"]
+        );
+        assert_eq!(children(&sidebar, home.today), [c, d]);
+        assert_eq!(sidebar.remove_above(c).unwrap(), []);
+        let e = sidebar.open_tab(home.id, "https://e.test/").unwrap();
+        assert_eq!(
+            urls(sidebar.remove_others(d).unwrap()),
+            ["https://c.test/", "https://e.test/"]
+        );
+        assert_eq!(children(&sidebar, home.today), [d]);
+        assert!(sidebar.node(b).is_none() && sidebar.node(e).is_none());
+        assert_eq!(sidebar.remove_others(d).unwrap(), []);
+        assert_eq!(sidebar.remove_others(folder), Err(Error::UnknownNode));
     }
 
     #[test]
