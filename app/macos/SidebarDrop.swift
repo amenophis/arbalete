@@ -15,6 +15,119 @@ extension NSPasteboard.PasteboardType {
 
 let sidebarNode = UTType(exportedAs: NSPasteboard.PasteboardType.sidebarNode.rawValue)
 
+/// Whether the user chose not to be asked again before tabs move to another profile's Space.
+private let otherProfileMoveAsked = "otherProfileMoveNotAsked"
+
+/// Like Arc's, the question before a drop moves tabs into a Space of another profile, whose
+/// sites they may be signed out of: unless the user chose not to be asked again. Measured on
+/// Arc's.
+private struct MoveToProfileDialog: View {
+    let space: String
+    let several: Bool
+    let close: () -> Void
+    let move: () -> Void
+    private let _again = State(initialValue: false)
+
+    var body: some View {
+        let tabs = several ? "tabs" : "tab"
+        DialogCard {
+            MovingProfileIcon().padding(.bottom, 20)
+            (Text("Move \(tabs) to ") + Text(space).fontWeight(.heavy) + Text("?"))
+                .font(.system(size: 19, weight: .semibold))
+            Group {
+                Text(space).fontWeight(.bold).foregroundColor(.white.opacity(0.85))
+                    + Text(
+                        " uses another profile, so the \(tabs) may be signed out of "
+                            + "\(several ? "their" : "its") sites or lose what was in progress.")
+                Text("This can’t be undone.").padding(.top, 14)
+            }
+            .font(.system(size: 14))
+            .foregroundStyle(.white.opacity(0.7))
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 12)
+            HStack(alignment: .bottom) {
+                DialogCheckbox(title: "Don’t ask again", on: _again.projectedValue)
+                    .padding(.bottom, 10)
+                DialogButtons(
+                    cancel: "Cancel", confirm: "Move it", enabled: true, back: close
+                ) {
+                    if _again.wrappedValue {
+                        UserDefaults.standard.set(true, forKey: otherProfileMoveAsked)
+                    }
+                    close()
+                    move()
+                }
+            }
+        }
+    }
+}
+
+/// Arc's profile face, moving: a smile in a lavender rim, in a dashed ring, with a light badge
+/// of two arrows.
+private struct MovingProfileIcon: View {
+    var body: some View {
+        let lavender = color("#6b68b8")
+        let ink = color("#cac8f0")
+        ZStack {
+            Circle()
+                .strokeBorder(.white.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                .frame(width: 62, height: 62)
+            Circle().fill(color("#2b2958"))
+                .overlay(Circle().strokeBorder(lavender, lineWidth: 2.5))
+                .frame(width: 55, height: 55)
+            HStack(spacing: 9) {
+                Capsule().fill(ink).frame(width: 4, height: 13)
+                Capsule().fill(ink).frame(width: 4, height: 13)
+            }
+            .offset(y: -6)
+            Path { path in
+                path.addArc(
+                    center: CGPoint(x: 11, y: 0), radius: 11, startAngle: .degrees(160),
+                    endAngle: .degrees(20), clockwise: true)
+            }
+            .stroke(ink, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            .frame(width: 22, height: 6)
+            .offset(y: 9)
+        }
+        .frame(width: 62, height: 62)
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.system(size: 8, weight: .heavy))
+                .foregroundStyle(color("#2b2958"))
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(color("#d3d3e6")))
+                .overlay(Circle().strokeBorder(color("#121828"), lineWidth: 1.5))
+                .offset(x: 2, y: 2)
+        }
+    }
+}
+
+/// A checkbox of the dialogs, like Arc's: a filled rounded square, then its title.
+private struct DialogCheckbox: View {
+    let title: String
+    @Binding var on: Bool
+
+    var body: some View {
+        Button {
+            on.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 4).fill(.white.opacity(on ? 0.3 : 0.15))
+                    .frame(width: 16, height: 16)
+                    .overlay {
+                        if on {
+                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                        }
+                    }
+                Text(title).font(.system(size: 14)).foregroundStyle(.white.opacity(0.7))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// Where a drag over the sidebar's rows would land.
 enum DropTarget: Equatable {
     /// Before or after a row, by its id.
@@ -141,6 +254,7 @@ extension AppModel {
     /// A row starts a drag: the node it carries, and whether it is a tab, which may split.
     func startDrag(_ item: Item) -> NSItemProvider {
         Self.sidebarDrag = self
+        dragProfile = displayedProfile
         dragged = item.id
         draggedItem = item
         if case .tab = item { draggedTab = true } else { draggedTab = false }
@@ -226,16 +340,39 @@ extension AppModel {
         draggedItem = item
         draggedTab = source.draggedTab
         draggedTabs = source.draggedTabs
+        dragProfile = source.dragProfile
         joined = true
         dragged = source.dragged
         return true
     }
 
-    /// Once a drop from another window lands, this window shows the tab it carried, like Arc's.
-    func showLanded() {
-        guard let landing else { return }
+    /// The displayed Space's profile.
+    private var displayedProfile: Int? {
+        state.flatMap { state in state.spaces.first { $0.id == state.space }?.profile }
+    }
+
+    /// A drop lands: `moves` puts what the drag carried in place, then a drop from another window
+    /// shows here the tab it carried, like Arc's. Like Arc's too, moving tabs into a Space of
+    /// another profile asks first, as their sites may sign them out; a copy, with Option, does
+    /// not, the tabs staying where they were.
+    func land(_ moves: @escaping () -> Void) {
+        let landing = self.landing
         self.landing = nil
-        run("select", landing)
+        let done = { [weak self] in
+            moves()
+            if let landing { self?.run("select", landing) }
+        }
+        guard let from = dragProfile, let state,
+            let space = state.spaces.first(where: { $0.id == state.space }),
+            space.profile != from, !NSEvent.modifierFlags.contains(.option)
+        else { return done() }
+        guard !UserDefaults.standard.bool(forKey: otherProfileMoveAsked) else { return done() }
+        let several = draggedTabs.count > 1 || (draggedItem?.tabs.count ?? 1) > 1
+        // A dialog over the window dropped into, like Arc's: AppKit refuses a modal alert while
+        // the drag finishes.
+        showDialog(over: host) { close in
+            MoveToProfileDialog(space: space.title, several: several, close: close, move: done)
+        }
     }
 
     /// The drag ends: what it carried, and where it landed, if anywhere.
@@ -322,8 +459,8 @@ struct TailDrop: DropDelegate {
         let ids = model.draggedTabs
         model.marked = []
         _ = model.endDrag()
-        ids.enumerated().forEach { model.move($1, to: page.roots.today, page.today.count + $0) }
-        model.showLanded()
+        let count = page.today.count
+        model.land { ids.enumerated().forEach { model.move($1, to: page.roots.today, count + $0) } }
         return true
     }
 }
@@ -420,8 +557,7 @@ struct SectionDrop: DropDelegate {
         let ids = model.draggedTabs
         model.marked = []
         _ = model.endDrag()
-        ids.enumerated().forEach { model.move($1, to: parent, index + $0) }
-        model.showLanded()
+        model.land { ids.enumerated().forEach { model.move($1, to: parent, index + $0) } }
         return true
     }
 }
@@ -453,30 +589,35 @@ private struct RowDrop: DropDelegate {
         guard let (id, target) = model.endDrag(), !ids.contains(item.id), id != item.id else {
             return false
         }
-        switch target {
-        // Several tabs keep their order: each goes before the row, or after it from the last.
-        case .before: ids.forEach { place($0, 0) }
-        case .after:
-            // After an open folder is before what it holds.
-            if case .folder(let folder, _, true, _) = item {
-                ids.enumerated().forEach { model.move($1, to: folder, $0) }
-            } else {
-                ids.reversed().forEach { place($0, 1) }
-            }
-        case .into(let folder):
-            if case .folder(_, _, _, let children) = item {
-                ids.enumerated().forEach { model.move($1, to: folder, children.count + $0) }
-            }
-        case .split(let tab, let leading): model.split(id, onto: tab, before: leading)
-        case .join(_, let index):
+        if case .join = target {
             guard case .split(_, let tabs) = item, !tabs.isEmpty else { return false }
-            if index == 0 {
-                model.split(id, onto: tabs[0].id, before: true)
-            } else {
-                model.split(id, onto: tabs[min(index, tabs.count) - 1].id)
+        }
+        let (item, place, model) = (item, place, model)
+        model.land {
+            switch target {
+            // Several tabs keep their order: each goes before the row, or after it from the last.
+            case .before: ids.forEach { place($0, 0) }
+            case .after:
+                // After an open folder is before what it holds.
+                if case .folder(let folder, _, true, _) = item {
+                    ids.enumerated().forEach { model.move($1, to: folder, $0) }
+                } else {
+                    ids.reversed().forEach { place($0, 1) }
+                }
+            case .into(let folder):
+                if case .folder(_, _, _, let children) = item {
+                    ids.enumerated().forEach { model.move($1, to: folder, children.count + $0) }
+                }
+            case .split(let tab, let leading): model.split(id, onto: tab, before: leading)
+            case .join(_, let index):
+                guard case .split(_, let tabs) = item, !tabs.isEmpty else { return }
+                if index == 0 {
+                    model.split(id, onto: tabs[0].id, before: true)
+                } else {
+                    model.split(id, onto: tabs[min(index, tabs.count) - 1].id)
+                }
             }
         }
-        model.showLanded()
         return true
     }
 

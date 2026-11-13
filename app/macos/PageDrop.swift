@@ -248,20 +248,23 @@ final class PageDrop {
     private func drop(_ target: PageDropTarget) {
         preview(nil)
         guard let dragged = model.dragged else { return }
-        // A full split's page replaced leaves first, the tab joining beside its neighbor.
-        if target.replace, stable.count >= 4,
-            let index = stable.firstIndex(where: { $0.tab == target.tab })
-        {
-            let next = index + 1 < stable.count
-            model.run("separate", target.tab)
-            model.split(dragged, onto: stable[next ? index + 1 : index - 1].tab, before: next)
-        } else {
-            model.split(dragged, onto: target.tab, before: target.before)
-            // Replaced, the tab leaves the split, as a row after it.
-            if target.replace { model.run("separate", target.tab) }
+        let (model, stable, alone) = (model, stable, panes.count < 2)
+        model.land {
+            // A full split's page replaced leaves first, the tab joining beside its neighbor.
+            if target.replace, stable.count >= 4,
+                let index = stable.firstIndex(where: { $0.tab == target.tab })
+            {
+                let next = index + 1 < stable.count
+                model.run("separate", target.tab)
+                model.split(dragged, onto: stable[next ? index + 1 : index - 1].tab, before: next)
+            } else {
+                model.split(dragged, onto: target.tab, before: target.before)
+                // Replaced, the tab leaves the split, as a row after it.
+                if target.replace { model.run("separate", target.tab) }
+            }
+            // A split made of a page shown alone lays its pages out as the drop asked.
+            if target.stacked, alone { model.run("flip-panes") }
         }
-        // A split made of a page shown alone lays its pages out as the drop asked.
-        if target.stacked, panes.count < 2 { model.run("flip-panes") }
         model.dragged = nil
         model.dropTarget = nil
     }

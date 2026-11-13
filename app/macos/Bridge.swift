@@ -88,8 +88,12 @@ final class AppModel: ObservableObject {
     static weak var sidebarDrag: AppModel?
     /// The drag came from another window's sidebar.
     var joined = false
-    /// The tab a drop from another window shows here once it lands, like Arc's (showLanded).
+    /// The tab a drop from another window shows here once it lands, like Arc's (land).
     var landing: Int?
+    /// The profile of the Space a drag started in, which a drop into another's asks about.
+    var dragProfile: Int?
+    /// The window it stands for, which asks it.
+    weak var host: NSWindow?
     var draggedTab = false
     /// The tabs a drag carries, several when they were selected at once.
     var draggedTabs: [Int] = []
@@ -650,6 +654,7 @@ final class NativeWindow {
     init(window: NSWindow, content: NSView, app: AppModel) {
         model = app
         self.window = window
+        app.host = window
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
