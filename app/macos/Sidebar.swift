@@ -1305,6 +1305,11 @@ struct TabRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
+                if hovered && tab.shareInstead == true {
+                    CloseButton(symbol: "rectangle.inset.filled.and.person.filled", help: "Share This Tab Instead") {
+                        model.run("share-this-tab", tab.id)
+                    }
+                }
                 if hovered || active {
                     // Like Arc's: a minus for an open pinned tab, selected or not, which closes
                     // it and stays, an x for the others, which removes a closed pinned tab.

@@ -67,6 +67,7 @@ pub(super) fn suspend_hidden_pages() {
             .iter()
             .filter(|(tab, live)| {
                 !live.capturing
+                    && !is_shared(**tab)
                     && tab_url(**tab)
                         .is_none_or(|url| !settings.awake_sites.iter().any(|s| s == site(&url)))
             })

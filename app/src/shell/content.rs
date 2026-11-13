@@ -636,9 +636,11 @@ wrap_display_handler! {
             change_favicon(self.profile, tab, source, browser.host());
         }
 
-        /// A page capturing is never suspended.
+        /// A page capturing is never suspended. A page sharing its screen shows the bar to end it.
         fn on_media_access_change(&self, browser: Option<&mut Browser>, has_video_access: i32, has_audio_access: i32) {
-            let Some(tab) = browser.and_then(|browser| page_tab(browser)) else { return };
+            let Some(browser) = browser else { return };
+            media_changed(browser);
+            let Some(tab) = page_tab(browser) else { return };
             PAGES.with_borrow_mut(|pages| {
                 if let Some(live) = pages.get_mut(&tab) {
                     live.capturing = has_video_access == 1 || has_audio_access == 1;

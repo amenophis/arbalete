@@ -224,13 +224,14 @@ pub(super) fn share_screen(id: u64, source: Option<String>, sound: bool) {
     });
     let Some(PermissionRequest {
         browser,
+        site,
         callback: PermissionCallback::Screen(callback, requested),
         ..
     }) = request
     else {
         return;
     };
-    let chosen = source.is_some_and(|source| screen_share::choose(&browser, &source));
+    let chosen = source.is_some_and(|source| screen_share::choose(&browser, &site, &source));
     let sound_off = if sound {
         0
     } else {
@@ -274,6 +275,15 @@ fn keep_decision(browser: &Browser, origin: &str, asks: &[&permissions::Capabili
     for setting in asks.iter().filter_map(|ask| ask.setting) {
         context.set_content_setting(Some(&origin), Some(&origin), setting, value);
     }
+}
+
+/// Whether the window shows the picker of what to share, which the sharing bar gives way to.
+pub(super) fn picker_shown() -> bool {
+    PERMISSION_REQUESTS.with_borrow(|requests| {
+        requests.iter().any(|request| {
+            matches!(request.callback, PermissionCallback::Screen(..)) && shows_request(request)
+        })
+    })
 }
 
 /// Whether the window shows a request's page: its tab's, shown alone or in a split; else, a page
