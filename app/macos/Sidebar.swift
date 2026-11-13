@@ -337,9 +337,10 @@ struct AddressRow: View {
             Button {
                 model.run("edit-url")
             } label: {
-                // Like Arc's, as another Space shows, its address slides in from the side it
-                // comes from, the last one gone at once.
-                let address = tab.map { domain($0.url) }
+                // Like Arc's, past the middle of a slide to another Space, its address slides in
+                // from the side it comes from, the last one gone at once.
+                let slid = model.slidTab()
+                let address = slid.tab.map { domain($0.url) }
                 ZStack(alignment: .leading) {
                     Group {
                         if let address {
@@ -354,11 +355,10 @@ struct AddressRow: View {
                     .id(address)
                     .transition(
                         .asymmetric(
-                            insertion: .offset(x: 18 * CGFloat(model.spaceStep))
-                                .combined(with: .opacity),
-                            removal: .opacity.animation(.easeOut(duration: 0.05))))
+                            insertion: .offset(x: 15 * CGFloat(slid.step)),
+                            removal: .opacity.animation(.easeOut(duration: 0.04))))
                 }
-                .animation(.easeOut(duration: 0.15), value: model.state?.space)
+                .animation(.easeOut(duration: 0.12), value: slid.space)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 14)
