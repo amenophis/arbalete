@@ -24,9 +24,12 @@ extension AppModel {
 /// The dialog shown, one at a time.
 @MainActor private var dialog: NSPanel?
 
-/// Shows a dialog over the window in front, which it dims, until it calls the function it is given.
-@MainActor func showDialog<Content: View>(_ content: (@escaping () -> Void) -> Content) {
-    var front = NSApp.keyWindow ?? NSApp.mainWindow
+/// Shows a dialog over `window`, or the window in front, which it dims, until it calls the
+/// function it is given.
+@MainActor func showDialog<Content: View>(
+    over window: NSWindow? = nil, _ content: (@escaping () -> Void) -> Content
+) {
+    var front = window ?? NSApp.keyWindow ?? NSApp.mainWindow
     while let parent = front?.parent { front = parent }
     guard dialog == nil, let window = front else { return }
     let panel = DialogPanel(
@@ -120,10 +123,19 @@ struct DialogButtons: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Text(title).font(.system(size: 14, weight: .medium))
-                Text(key).font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 6)
-                    .frame(height: 20)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.2)))
+                if key == "⏎" {
+                    // Like Arc's, Return's key is outlined, with its arrow.
+                    Image(systemName: "return").font(.system(size: 11, weight: .bold))
+                        .frame(width: 28, height: 20)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.15)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4).strokeBorder(.white.opacity(0.45)))
+                } else {
+                    Text(key).font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6)
+                        .frame(height: 20)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.2)))
+                }
             }
             .padding(.leading, 12)
             .padding(.trailing, 8)
