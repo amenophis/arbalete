@@ -714,22 +714,27 @@ private struct RowDrop: DropDelegate {
                 if case .folder(_, _, _, let children) = item {
                     ids.enumerated().forEach { model.move($1, to: folder, children.count + $0) }
                 }
-            case .split(let tab, let leading): model.split(id, onto: tab, before: leading)
+            // Several tabs join the split in their order, each after the one before.
+            case .split(let tab, let leading):
+                let joining = ids.filter { $0 != tab }
+                guard let first = joining.first else { return }
+                model.split(first, onto: tab, before: leading)
+                zip(joining, joining.dropFirst()).forEach { model.split($1, onto: $0) }
             case .join(_, let index):
                 guard case .split(_, let tabs) = item, !tabs.isEmpty else { return }
+                let joining = ids.filter { id in !tabs.contains { $0.id == id } }
+                guard let first = joining.first else { return }
                 if index == 0 {
                     model.split(first, onto: tabs[0].id, before: true)
                 } else {
                     model.split(first, onto: tabs[min(index, tabs.count) - 1].id)
                 }
-                let joining = ids.filter { id in !tabs.contains { $0.id == id } }
-                guard let first = joining.first else { return }
+                zip(joining, joining.dropFirst()).forEach { model.split($1, onto: $0) }
             }
         }
         return true
     }
 
-                zip(joining, joining.dropFirst()).forEach { model.split($1, onto: $0) }
     /// Like Arc's, measured: a band at the top inserts before; at the bottom, after a folder;
     /// elsewhere, into a folder, or beside a tab in a split once it waited (splitDelay).
     private func target(at point: CGPoint) -> DropTarget? {
@@ -757,11 +762,6 @@ private struct RowDrop: DropDelegate {
     }
 }
 
-/// Where a row dropped would go, as AppKit draws it: a thin line from a small ring.
-struct InsertionLine: View {
-    let tint: Color
-
-    var body: some View {
 /// A row lit as a drop lands into it, a folder or a section's row: rounded like a tab's.
 struct DropHighlight: View {
     let tint: Color
@@ -774,6 +774,11 @@ struct DropHighlight: View {
     }
 }
 
+/// Where a row dropped would go, as AppKit draws it: a thin line from a small ring.
+struct InsertionLine: View {
+    let tint: Color
+
+    var body: some View {
         HStack(spacing: 0) {
             Circle().strokeBorder(tint, lineWidth: 2).frame(width: 8, height: 8)
             Rectangle().fill(tint).frame(height: 2)
