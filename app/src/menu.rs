@@ -157,8 +157,8 @@ pub fn find(entries: Vec<Entry>, id: &str) -> Option<Action> {
     })
 }
 
-/// The menu of several tabs selected at once, like Arc's: their links, moving them, putting them
-/// in a new folder and closing them all.
+/// The menu of several tabs selected at once, like Arc's: their links, moving them, to a new Space
+/// too, putting them in a new folder and closing them all.
 pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
     let urls: Vec<&str> = ids
         .iter()
@@ -167,7 +167,7 @@ pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
             _ => None,
         })
         .collect();
-    let spaces = sidebar
+    let mut spaces: Vec<_> = sidebar
         .spaces()
         .iter()
         .map(|space| {
@@ -184,6 +184,15 @@ pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
             })
         })
         .collect();
+    // Like Arc's, a new Space takes them, its form filled in first.
+    spaces.extend([
+        Entry::Separator,
+        item(
+            "new-space",
+            "New Space…",
+            Action::Ask("arbalete:new-space", json!(ids)),
+        ),
+    ]);
     vec![
         item(
             "copy-links",
@@ -410,7 +419,7 @@ fn move_to(sidebar: &Sidebar, id: NodeId) -> Entry {
         item(
             "new-space",
             "New Space…",
-            Action::Ask("arbalete:new-space", json!(id)),
+            Action::Ask("arbalete:new-space", json!([id])),
         ),
     ]);
     Entry::Submenu("Move to".to_string(), spaces)
@@ -734,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_tabs_move_to_a_new_folder() {
+    fn selected_tabs_move_to_a_new_space_or_a_new_folder() {
         let mut sidebar = Sidebar::default();
         let home = sidebar.spaces()[0].id;
         let tabs =
@@ -747,10 +756,16 @@ mod tests {
                 "-",
                 "Move to ▸",
                 "  Home",
+                "  -",
+                "  New Space…",
                 "New Folder with 2 Items",
                 "-",
                 "Close 2 Tabs",
             ]
+        );
+        assert_eq!(
+            find(tabs_menu(&sidebar, &tabs), "new-space"),
+            Some(Action::Ask("arbalete:new-space", json!(tabs)))
         );
         assert_eq!(
             find(menu, "new-folder"),
@@ -863,7 +878,7 @@ mod tests {
         );
         assert_eq!(
             choose(&sidebar, tab, "new-space"),
-            Some(Action::Ask("arbalete:new-space", json!(tab)))
+            Some(Action::Ask("arbalete:new-space", json!([tab])))
         );
         assert_eq!(
             choose(&sidebar, tab, "close"),

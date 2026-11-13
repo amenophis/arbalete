@@ -1842,6 +1842,30 @@ impl Sidebar {
         Ok(())
     }
 
+    /// Moves tabs, with their splits, and folders, in the sidebar's order, to another Space, like
+    /// Arc's New Space… from a selection: a folder or a pinned tab to the end of its pinned tabs,
+    /// a "Today" tab to the end of its "Today" tabs. Returns what moved. Favorites stay where they
+    /// are.
+    pub fn move_all_to_space(
+        &mut self,
+        ids: &[NodeId],
+        space: SpaceId,
+    ) -> Result<Vec<NodeId>, Error> {
+        let pinned = self.space(space)?.pinned;
+        let rows = self.rows_of(ids);
+        for &(id, row) in &rows {
+            if self.space_of(row) == Some(space) {
+                continue;
+            }
+            let was_pinned = self.is_pinned(row);
+            self.move_to_space(id, space)?;
+            if was_pinned && self.is_tab(id) {
+                self.move_node(row, pinned, usize::MAX)?;
+            }
+        }
+        Ok(rows.into_iter().map(|(id, _)| id).collect())
+    }
+
     /// Puts tabs, with their splits, and folders in a new folder of their Space, in the sidebar's
     /// order, like Arc's "New Folder with N Items": the new folder takes the place of the first
     /// of them if it is pinned, else goes at the end of the pinned tabs. Favorites stay where
@@ -2596,6 +2620,30 @@ mod tests {
         assert_eq!(sidebar.displayed().selected, None);
         // Pinned, its tabs keep their url.
         assert!(sidebar.is_pinned(tab));
+    }
+
+    #[test]
+    fn moves_tabs_and_folders_to_a_space_keeping_pinned_tabs_pinned() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let work = sidebar.add_space("Work", home.profile).unwrap();
+        let today = sidebar.add_tab(home.today, "https://t.test/", "T").unwrap();
+        let folder = sidebar.add_folder(home.pinned, "Docs").unwrap();
+        let pinned = sidebar.add_tab(folder, "https://p.test/", "P").unwrap();
+        let left = sidebar.add_tab(home.today, "https://l.test/", "L").unwrap();
+        let docs = sidebar.add_folder(home.today, "Docs").unwrap();
+        let inside = sidebar.add_tab(docs, "https://i.test/", "I").unwrap();
+        // In the sidebar's order, whatever the selection's, a tab moving with its folder.
+        let moved = sidebar
+            .move_all_to_space(&[today, inside, docs, pinned], work)
+            .unwrap();
+        assert_eq!(moved, [pinned, today, docs]);
+        let work = sidebar.spaces()[1].clone();
+        assert_eq!(children(&sidebar, work.pinned), [pinned, docs]);
+        assert_eq!(children(&sidebar, work.today), [today]);
+        assert_eq!(children(&sidebar, docs), [inside]);
+        assert_eq!(children(&sidebar, home.today), [left]);
+        assert!(children(&sidebar, folder).is_empty());
     }
 
     #[test]

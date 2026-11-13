@@ -6,15 +6,15 @@ import AppKit
 import SwiftUI
 
 extension AppModel {
-    /// Creates a Space to fill in, with the tab `moving` moved into it.
-    func newSpace(moving tab: Int? = nil) {
+    /// Creates a Space to fill in, with the tabs `moving` moved into it.
+    func newSpace(moving tabs: [Int] = []) {
         guard let state else { return }
         // Like Arc's, the form shows in the sidebar, the library closed.
         if libraryShown { closeLibrary() }
         awaitingDraft = Set(state.spaces.map(\.id))
         let title = "Space \(state.spaces.count + 1)"
         var space: [String: Any] = ["title": title, "emoji": "", "color": "purple"]
-        if let tab { space["tab"] = tab }
+        if !tabs.isEmpty { space["tabs"] = tabs }
         run("create-space", space)
     }
 
