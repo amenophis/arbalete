@@ -792,14 +792,18 @@ struct Favorites: View {
         return min(count, row * columns + column + (past ? 1 : 0))
     }
 
-    /// Makes the node a drag carries a favorite at `slot`.
+    /// Makes the node a drag carries a favorite at `slot`, like Arc's: several tabs selected at
+    /// once each become one, in their order.
     private func dropFavorite(_ dragged: Int, at slot: Int?) -> Bool {
         model.favoriteSlot = nil
         model.favoritesTargeted = false
+        let ids = model.draggedTab && model.draggedTabs.contains(dragged)
+            ? model.draggedTabs : [dragged]
+        model.marked = []
         _ = model.endDrag()
         guard let slot else { return false }
         let (model, favorites) = (model, page.roots.favorites)
-        model.land { model.move(dragged, to: favorites, slot) }
+        model.land { ids.enumerated().forEach { model.move($1, to: favorites, slot + $0) } }
         return true
     }
 }

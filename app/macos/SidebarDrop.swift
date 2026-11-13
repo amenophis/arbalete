@@ -355,11 +355,11 @@ extension AppModel {
         state.flatMap { state in state.spaces.first { $0.id == state.space }?.profile }
     }
 
-    /// A drop lands: `moves` puts what the drag carried in place, then a drop from another window
-    /// shows here the tab it carried, like Arc's. Like Arc's too, moving tabs into a Space of
-    /// another profile asks first, as their sites may sign them out; a copy, with Option, does
-    /// not, the tabs staying where they were.
-    func land(_ moves: @escaping () -> Void) {
+    /// A drop lands, in the displayed Space or `target`: `moves` puts what the drag carried in
+    /// place, then a drop from another window shows here the tab it carried, like Arc's. Like
+    /// Arc's too, moving tabs into a Space of another profile asks first, as their sites may sign
+    /// them out; a copy, with Option, does not, the tabs staying where they were.
+    func land(into target: Int? = nil, _ moves: @escaping () -> Void) {
         let landing = self.landing
         self.landing = nil
         let done = { [weak self] in
@@ -367,7 +367,7 @@ extension AppModel {
             if let landing { self?.run("select", landing) }
         }
         guard let from = dragProfile, let state,
-            let space = state.spaces.first(where: { $0.id == state.space }),
+            let space = state.spaces.first(where: { $0.id == (target ?? state.space) }),
             space.profile != from, !NSEvent.modifierFlags.contains(.option)
         else { return done() }
         guard !UserDefaults.standard.bool(forKey: otherProfileMoveAsked) else { return done() }
@@ -513,7 +513,8 @@ final class DragShape {
 }
 
 /// A Space's icon under a drag: resting there a moment slides to that Space, whose tabs then
-/// take the drop. The icon itself takes none.
+/// take the drop; dropped on the icon, like Arc's, what the drag carries moves into that Space,
+/// several tabs selected at once together.
 struct SpaceIconDrop: DropDelegate {
     let model: AppModel
     let space: Int
@@ -528,14 +529,25 @@ struct SpaceIconDrop: DropDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: go)
     }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .forbidden) }
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: model.dragged == nil ? .forbidden : .move)
+    }
 
     func dropExited(info: DropInfo) {
         model.spaceWait?.cancel()
         model.spaceWait = nil
     }
 
-    func performDrop(info: DropInfo) -> Bool { false }
+    func performDrop(info: DropInfo) -> Bool {
+        dropExited(info: info)
+        guard let item = model.draggedItem else { return false }
+        let ids = model.draggedTab ? model.draggedTabs : [item.id]
+        model.marked = []
+        _ = model.endDrag()
+        let (model, space) = (model, space)
+        model.land(into: space) { ids.forEach { model.run("move-to-space", $0, space) } }
+        return true
+    }
 }
 
 /// A section's edge taking a drop, like the divider or New Tab: what the drag carries goes at
