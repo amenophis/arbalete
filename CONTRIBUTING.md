@@ -65,13 +65,11 @@ requests.
 
 ### Identity
 
-Commits are authored only by the project author:
+Each commit is authored by the person who wrote it, under their own name: outside contributions
+keep their author when merged.
 
-```text
-Jérémy LEHERPEUR <amenophis@leherpeur.net>
-```
-
-No other author or tool mention (no `Co-Authored-By`, no tool signature in the message).
+No AI or tool as an author or co-author: no `Co-Authored-By` line naming an AI assistant, and no
+tool signature such as "Generated with" in commits and pull requests.
 
 ### Format: Conventional Commits
 
