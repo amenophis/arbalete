@@ -24,6 +24,11 @@ struct PageDropTarget: Equatable {
 /// and SPLIT_GAP in app/src/shell.rs).
 private let cardMargin: CGFloat = 10
 private let splitGap: CGFloat = 10
+/// How far from a page's edges a link dragged over it, from a page or another app, offers to
+/// open beside it: a quarter of its width at most at either side, as at the top and the bottom.
+/// The page's middle half takes the drop itself.
+private let linkSide: CGFloat = 240
+private let linkBand: CGFloat = 80
 /// Like Arc's, the room beside the sidebar where a drag shows the previous Space, at its left,
 /// or the next one, at its right.
 private let leadingEdge: CGFloat = 80
@@ -35,11 +40,21 @@ final class PageDrop {
     private let parent: NSWindow
     private let model: AppModel
     private let view = DropView()
+    /// Where a link would open, drawn apart from the view taking the drop: it takes no drag, so
+    /// that it stays while the page's middle, which the page keeps, is crossed.
+    private let outline = DropView()
+    private let outlinePanel: Overlay
     private let panel: Overlay
     private let edge = EdgeView()
     private let edgePanel: Overlay
     private var watch: AnyCancellable?
     private var timer: Timer?
+    /// The web link a drag from a page or another app carries over the window, while it does.
+    private var link: String?
+    /// Watches for such a drag, and the drag pasteboard's count as the mouse's buttons last came
+    /// up: a drag since then changed it.
+    private var linkWatch: Timer?
+    private var idleCount = NSPasteboard(name: .drag).changeCount
     /// The sidebar, docked or floating, from the window's top left corner, if it shows.
     var sidebar: NSRect?
     /// The split's pages shown, from the card's top left corner.
@@ -51,6 +66,7 @@ final class PageDrop {
     var emptyPane: Pane? {
         didSet {
             view.room = emptyPane.map(frame)
+            outline.room = view.room
         }
     }
     /// The pages as they stood before an empty one opened among them for a drag, which the drag
@@ -61,11 +77,14 @@ final class PageDrop {
         self.parent = parent
         self.model = model
         panel = Overlay(view: view)
+        outlinePanel = Overlay(view: outline)
         edgePanel = Overlay(view: edge)
         edge.registerForDraggedTypes([.sidebarNode])
         edge.rested = { model.edge($0 ? true : nil) }
-        view.registerForDraggedTypes([.sidebarNode])
+        view.registerForDraggedTypes([.sidebarNode, .URL])
         view.locate = { [unowned self] point in target(at: point) }
+        view.morphs = { [unowned self] in link == nil }
+        view.draws = { [unowned self] in link == nil }
         view.drop = { [unowned self] target in drop(target) }
         view.shown = { [unowned self] target in preview(target) }
         view.card = { [unowned self] in cardImage() }
@@ -73,9 +92,86 @@ final class PageDrop {
         watch = model.$dragged.sink { [weak self] _ in
             DispatchQueue.main.async { self?.update() }
         }
+        // Also while AppKit tracks a drag.
+        let watch = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.watchLink() }
+        }
+        RunLoop.main.add(watch, forMode: .common)
+        linkWatch = watch
+    }
+
+    /// A web link dragged over the page from a page or another app offers to open beside it, as
+    /// a tab from the sidebar does, though Arc does not: near its edges only, where the drop's
+    /// view shows, leaving the rest of the page to the page itself, which may take a drop of its
+    /// own.
+    private func watchLink() {
+        let board = NSPasteboard(name: .drag)
+        guard NSEvent.pressedMouseButtons != 0 else {
+            idleCount = board.changeCount
+            if link != nil { endLink() }
+            return
+        }
+        guard model.dragged == nil, board.changeCount != idleCount, parent.isVisible,
+            let content = parent.contentView,
+            let url = board.readObjects(forClasses: [NSURL.self])?.first as? URL,
+            ["http", "https"].contains(url.scheme?.lowercased())
+        else {
+            if link != nil { endLink() }
+            return
+        }
+        link = url.absoluteString
+        let left = sidebar?.maxX ?? 0
+        let room = NSRect(
+            x: left, y: 0, width: max(0, content.bounds.width - left),
+            height: content.bounds.height)
+        let mouse = parent.mouseLocationOutsideOfEventStream
+        let point = NSPoint(x: mouse.x - left, y: content.bounds.height - mouse.y)
+        if view.bounds.size != room.size { view.frame.size = room.size }
+        let inside = NSRect(origin: .zero, size: room.size).contains(point)
+        if inside, target(at: point) != nil {
+            if !panel.isVisible {
+                view.tint = NSColor(model.accent)
+                panel.place(in: parent, room)
+            }
+            return
+        }
+        if panel.isVisible {
+            view.show(nil)
+            panel.place(in: parent, nil)
+        }
+        // Out of the page, the room it would take goes.
+        if !inside { preview(nil, leaving: true) }
+    }
+
+    /// Shows where a link would open, over the page, or nothing.
+    private func showOutline(_ target: PageDropTarget?) {
+        guard let target, let content = parent.contentView else {
+            outline.show(nil)
+            outlinePanel.place(in: parent, nil)
+            return
+        }
+        let left = sidebar?.maxX ?? 0
+        outline.tint = NSColor(model.accent)
+        outline.show(target)
+        outlinePanel.place(
+            in: parent,
+            NSRect(
+                x: left, y: 0, width: max(0, content.bounds.width - left),
+                height: content.bounds.height),
+            raise: false)
+    }
+
+    /// The link's drag is over.
+    private func endLink() {
+        link = nil
+        view.show(nil)
+        preview(nil)
+        if model.dragged == nil { panel.place(in: parent, nil) }
     }
 
     func close() {
+        linkWatch?.invalidate()
+        outlinePanel.close()
         timer?.invalidate()
         panel.close()
         edgePanel.close()
@@ -90,7 +186,12 @@ final class PageDrop {
     }
 
     /// Over a split, like Arc's, an empty page opens among its pages where the tab would go.
-    private func preview(_ target: PageDropTarget?) {
+    private func preview(_ target: PageDropTarget?, leaving: Bool = false) {
+        // A link crossing the page's middle, which the page keeps, from one edge to the other:
+        // the room it would take stays, rather than the page jumping back and forth.
+        if target == nil, link != nil, !leaving { return }
+        // A link's outline, which stays meanwhile too.
+        if link != nil || target == nil { showOutline(target) }
         let page: String
         if let target, stable.count < 2 {
             page = command("preview-drop", [target.before, target.stacked])
@@ -181,10 +282,12 @@ final class PageDrop {
 
     /// Where a tab dropped at `point`, from the view's top left corner, would go.
     private func target(at point: NSPoint) -> PageDropTarget? {
-        // Just beside the docked sidebar, the next Space shows.
+        // Just beside the docked sidebar, the next Space shows, for a tab.
+        let linking = link != nil && model.dragged == nil
         let beside = sidebar != nil && point.x < trailingEdge
-        model.edge(beside ? false : nil)
-        guard !beside, model.draggedTab, let dragged = model.dragged else { return nil }
+        if !linking { model.edge(beside ? false : nil) }
+        guard !beside, linking || model.draggedTab else { return nil }
+        let dragged = model.dragged ?? -1
         let panes = stable
         if panes.count > 1 {
             guard !panes.contains(where: { $0.tab == dragged }) else { return nil }
@@ -196,6 +299,14 @@ final class PageDrop {
                 // after it, which between two pages is the same place, and its middle replaces it.
                 let share = stacked
                     ? (point.y - frame.minY) / frame.height : (point.x - frame.minX) / frame.width
+                // A link, near the page's edges only: elsewhere, the page takes it.
+                if linking {
+                    guard panes.count < 4, share <= 0.25 || share >= 0.75 else { return nil }
+                    let before = share <= 0.25
+                    return PageDropTarget(
+                        tab: panes[index].tab, before: before, stacked: stacked, preview: .zero,
+                        index: index + (before ? 0 : 1))
+                }
                 if share > 0.25 && share < 0.75 {
                     return PageDropTarget(
                         tab: panes[index].tab, before: true, stacked: stacked, preview: frame,
@@ -219,8 +330,8 @@ final class PageDrop {
         let room =
             stableCard?.offsetBy(dx: -(sidebar?.maxX ?? 0), dy: 0)
             ?? view.bounds.insetBy(dx: cardMargin, dy: cardMargin)
-        let band = min(room.height / 3, 50)
-        let side = room.width * 0.45
+        let band = min(room.height / 3, linking ? linkBand : 50)
+        let side = linking ? min(linkSide, room.width * 0.25) : room.width * 0.45
         let (top, bottom) = (point.y < room.minY + band, point.y > room.maxY - band)
         let (leading, trailing) = (point.x < room.minX + side, point.x > room.maxX - side)
         guard top || bottom || leading || trailing else { return nil }
@@ -239,7 +350,13 @@ final class PageDrop {
     }
 
     private func drop(_ target: PageDropTarget) {
-        preview(nil)
+        preview(nil, leaving: true)
+        if let link, model.dragged == nil {
+            model.run("drop-link-beside", ["url": link, "tab": target.tab, "before": target.before])
+            if target.stacked, panes.count < 2 { model.run("flip-panes") }
+            endLink()
+            return
+        }
         guard let dragged = model.dragged else { return }
         let (model, stable, alone) = (model, stable, panes.count < 2)
         model.land {
@@ -289,6 +406,10 @@ private final class DropView: NSView {
     var shown: (PageDropTarget?) -> Void = { _ in }
     /// What the drag shows over the page.
     var card: () -> NSImage = { NSImage() }
+    /// Whether the drag turns into the card over the page: a tab's, not a link's.
+    var morphs: () -> Bool = { true }
+    /// Whether it draws where the drag would go: not for a link, whose outline is drawn apart.
+    var draws: () -> Bool = { true }
     var tint = NSColor.controlAccentColor
     /// Where the empty page the app opened for the drag stands, over a split.
     var room: NSRect? { didSet { needsDisplay = true } }
@@ -312,7 +433,7 @@ private final class DropView: NSView {
         show(locate(convert(sender.draggingLocation, from: nil)))
         // Like Arc's, over the page the drag turns into a card, following the pointer.
         if target != nil {
-            shape.morph(sender, in: self, size: cardSize, image: card())
+            if morphs() { shape.morph(sender, in: self, size: cardSize, image: card()) }
         } else {
             shape.restore(sender, in: self)
         }
@@ -335,7 +456,7 @@ private final class DropView: NSView {
     /// Like Arc's, the room the tab would take shows as an empty page, outlined; a page it would
     /// replace dims under it.
     override func draw(_ dirtyRect: NSRect) {
-        guard let target else { return }
+        guard let target, draws() else { return }
         // A page it would replace takes an outline in the theme's color, like Arc's.
         if target.replace {
             let page = NSBezierPath(

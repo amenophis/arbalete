@@ -297,6 +297,13 @@ pub enum Command {
         parent: NodeId,
         index: usize,
     },
+    /// Opens a link dropped on the page beside the tab `tab` in a split, before it with
+    /// `before`, as a tab from the sidebar dropped there does.
+    DropLinkBeside {
+        url: String,
+        tab: NodeId,
+        before: bool,
+    },
     /// Opens a blank window at `place` holding the tabs or splits dragged out of the windows,
     /// like Arc's.
     DropOutside {
