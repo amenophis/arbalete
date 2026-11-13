@@ -337,15 +337,24 @@ struct AddressRow: View {
             Button {
                 model.run("edit-url")
             } label: {
-                Group {
-                    if let tab {
-                        Text(domain(tab.url))
-                    } else {
-                        // Like Arc's, without a tab it offers the Command Bar, which a click opens.
-                        Label("Search or Enter URL…", systemImage: "magnifyingglass")
-                            .foregroundStyle(.secondary)
+                // Like Arc's (its FeatheredTransitioningLabel), a new address sweeps in over the
+                // last one behind a soft edge, as a Space or a tab shows.
+                let address = tab.map { domain($0.url) }
+                ZStack(alignment: .leading) {
+                    Group {
+                        if let address {
+                            Text(address)
+                        } else {
+                            // Like Arc's, without a tab it offers the Command Bar, which a click
+                            // opens.
+                            Label("Search or Enter URL…", systemImage: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .id(address)
+                    .transition(.feathered)
                 }
+                .animation(.easeOut(duration: 0.25), value: address)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 14)
@@ -380,6 +389,51 @@ struct AddressRow: View {
         // 46 points from the window's top, like Arc's.
         .padding(.top, 46 - windowButtonsCenter - 20)
         .padding(.bottom, 7)
+    }
+}
+
+/// A text sweeping in, or out, behind a soft edge going from its leading edge to its trailing
+/// one, like Arc's FeatheredTransitioningLabel; coming in, it slides in from a little further.
+private struct Feathered: ViewModifier, Animatable {
+    /// How far the edge has gone, from 0 to 1.
+    var progress: Double
+    let leaving: Bool
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    /// How wide the soft edge is, and how far further a text comes in from, in points.
+    private let feather: CGFloat = 24
+    private let slide: CGFloat = 10
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: leaving ? 0 : slide * (1 - progress))
+            .mask {
+                GeometryReader { geometry in
+                    let width = max(1, geometry.size.width)
+                    let edge = CGFloat(leaving ? 1 - progress : progress) * (width + feather)
+                    LinearGradient(
+                        colors: leaving ? [.clear, .black] : [.black, .clear],
+                        startPoint: UnitPoint(x: (edge - feather) / width, y: 0.5),
+                        endPoint: UnitPoint(x: edge / width, y: 0.5))
+                }
+            }
+    }
+}
+
+extension AnyTransition {
+    /// A text sweeping in and out behind a soft edge (Feathered).
+    static var feathered: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(
+                active: Feathered(progress: 0, leaving: false),
+                identity: Feathered(progress: 1, leaving: false)),
+            removal: .modifier(
+                active: Feathered(progress: 0, leaving: true),
+                identity: Feathered(progress: 1, leaving: true)))
     }
 }
 
