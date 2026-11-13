@@ -198,10 +198,16 @@ private struct PagingTint: View, Animatable {
         let at = min(max(position, 0), Double(last))
         let first = Int(at.rounded(.down))
         let share = at - Double(first)
-        let theme = themes.indices.contains(first) ? themes[first] : nil
-        Tint(theme: theme, active: active).opacity(1 - share)
+        let dark = systemDark()
+        let look = TintLook(
+            themes.indices.contains(first) ? themes[first] : nil, active: active,
+            systemIsDark: dark)
         if share > 0, first < last {
-            Tint(theme: themes[first + 1], active: active).opacity(share)
+            look.blended(
+                with: TintLook(themes[first + 1], active: active, systemIsDark: dark), share
+            ).view
+        } else {
+            look.view
         }
     }
 }

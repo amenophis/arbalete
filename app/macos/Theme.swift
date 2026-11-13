@@ -124,49 +124,104 @@ struct Tint: View {
     var systemIsDark = systemDark()
 
     var body: some View {
-        if let theme, !theme.colors.isEmpty {
+        TintLook(theme, active: active, systemIsDark: systemIsDark).view
+    }
+
+    /// A theme's colors alone, as the window shows them.
+    static func colors(_ colors: [String]) -> some View {
+        TintLook(
+            Theme(colors: colors, mode: "auto", intensity: 1, noise: 0), active: true,
+            systemIsDark: false
+        ).colors
+    }
+}
+
+/// What a Tint draws, as numbers, so that two themes' blend, like Arc's between Spaces, goes
+/// through the colors between theirs rather than a crossfade, which dims the window midway.
+struct TintLook {
+    /// The wash under the colors, and how opaque it is.
+    var wash: [Double]
+    var washOpacity: Double
+    /// The gradient's first and second colors, and the one rising from the bottom edge, as red,
+    /// green and blue from 0 to 1, with how much the latter shows.
+    var stops: [[Double]]
+    var rising: Double
+    /// How opaque the colors are, and the grain over them.
+    var opacity: Double
+    var grain: Double
+
+    init(_ theme: Theme?, active: Bool, systemIsDark: Bool) {
+        if let theme, let lead = theme.colors.first {
             let alpha = 0.2 + 0.55 * theme.intensity
             let under = min(alpha, 0.5)
-            ZStack {
-                systemIsDark
-                    ? Color.black.opacity(0.35 * under) : Color.white.opacity(under)
-                Self.colors(theme.colors)
-                    .drawingGroup(colorMode: .extendedLinear)
-                    .opacity(alpha)
-                if theme.noise > 0 {
-                    Image(nsImage: grain).resizable(resizingMode: .tile)
-                        .blendMode(.multiply)
-                        .opacity(theme.noise * 0.8 * (active ? 1 : 0.25))
-                }
-            }
+            wash = systemIsDark ? [0, 0, 0] : [1, 1, 1]
+            washOpacity = systemIsDark ? 0.35 * under : under
+            // One color is a gradient from it to itself; two, without the rising one.
+            let second = theme.colors.count > 1 ? theme.colors[1] : lead
+            stops = [lead, second, theme.colors.count > 2 ? theme.colors[2] : second].map(channels)
+            rising = theme.colors.count > 2 ? 1 : 0
+            opacity = alpha
+            grain = theme.noise * 0.8 * (active ? 1 : 0.25)
         } else {
             // Three quarters over the blur, measured, and whole once it falls flat.
-            color(systemIsDark ? defaultViolet : defaultLavender).opacity(active ? 0.75 : 1)
+            let flat = channels(systemIsDark ? defaultViolet : defaultLavender)
+            wash = flat
+            washOpacity = 0
+            stops = [flat, flat, flat]
+            rising = 0
+            opacity = active ? 0.75 : 1
+            grain = 0
         }
     }
 
-    @ViewBuilder static func colors(_ colors: [String]) -> some View {
-        if colors.count == 1 {
-            color(colors[0])
-        } else {
-            ZStack {
-                LinearGradient(
-                    stops: [
-                        .init(color: color(colors[0]), location: 0),
-                        .init(color: color(colors[1]), location: 0.75),
-                    ], startPoint: .topLeading, endPoint: .bottomTrailing)
-                if colors.count > 2 {
-                    LinearGradient(
-                        colors: [color(colors[2]).opacity(0), color(colors[2])], startPoint: .top,
-                        endPoint: .bottom)
-                }
+    /// `share` of the way from this look to `other`.
+    func blended(with other: TintLook, _ share: Double) -> TintLook {
+        func mix(_ a: Double, _ b: Double) -> Double { a + (b - a) * share }
+        func mix(_ a: [Double], _ b: [Double]) -> [Double] { zip(a, b).map { mix($0, $1) } }
+        var look = self
+        look.wash = mix(wash, other.wash)
+        look.washOpacity = mix(washOpacity, other.washOpacity)
+        look.stops = zip(stops, other.stops).map { mix($0, $1) }
+        look.rising = mix(rising, other.rising)
+        look.opacity = mix(opacity, other.opacity)
+        look.grain = mix(grain, other.grain)
+        return look
+    }
+
+    /// The colors alone, without the wash, the grain or their opacity.
+    var colors: some View {
+        ZStack {
+            LinearGradient(
+                stops: [
+                    .init(color: paint(stops[0]), location: 0),
+                    .init(color: paint(stops[1]), location: 0.75),
+                ], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(
+                colors: [paint(stops[2]).opacity(0), paint(stops[2])], startPoint: .top,
+                endPoint: .bottom
+            )
+            .opacity(rising)
+        }
+        .drawingGroup(colorMode: .extendedLinear)
+    }
+
+    private func paint(_ rgb: [Double]) -> Color { Color(red: rgb[0], green: rgb[1], blue: rgb[2]) }
+
+    var view: some View {
+        ZStack {
+            paint(wash).opacity(washOpacity)
+            colors.opacity(opacity)
+            if grain > 0 {
+                Image(nsImage: grainTile).resizable(resizingMode: .tile)
+                    .blendMode(.multiply)
+                    .opacity(grain)
             }
         }
     }
 }
 
 /// Grain of our own, a tile of gray noise, which multiplies the colors like Arc's.
-private let grain: NSImage = {
+private let grainTile: NSImage = {
     let size = 128
     var generator = SystemRandomNumberGenerator()
     let pixels = (0..<size * size).map { _ in UInt8.random(in: 180...255, using: &generator) }
