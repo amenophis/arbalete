@@ -11,6 +11,7 @@ now. Technical choices: [docs/decisions](docs/decisions); open work: GitHub issu
   [CONTRIBUTING.md](CONTRIBUTING.md): compatible dependency licenses, no proprietary material from Arc or other
   products, no secrets or personal data.
 - **English only**: code, comments, documentation, commit messages and pull requests.
-- **Commits**: follow [CONTRIBUTING.md](CONTRIBUTING.md#commits). Sole author `Jérémy LEHERPEUR <amenophis@leherpeur.net>`.
+- **Commits**: follow [CONTRIBUTING.md](CONTRIBUTING.md#commits). Commits are authored by the
+  git identity configured on the machine (`git config user.name` / `user.email`), never by an AI.
   **No mention of Claude or any tool** in commits and pull requests: no `Co-Authored-By`, no "Generated with" line.
 - Every commit builds and passes `mise run check`.
