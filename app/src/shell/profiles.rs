@@ -12,13 +12,24 @@ pub(super) fn profile_context(profile: ProfileId) -> Option<RequestContext> {
         ..Default::default()
     };
     let context = request_context_create_context(Some(&settings), None)?;
-    // Save Link As… and Save Image As… ask where from the profile's downloads folder, like Arc's,
-    // rather than the home folder.
+    set_download_preferences(&context, profile);
+    Some(context)
+}
+
+/// Makes Save Link As… and Save Image As… ask where from the profile's downloads folder, like
+/// Arc's, rather than the home folder, in every view of the profile: they share its preferences.
+pub(super) fn apply_download_folder(profile: ProfileId) {
+    let context = CONTEXTS.with_borrow(|contexts| contexts.get(&profile).cloned().flatten());
+    if let Some(context) = context {
+        set_download_preferences(&context, profile);
+    }
+}
+
+fn set_download_preferences(context: &RequestContext, profile: ProfileId) {
     let (downloads, _) = download_folder(Some(profile));
     for name in ["savefile.default_directory", "download.default_directory"] {
-        set_string_preference(&context, name, &downloads.to_string_lossy());
+        set_string_preference(context, name, &downloads.to_string_lossy());
     }
-    Some(context)
 }
 
 /// Sets a string preference of a profile's web data, telling when CEF turns it down.
@@ -293,6 +304,7 @@ wrap_request_context_handler! {
             }
             CONTEXTS.with_borrow_mut(|contexts| contexts.insert(self.profile, Some(context.clone())));
             name_web_data(self.profile);
+            apply_download_folder(self.profile);
             extensions::profile_ready(self.profile, &profile_dir(self.profile));
             in_each_window(show_selected);
         }

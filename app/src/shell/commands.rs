@@ -302,6 +302,7 @@ fn run_command(command: Command) {
         }
         (Command::SetDownloadLocation(id, location), _) => {
             if update_sidebar(|sidebar| sidebar.set_download_location(id, location)).is_ok() {
+                apply_download_folder(id);
                 send_settings();
             }
         }
