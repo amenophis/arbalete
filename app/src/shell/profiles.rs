@@ -20,12 +20,16 @@ pub(super) fn profile_context(profile: ProfileId) -> Option<RequestContext> {
             break;
         };
         value.set_string(Some(&CefString::from(downloads.to_string_lossy().as_ref())));
-        let mut error = CefString::default();
-        context.set_preference(
+        // Not empty: cef passes an empty string as none, which CEF turns down.
+        let mut error = CefString::from(" ");
+        let set = context.set_preference(
             Some(&CefString::from(name)),
             Some(&mut value),
             Some(&mut error),
-        );
+        ) == 1;
+        if !set {
+            eprintln!("cannot set {name}: {error}");
+        }
     }
     Some(context)
 }
