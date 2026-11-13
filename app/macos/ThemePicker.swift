@@ -156,8 +156,6 @@ final class ThemePickerModel: ObservableObject {
     @Published var page = 0
     /// Whether the colors are neighbors on the wheel rather than complements, like Arc's.
     @Published var analogous = false
-    /// The pad's lightness in automatic appearance, which a light or a dark one sets aside.
-    private var autoRange = (0.01, 0.97)
     let app: AppModel
     /// The theme to send next, at most one every frame's time while a dot or a knob moves.
     private var pending: Theme?
@@ -176,7 +174,6 @@ final class ThemePickerModel: ObservableObject {
         space = shown.space
         theme = shown.theme
         wheel = wheelFor(shown.theme.colors)
-        autoRange = wheel.range
         // Like Arc's, a light or a dark appearance opens on its half of the lightness, widened to
         // the leading color's.
         if theme.mode != "auto", let lead = theme.colors.first {
@@ -203,11 +200,15 @@ final class ThemePickerModel: ObservableObject {
     }
 
     /// Like Arc's, a light or a dark appearance keeps the pad to its half of the lightness, the
-    /// dots staying where they are and their colors following; the automatic one gives the pad
-    /// back the lightness it had, so that going back to an appearance gives its colors back.
+    /// dots staying where they are and their colors following; the automatic one keeps the
+    /// colors and the pad as they are.
     func setMode(_ mode: String) {
         guard mode != theme.mode else { return }
-        wheel.range = mode == "auto" ? autoRange : forcedRange(dark: mode == "dark")
+        if mode == "auto" {
+            change { $0.mode = mode }
+            return
+        }
+        wheel.range = forcedRange(dark: mode == "dark")
         let (wheel, points) = (wheel, points)
         change(
             {
@@ -217,8 +218,8 @@ final class ThemePickerModel: ObservableObject {
     }
 
     /// Changes the theme; dots `at` points give its colors, other new colors place their dots.
-    /// `rewheel` takes the new leading color's saturation, and centers the pad's lightness on it,
-    /// in a light or a dark appearance only once the automatic one comes back.
+    /// `rewheel` takes the new leading color's saturation, and centers the pad's lightness on it
+    /// in automatic appearance; a light or a dark one keeps its lightness.
     func change(
         _ update: (inout Theme) -> Void, rewheel: Bool = false, at points: [CGPoint]? = nil
     ) {
@@ -226,7 +227,6 @@ final class ThemePickerModel: ObservableObject {
         update(&theme)
         if rewheel {
             let around = wheelFor(theme.colors)
-            autoRange = around.range
             wheel.saturation = around.saturation
             if theme.mode == "auto" { wheel.range = around.range }
         }
