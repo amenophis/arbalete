@@ -43,6 +43,8 @@ rm -rf "$download"
 
 [tasks.cef-bundler]
 description = "Install bundle-cef-app, the CEF bundling tool"
+# Its build script downloads CEF to CEF_PATH when no CEF is there, as while `cef` replaces it.
+wait_for = ["cef"]
 run = """
 version=$(sed -n 's/^cef = "=\\(.*\\)"/\\1/p' Cargo.toml)
 cargo install --locked cef --version "=$version" --features build-util --bin bundle-cef-app
