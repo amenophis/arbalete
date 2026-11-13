@@ -290,6 +290,13 @@ pub enum Command {
     NewIncognitoWindow,
     /// Opens a blank window, on a Space of its own, like Arc's.
     NewBlankWindow,
+    /// Opens a link dragged onto the sidebar from a page or another app as a tab at `index` in
+    /// `parent`, and shows it, like Arc's.
+    DropLink {
+        url: String,
+        parent: NodeId,
+        index: usize,
+    },
     /// Opens a blank window at `place` holding the tabs or splits dragged out of the windows,
     /// like Arc's.
     DropOutside {

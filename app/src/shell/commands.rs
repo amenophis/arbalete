@@ -325,6 +325,16 @@ fn run_command(command: Command) {
         (Command::NewWindow, _) => new_window(),
         (Command::NewIncognitoWindow, _) => new_incognito_window(),
         (Command::NewBlankWindow, _) => new_blank_window(),
+        (Command::DropLink { url, parent, index }, _) => {
+            // Only a web page's link: a dropped file stays where it is.
+            let web = url.starts_with("https://") || url.starts_with("http://");
+            if let Some(tab) = web
+                .then(|| update_sidebar(|sidebar| sidebar.add_tab_at(parent, index, &url, &url)))
+                .and_then(Result::ok)
+            {
+                select_tab(tab);
+            }
+        }
         (Command::DropOutside { tabs, place }, _) => drop_outside(&tabs, place),
         (Command::Little(id, action), _) => little_action(id, action),
         (Command::OpenLittleInSpace, _) => {

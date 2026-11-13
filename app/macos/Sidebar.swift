@@ -486,7 +486,7 @@ struct SpaceSections: View {
                         // line showing under the last one.
                         DividerRow(model: model, clearable: !page.today.isEmpty, root: page.roots.pinned)
                             .onDrop(
-                                of: [sidebarNode],
+                                of: [sidebarNode, .url],
                                 delegate: SectionDrop(
                                     model: model, parent: page.roots.pinned, index: page.pinned.count,
                                     shown: lastShown(page.pinned).map { .after($0) }
@@ -494,7 +494,7 @@ struct SpaceSections: View {
                         // Dropped on, New Tab puts the node first among today's tabs.
                         NewTabRow(model: model, root: page.roots.today)
                             .onDrop(
-                                of: [sidebarNode],
+                                of: [sidebarNode, .url],
                                 delegate: SectionDrop(
                                     model: model, parent: page.roots.today, index: 0,
                                     shown: page.today.first.map { .before($0.id) }
@@ -507,7 +507,7 @@ struct SpaceSections: View {
                         WindowDragArea()
                             .frame(maxWidth: .infinity, minHeight: 8, maxHeight: .infinity)
                             .onDrop(
-                                of: [sidebarNode],
+                                of: [sidebarNode, .url],
                                 delegate: TailDrop(model: model, page: page, width: _width.wrappedValue))
                     }
                     .frame(minHeight: _height.wrappedValue, alignment: .top)
@@ -732,7 +732,8 @@ struct Favorites: View {
             let target = FavoritesTarget(
                 model: model, tile: CGSize(width: Measure.tile, height: Measure.tile),
                 hover: { model.favoritesTargeted = $0 != nil },
-                drop: { dropFavorite($0, at: 0) })
+                drop: { dropFavorite($0, at: 0) },
+                dropLink: { dropLink($0, at: 0) })
             if page.favoritesHint {
                 FavoritesHint(model: model, space: page.space)
                     .overlay(target.padding(.bottom, 8))
@@ -778,7 +779,8 @@ struct Favorites: View {
                             slot(at: $0, count: count, columns: columns, width: tileWidth)
                         }
                     },
-                    drop: { dropFavorite($0, at: model.favoriteSlot) }))
+                    drop: { dropFavorite($0, at: model.favoriteSlot) },
+                    dropLink: { dropLink($0, at: model.favoriteSlot) }))
             .padding(.bottom, 8)
         }
     }
@@ -790,6 +792,15 @@ struct Favorites: View {
         let row = max(0, Int(point.y / (Measure.tile + Measure.inset)))
         let past = point.x - CGFloat(column) * (width + Measure.inset) > width / 2
         return min(count, row * columns + column + (past ? 1 : 0))
+    }
+
+    /// Makes a link dragged in from a page or another app a favorite at `slot`, like Arc's.
+    private func dropLink(_ url: String, at slot: Int?) -> Bool {
+        model.favoriteSlot = nil
+        model.favoritesTargeted = false
+        guard let slot else { return false }
+        model.run("drop-link", ["url": url, "parent": page.roots.favorites, "index": slot])
+        return true
     }
 
     /// Makes the node a drag carries a favorite at `slot`, like Arc's: several tabs selected at
