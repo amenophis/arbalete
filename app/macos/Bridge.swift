@@ -390,14 +390,20 @@ final class AppModel: ObservableObject {
         draftSpace == nil && swipe < 0 && swipePastEdge ? min(1, -swipe / swipeThreshold) : 0
     }
 
-    /// The theme of the Space a swipe brings in, and how far it has come, from 0 to 1.
-    func swipeNeighbor() -> (Theme?, Double) {
-        guard swipe != 0, pageWidth > 0, let state,
-            let index = state.spaces.firstIndex(where: { $0.id == state.space })
-        else { return (nil, 0) }
-        let at = index + (swipe < 0 ? 1 : -1)
-        guard state.spaces.indices.contains(at) else { return (nil, 0) }
-        return (state.spaces[at].theme, min(1, abs(swipe) / pageWidth))
+    /// Where the sliding pages are, like Arc's (its PagingPosition): the themes of the Spaces
+    /// side by side, left to right, and where the sidebar's middle is among them, from 0 for the
+    /// first, as a swipe or a click carries the pages.
+    func pagingThemes() -> (themes: [Theme?], position: Double) {
+        guard let state else { return ([], 0) }
+        func theme(_ id: Int) -> Theme? { state.spaces.first { $0.id == id }?.theme }
+        if let carousel {
+            return (carousel.map { theme($0.id) }, carouselShare * Double(carousel.count - 1))
+        }
+        guard let index = state.spaces.firstIndex(where: { $0.id == state.space }) else {
+            return ([space?.theme], 0)
+        }
+        let shift = pageWidth > 0 ? pagerShift / pageWidth : 0
+        return (state.spaces.map(\.theme), Double(index) - shift)
     }
 
     /// The pages of the displayed Space's previous neighbor, itself and its next neighbor, if

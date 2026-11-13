@@ -124,16 +124,14 @@ struct BackdropTint: View {
         let theme = model.space?.theme
         let colored = !(theme?.colors.isEmpty ?? true)
         ZStack(alignment: .topLeading) {
-            // Like Arc's, a swipe between Spaces fades the window into the coming one's colors.
-            let (coming, share) = model.swipeNeighbor()
+            // Like Arc's, the window goes from one Space's colors to the next one's as the pages
+            // slide, whether a swipe or a click carries them.
+            let (themes, position) = model.pagingThemes()
             // Like Arc's, an incognito window is near black, measured, and opaque.
             if model.state?.incognito == true {
                 color("#0e0f13")
             } else {
-                Tint(theme: theme, active: model.active).opacity(1 - share)
-                if share > 0 {
-                    Tint(theme: coming, active: model.active).opacity(share)
-                }
+                PagingTint(themes: themes, position: position, active: model.active)
             }
             // Like Arc's, each of a split's pages loading shows a line above it, in the room over
             // the card or between the pages, where a grabber rests between stacked ones.
@@ -180,6 +178,31 @@ struct BackdropTint: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+/// The colors of the Spaces the pages slide between, at `position` among `themes`: animatable,
+/// so that the colors follow the pages frame by frame as they slide on their own.
+private struct PagingTint: View, Animatable {
+    let themes: [Theme?]
+    var position: Double
+    let active: Bool
+
+    var animatableData: Double {
+        get { position }
+        set { position = newValue }
+    }
+
+    var body: some View {
+        let last = max(0, themes.count - 1)
+        let at = min(max(position, 0), Double(last))
+        let first = Int(at.rounded(.down))
+        let share = at - Double(first)
+        let theme = themes.indices.contains(first) ? themes[first] : nil
+        Tint(theme: theme, active: active).opacity(1 - share)
+        if share > 0, first < last {
+            Tint(theme: themes[first + 1], active: active).opacity(share)
+        }
     }
 }
 
