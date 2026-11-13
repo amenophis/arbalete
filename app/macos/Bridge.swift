@@ -134,8 +134,10 @@ final class AppModel: ObservableObject {
     @Published var swipe: CGFloat = 0
     /// The width of a Space's page in the sidebar, which a swipe slides by.
     var pageWidth: CGFloat = 0
-    /// The Space a finished swipe slid to, until the app shows it.
+    /// The Space finished swipes slid to, until the app shows it, and what brings the pages back
+    /// should it not.
     private var swipedTo: Int?
+    private var swipeFallback: DispatchWorkItem?
     /// The Spaces a click carries the page across, left to right, while it does, like Arc's
     /// carousel, and how far along it is, from 0 at the left to 1 at the right.
     @Published var carousel: [(id: Int, shown: (SpacePage, Space)?)]?
@@ -227,6 +229,7 @@ final class AppModel: ObservableObject {
     func handle(_ name: String, _ detail: Data) {
         switch name {
         case "arbalete:state":
+            let shown = displayedIndex
             do {
                 state = try JSONDecoder().decode(AppState.self, from: detail)
             } catch {
@@ -235,12 +238,16 @@ final class AppModel: ObservableObject {
             paintWindow()
             followDraft()
             for page in state?.pages ?? [] { seenPages[page.space] = page }
-            // The page slid to is now the displayed one, in the middle.
-            if let swipedTo, state?.space == swipedTo {
-                self.swipedTo = nil
+            // A Space slid to now displayed, the pages stay where they are, now measured from
+            // it: in the middle, or as far as a swipe begun since has moved them.
+            if swipedTo != nil, let shown, let now = displayedIndex, now != shown {
                 var still = Transaction()
                 still.disablesAnimations = true
-                withTransaction(still) { swipe = 0 }
+                withTransaction(still) { swipe += CGFloat(now - shown) * pageWidth }
+                if state?.space == swipedTo {
+                    swipedTo = nil
+                    swipeFallback?.cancel()
+                }
             }
         case "arbalete:picture":
             if let picture = try? JSONDecoder().decode(TabPicture.self, from: detail) {
@@ -291,7 +298,8 @@ final class AppModel: ObservableObject {
         guard !apart else { return }
         switch phase {
         case "begin":
-            swipe = 0
+            // Begun before the app shows the Space the last swipe slid to, it goes on from there.
+            if swipedTo == nil { swipe = 0 }
         case "move":
             swipe += dx
         default:
@@ -312,31 +320,51 @@ final class AppModel: ObservableObject {
                 withAnimation(.spring(duration: 0.3)) { swipe = 0 }
                 return
             }
-            guard let state, let index = state.spaces.firstIndex(where: { $0.id == state.space })
-            else { return }
+            guard let state, let shown = displayedIndex else { return }
+            // Quick swipes page on, like Arc's: one begun before the app shows the Space the last
+            // one slid to goes from that Space.
+            let index = swipedTo.flatMap { to in state.spaces.firstIndex { $0.id == to } } ?? shown
+            let rest = CGFloat(shown - index) * pageWidth
+            let moved = swipe - rest
             let (previous, next) = (index > 0, index < state.spaces.count - 1)
-            if (swipe > threshold && previous) || (swipe < -threshold && next) {
+            if (moved > threshold && previous) || (moved < -threshold && next) {
                 // Like Arc's, the page carries on to its neighbor, which the app then shows.
-                let forward = swipe < 0
-                swipedTo = state.spaces[index + (forward ? 1 : -1)].id
+                let forward = moved < 0
+                let target = state.spaces[index + (forward ? 1 : -1)].id
+                swipedTo = target
                 withAnimation(.easeOut(duration: 0.25)) {
-                    swipe = forward ? -pageWidth : pageWidth
+                    swipe = rest + (forward ? -pageWidth : pageWidth)
                 } completion: {
-                    self.run(forward ? "next-space" : "previous-space")
+                    // Overtaken by a quicker swipe, whose own completion may come first, it
+                    // leaves the Space to that one.
+                    guard self.swipedTo == target else { return }
+                    self.run("show-space", target)
                     // Should the app not show it, the page comes back.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        guard self.swipedTo != nil else { return }
+                    let fallback = DispatchWorkItem {
+                        guard self.swipedTo == target else { return }
                         self.swipedTo = nil
                         withAnimation(.spring(duration: 0.3)) { self.swipe = 0 }
                     }
+                    self.swipeFallback?.cancel()
+                    self.swipeFallback = fallback
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: fallback)
                 }
+            } else if swipedTo != nil {
+                // Short of another Space, the pages go back to the one slid to.
+                withAnimation(.spring(duration: 0.3)) { swipe = rest }
             } else {
-                if swipe > threshold, index == 0 { openLibrary(nil) }
+                if moved > threshold, index == 0 { openLibrary(nil) }
                 // Like Arc's, past the last Space, the swipe creates one.
-                if swipe < -threshold, !next { newSpace() }
+                if moved < -threshold, !next { newSpace() }
                 withAnimation(.spring(duration: 0.3)) { swipe = 0 }
             }
         }
+    }
+
+    /// Where the displayed Space is among the Spaces.
+    private var displayedIndex: Int? {
+        guard let state else { return nil }
+        return state.spaces.firstIndex { $0.id == state.space }
     }
 
     /// The page the app last sent of a Space, with the Space, if it sent one.
