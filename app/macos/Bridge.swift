@@ -434,18 +434,22 @@ final class AppModel: ObservableObject {
         return (state.spaces.map(\.theme), Double(index) - shift)
     }
 
-    /// The pages of the displayed Space's previous neighbor, itself and its next neighbor, if
-    /// the app sent them.
+    /// The pages of the displayed Space's previous neighbor, itself and its next neighbor, and
+    /// past them, those quick swipes have taken the pages to before the app shows their Space;
+    /// as the app sent them, or else as it last did.
     /// Each is known by its Space, so that the page slid to stays in place once displayed; a
     /// missing one by its side.
     func neighbors() -> [(id: Int, shown: (SpacePage, Space)?)] {
-        guard let state, let index = state.spaces.firstIndex(where: { $0.id == state.space })
-        else { return [] }
-        return (-1...1).map { step in
+        guard let state, let index = displayedIndex else { return [] }
+        let shift = pagerShift
+        let reach = pageWidth > 0 ? Int((abs(shift) / pageWidth).rounded(.up)) : 0
+        let beyond = min(state.spaces.count, max(0, reach - 1))
+        return ((shift > 0 ? -1 - beyond : -1)...(shift < 0 ? 1 + beyond : 1)).map { step in
             let at = index + step
-            guard state.spaces.indices.contains(at) else { return (Int.min + 1 + step, nil) }
+            guard state.spaces.indices.contains(at) else { return (Int.min / 2 + step, nil) }
             let space = state.spaces[at]
-            return (space.id, state.pages.first { $0.space == space.id }.map { ($0, space) })
+            let page = state.pages.first { $0.space == space.id } ?? seenPages[space.id]
+            return (space.id, page.map { ($0, space) })
         }
     }
 
