@@ -115,6 +115,8 @@ run = [
   "plutil -replace CFBundleAllowMixedLocalizations -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
   # The interface needs macOS 14 (app/build.rs).
   "plutil -replace LSMinimumSystemVersion -string 14.0 target/bundle/Arbalete.app/Contents/Info.plist",
+  # The type a drag from the sidebar carries (app/macos/SidebarDrop.swift), which only Arbalete reads.
+  "plutil -insert UTExportedTypeDeclarations -json '[{\"UTTypeIdentifier\":\"io.github.amenophis.arbalete.sidebar-node\",\"UTTypeConformsTo\":[\"public.data\"],\"UTTypeDescription\":\"Arbalete sidebar item\"}]' target/bundle/Arbalete.app/Contents/Info.plist",
   # What macOS says as it first asks whether websites may use these, for a site the user allowed.
   "plutil -replace NSCameraUsageDescription -string 'Websites you allow can use your camera.' target/bundle/Arbalete.app/Contents/Info.plist",
   "plutil -replace NSMicrophoneUsageDescription -string 'Websites you allow can use your microphone.' target/bundle/Arbalete.app/Contents/Info.plist",

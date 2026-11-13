@@ -4,6 +4,16 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// What a drag from the sidebar carries: the node's id, under a type of Arbalete's own that no page
+/// or other app reads, like Arc's, rather than plain text, which typed the id where it landed.
+/// Declared in the bundle's Info.plist (mise run app).
+extension NSPasteboard.PasteboardType {
+    static let sidebarNode = Self("io.github.amenophis.arbalete.sidebar-node")
+}
+
+let sidebarNode = UTType(exportedAs: NSPasteboard.PasteboardType.sidebarNode.rawValue)
 
 /// Where a drag over the sidebar's rows would land.
 enum DropTarget: Equatable {
@@ -134,7 +144,8 @@ extension AppModel {
         draggedItem = item
         if case .tab = item { draggedTab = true } else { draggedTab = false }
         draggedTabs = draggedTab ? acting(on: item.id) : [item.id]
-        return NSItemProvider(object: String(item.id) as NSString)
+        return NSItemProvider(
+            item: Data(String(item.id).utf8) as NSData, typeIdentifier: sidebarNode.identifier)
     }
 
     /// The pointer moves over a row: a split shows once it rests on a tab; until then, the drop
@@ -251,7 +262,7 @@ struct DropRow<Content: View>: View {
             }
             .onDrag { model.startDrag(item) }
             .onDrop(
-                of: [.plainText],
+                of: [sidebarNode],
                 delegate: RowDrop(model: model, item: item, size: _size.wrappedValue, place: place))
     }
 }
@@ -528,7 +539,7 @@ struct FavoritesTarget: NSViewRepresentable {
 
     func makeNSView(context: Context) -> Target {
         let view = Target()
-        view.registerForDraggedTypes([.string])
+        view.registerForDraggedTypes([.sidebarNode])
         return view
     }
 
@@ -561,7 +572,8 @@ struct FavoritesTarget: NSViewRepresentable {
         /// The node the drag carries, from its pasteboard: the model may forget its drag as the
         /// mouse button comes up, before the drop.
         private func carried(_ sender: any NSDraggingInfo) -> Int? {
-            sender.draggingPasteboard.string(forType: .string).flatMap { Int($0) }
+            sender.draggingPasteboard.data(forType: .sidebarNode)
+                .flatMap { Int(String(decoding: $0, as: UTF8.self)) }
         }
 
         /// Like Arc's, the favorites take tabs and splits, not folders.

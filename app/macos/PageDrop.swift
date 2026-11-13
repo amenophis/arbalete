@@ -62,9 +62,9 @@ final class PageDrop {
         self.model = model
         panel = Overlay(view: view)
         edgePanel = Overlay(view: edge)
-        edge.registerForDraggedTypes([.string])
+        edge.registerForDraggedTypes([.sidebarNode])
         edge.rested = { model.edge($0 ? true : nil) }
-        view.registerForDraggedTypes([.string])
+        view.registerForDraggedTypes([.sidebarNode])
         view.locate = { [unowned self] point in target(at: point) }
         view.drop = { [unowned self] target in drop(target) }
         view.shown = { [unowned self] target in preview(target) }

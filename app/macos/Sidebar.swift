@@ -503,7 +503,7 @@ struct SpaceSections: View {
                         // line showing under the last one.
                         DividerRow(model: model, clearable: !page.today.isEmpty, root: page.roots.pinned)
                             .onDrop(
-                                of: [.plainText],
+                                of: [sidebarNode],
                                 delegate: SectionDrop(
                                     model: model, parent: page.roots.pinned, index: page.pinned.count,
                                     shown: lastShown(page.pinned).map { .after($0) }
@@ -511,7 +511,7 @@ struct SpaceSections: View {
                         // Dropped on, New Tab puts the node first among today's tabs.
                         NewTabRow(model: model, root: page.roots.today)
                             .onDrop(
-                                of: [.plainText],
+                                of: [sidebarNode],
                                 delegate: SectionDrop(
                                     model: model, parent: page.roots.today, index: 0,
                                     shown: page.today.first.map { .before($0.id) }
@@ -524,7 +524,7 @@ struct SpaceSections: View {
                         WindowDragArea()
                             .frame(maxWidth: .infinity, minHeight: 8, maxHeight: .infinity)
                             .onDrop(
-                                of: [.plainText],
+                                of: [sidebarNode],
                                 delegate: TailDrop(model: model, page: page, width: _width.wrappedValue))
                     }
                     .frame(minHeight: _height.wrappedValue, alignment: .top)
@@ -1953,7 +1953,7 @@ struct SpaceIcon: View {
         .onHover { hovered = $0 }
         .rightClick { model.run("menu", ["space": space.id]) }
         // Like Arc's, a drag resting on a Space's icon slides to that Space, to drop there.
-        .onDrop(of: [.plainText], delegate: SpaceIconDrop(model: model, space: space.id))
+        .onDrop(of: [sidebarNode], delegate: SpaceIconDrop(model: model, space: space.id))
         // Like Arc's, Change Space Icon… opens its picker above the Space's icon.
         .popover(
             isPresented: Binding(
