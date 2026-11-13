@@ -569,7 +569,8 @@ fn stop_zap(page: &Browser) {
         "Runtime.removeBinding",
         json!({ "name": ZAP_BINDING }),
     );
-    send(page, "Runtime.disable", json!({}));
+    // The Runtime domain stays enabled: the page tells through its own binding whether it plays
+    // sound (sound.rs).
 }
 
 thread_local! {

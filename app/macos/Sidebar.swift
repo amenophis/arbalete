@@ -1289,6 +1289,11 @@ struct TabRow: View {
             // A 16-point icon in a 24-point slot, like Arc's.
             Favicon(url: tab.favicon, size: 16).opacity(tab.asleep == true ? 0.55 : 1)
                 .frame(width: 24, height: 24)
+            // Like Arc's, after the icon while its page plays sound or is muted: it mutes the
+            // tab, or gives it its sound back.
+            if tab.muted == true || tab.audible == true {
+                SoundButton(muted: tab.muted == true) { model.run("toggle-mute", tab.id) }
+            }
             if model.renaming == tab.id {
                 NameField(model: model, id: tab.id, title: tab.label, blank: true)
             } else {
@@ -1302,10 +1307,6 @@ struct TabRow: View {
                     }
                 }
                 .animation(.easeInOut(duration: 0.15), value: model.renameHint == tab.id)
-                if tab.muted == true {
-                    Image(systemName: "speaker.slash").font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
                 Spacer(minLength: 0)
                 if hovered && tab.shareInstead == true {
                     CloseButton(symbol: "rectangle.inset.filled.and.person.filled", help: "Share This Tab Instead") {
@@ -1587,6 +1588,29 @@ struct CloseButton: View {
         .buttonStyle(.plain)
         .onHover { _hovered.wrappedValue = $0 }
         .help(help)
+    }
+}
+
+/// A tab's speaker, tinted while hovered, which mutes the tab or gives it its sound back.
+private struct SoundButton: View {
+    let muted: Bool
+    let action: () -> Void
+    private let _hovered = State<Bool>(initialValue: false)
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: muted ? "speaker.slash" : "speaker.wave.2")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.ink((0x000000, 0.565), (0xFFFFFF, 0.592)))
+                .frame(width: 20, height: 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(_hovered.wrappedValue ? Color.ink((0x000000, 0.1), (0xFFFFFF, 0.1)) : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { _hovered.wrappedValue = $0 }
+        .help(muted ? "Unmute Tab" : "Mute Tab")
     }
 }
 

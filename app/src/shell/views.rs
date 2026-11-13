@@ -134,6 +134,7 @@ fn page(tab: NodeId) -> Option<()> {
                         hidden_since: None,
                         frozen: false,
                         capturing: false,
+                        audible: HashSet::new(),
                     },
                 )
             });
@@ -233,6 +234,7 @@ pub(super) fn content_created(profile: ProfileId, browser: Option<&mut Browser>)
     let Some(browser) = browser else { return };
     extensions::page_created(profile, browser);
     picture_page_created(browser);
+    sound_page_created(browser);
     #[cfg(target_os = "macos")]
     cover_revived(Some(browser), true);
     // Made in page(), it is not one of the pages yet, which mutes it once it is.

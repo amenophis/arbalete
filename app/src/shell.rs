@@ -64,6 +64,7 @@ mod screen_share;
 mod session;
 mod settings_ui;
 mod site_controls;
+mod sound;
 mod split;
 mod tabs;
 mod theme_picker;
@@ -101,6 +102,8 @@ use screen_share::*;
 pub use session::*;
 pub use settings_ui::*;
 pub use site_controls::*;
+pub use sound::page_sound;
+use sound::*;
 pub use split::*;
 use tabs::*;
 pub use tabs::{close_store_tab, open_store_tab};
@@ -857,6 +860,7 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "title": tab.label(),
         "favicon": favicon_url(profile, tab),
         "muted": tab.muted,
+        "audible": audible(id),
         "asleep": ASLEEP.with_borrow(|asleep| asleep.contains(&id)),
         "open": has_page(id),
         "developer": developer_mode(&tab.url),
@@ -1100,6 +1104,8 @@ struct Live {
     frozen: bool,
     /// It uses the camera, the microphone or the screen.
     capturing: bool,
+    /// Its frames playing sound (sound::page_sound): its row shows the speaker.
+    audible: HashSet<String>,
 }
 
 fn now() -> i64 {
@@ -1463,7 +1469,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "theme": { "colors": ["#a352ff", "#5289ff", "#ff5252"], "mode": "auto", "intensity": 0.8, "noise": 0.4 }, "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false, "boosted": false, "shareInstead": false, "recording": false, "shared": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "audible": false, "asleep": false, "open": false, "developer": false, "boosted": false, "shareInstead": false, "recording": false, "shared": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);
