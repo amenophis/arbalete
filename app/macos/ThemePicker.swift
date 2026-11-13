@@ -7,13 +7,34 @@
 import AppKit
 import SwiftUI
 
-/// The palette's pages, nine colors each, Arc's own: its brand colors, pastels, drab colors and grays.
-let palettes: [[String]] = [
-    ["#f2eae4", "#f29bbb", "#a6729d", "#f25e6b", "#ff8558", "#f8d558", "#34e895", "#6bbad9", "#666789"],
-    ["#fdfbfa", "#ffe9f4", "#f1d1ec", "#ffcbd2", "#ffe0d3", "#fff9e5", "#defdeb", "#dcf3fc", "#c5c6e5"],
-    ["#4e3a5a", "#693558", "#8f3f42", "#b16d40", "#d7b35d", "#cdcca4", "#7aa982", "#226149", "#26456b"],
-    ["#ffffff", "#e5e5e5", "#cccccc", "#b2b2b2", "#808080", "#666666", "#333333", "#1a1a1a", "#000000"],
+/// A palette's choice, like Arc's: a key color, and how many colors go with it, on which wheel.
+struct Preset: Hashable {
+    let key: String
+    let count: Int
+    let analogous: Bool
+}
+
+/// Arc's own colors, nine to a page: its brand colors, pastels, drab colors and grays.
+private let brand = [
+    "#f2eae4", "#f29bbb", "#a6729d", "#f25e6b", "#ff8558", "#f8d558", "#34e895", "#6bbad9", "#666789",
 ]
+private let pastel = [
+    "#fdfbfa", "#ffe9f4", "#f1d1ec", "#ffcbd2", "#ffe0d3", "#fff9e5", "#defdeb", "#dcf3fc", "#c5c6e5",
+]
+private let drab = [
+    "#4e3a5a", "#693558", "#8f3f42", "#b16d40", "#d7b35d", "#cdcca4", "#7aa982", "#226149", "#26456b",
+]
+private let greyscale = [
+    "#ffffff", "#e5e5e5", "#cccccc", "#b2b2b2", "#808080", "#666666", "#333333", "#1a1a1a", "#000000",
+]
+
+/// The palette's pages, like Arc's: the brand colors alone, then each with its neighbors on the
+/// wheel, then the pastels, the drab colors and the grays.
+let palettes: [[Preset]] =
+    [(brand, 1, false), (brand, 3, true), (pastel, 1, false), (drab, 1, false), (greyscale, 1, false)]
+    .map { keys, count, analogous in
+        keys.map { Preset(key: $0, count: count, analogous: analogous) }
+    }
 
 let maxColors = 3
 
@@ -106,14 +127,18 @@ func pointOf(_ wheel: Wheel, _ color: String) -> CGPoint {
     return CGPoint(x: cos(angle) * t * edge, y: sin(angle) * t * edge)
 }
 
-/// The hues, from the leading color's, of a theme's colors: its complement for two, both sides of
-/// it for three.
-private let harmonies: [[Double]] = [[], [0], [0, 180], [0, 150, 210]]
+/// The hues, from the leading color's, of `count` colors. On the complementary wheel, its
+/// complement for two, both sides of it for three; on the analogous one, its neighbors.
+private func harmonies(_ count: Int, analogous: Bool) -> [Double] {
+    let complementary: [[Double]] = [[], [0], [0, 180], [0, 150, 210]]
+    let neighbors: [[Double]] = [[], [0], [0, 40], [0, 40, 320]]
+    return (analogous ? neighbors : complementary)[min(count, maxColors)]
+}
 
 /// The colors that go with a leading one, as many as the theme holds, as far from the center.
-func harmony(_ color: String, _ count: Int) -> [String] {
+func harmony(_ color: String, _ count: Int, analogous: Bool) -> [String] {
     let hsl = toHsl(color)
-    return harmonies[min(count, maxColors)].map { offset in
+    return harmonies(count, analogous: analogous).map { offset in
         offset == 0
             ? color
             : fromHsl(Hsl(h: (hsl.h + offset).truncatingRemainder(dividingBy: 360), s: hsl.s, l: hsl.l))
@@ -129,6 +154,8 @@ final class ThemePickerModel: ObservableObject {
     /// as a color's #rrggbb, rounded, would not: a grayish one barely keeps its hue.
     @Published var points: [CGPoint] = []
     @Published var page = 0
+    /// Whether the colors are neighbors on the wheel rather than complements, like Arc's.
+    @Published var analogous = false
     /// The pad's lightness in automatic appearance, which a light or a dark one sets aside.
     private var autoRange = (0.01, 0.97)
     let app: AppModel
@@ -158,6 +185,21 @@ final class ThemePickerModel: ObservableObject {
             wheel.range = (min(low, lightness), max(high, lightness))
         }
         points = shown.theme.colors.map { pointOf(wheel, $0) }
+        // The second color's hue tells the wheel: near the leading one's, they are neighbors.
+        let hues = shown.theme.colors.prefix(2).map { toHsl($0).h }
+        analogous = hues.count == 2 && abs(remainder(hues[1] - hues[0], 360)) < 90
+    }
+
+    /// Like Arc's, a palette's choice sets the colors and their wheel, at full intensity, the pad
+    /// taking the key color's saturation.
+    func pick(_ preset: Preset) {
+        analogous = preset.analogous
+        let colors = harmony(preset.key, preset.count, analogous: preset.analogous)
+        change(
+            {
+                $0.colors = colors
+                $0.intensity = 1
+            }, rewheel: true)
     }
 
     /// Like Arc's, a light or a dark appearance keeps the pad to its half of the lightness, the
@@ -175,8 +217,8 @@ final class ThemePickerModel: ObservableObject {
     }
 
     /// Changes the theme; dots `at` points give its colors, other new colors place their dots.
-    /// `rewheel` centers the pad on the new leading color, in a light or a dark appearance only
-    /// once the automatic one comes back.
+    /// `rewheel` takes the new leading color's saturation, and centers the pad's lightness on it,
+    /// in a light or a dark appearance only once the automatic one comes back.
     func change(
         _ update: (inout Theme) -> Void, rewheel: Bool = false, at points: [CGPoint]? = nil
     ) {
@@ -185,7 +227,8 @@ final class ThemePickerModel: ObservableObject {
         if rewheel {
             let around = wheelFor(theme.colors)
             autoRange = around.range
-            if theme.mode == "auto" { wheel = around }
+            wheel.saturation = around.saturation
+            if theme.mode == "auto" { wheel.range = around.range }
         }
         if let points {
             self.points = points
@@ -235,8 +278,8 @@ let pen = Color.ink((0x000000, 0.6), (0xFFFFFF, 1))
 
 /// The dots of `count` colors that go with a leading one at `lead`, like `harmony`: turned by
 /// their hues, as far from the center.
-func arranged(_ lead: CGPoint, _ count: Int) -> [CGPoint] {
-    harmonies[min(count, maxColors)].map { offset in
+func arranged(_ lead: CGPoint, _ count: Int, analogous: Bool) -> [CGPoint] {
+    harmonies(count, analogous: analogous).map { offset in
         let (c, s) = (cos(offset * .pi / 180), sin(offset * .pi / 180))
         return CGPoint(x: lead.x * c - lead.y * s, y: lead.x * s + lead.y * c)
     }
@@ -283,8 +326,9 @@ struct Pad: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
-                        // The dot taken leads, moving from where it was; elsewhere, the leading
-                        // one comes under the pointer.
+                        // The dot taken leads, like Arc's: it stays where it is, the others
+                        // falling in harmony around it, then moves with the pointer; elsewhere,
+                        // the leading one comes under the pointer.
                         if drag.translation == .zero {
                             let start = point(drag.startLocation)
                             taken.wrappedValue = picker.points.last { dot in
@@ -326,7 +370,7 @@ struct Pad: View {
     /// Places `count` dots in harmony, the leading one at `lead`.
     private func arrange(_ lead: CGPoint, _ count: Int) {
         let wheel = picker.wheel
-        let points = arranged(lead, count)
+        let points = arranged(lead, count, analogous: picker.analogous)
         picker.change({ $0.colors = points.map { colorAt(wheel, $0.x, $0.y) } }, at: points)
     }
 }
@@ -412,17 +456,11 @@ struct Palette: View {
             .buttonStyle(.plain)
             .disabled(picker.page == 0)
             .help("Previous colors")
-            ForEach(palettes[picker.page], id: \.self) { hex in
-                Button {
-                    let colors = harmony(hex, max(1, picker.theme.colors.count))
-                    // A light or a dark appearance keeps its lightness, like Arc's.
-                    picker.change({ $0.colors = colors }, rewheel: true)
-                } label: {
-                    Circle().fill(color(hex)).frame(width: 24, height: 24)
-                        .overlay(Circle().strokeBorder(pen.opacity(0.3)))
-                }
-                .buttonStyle(.plain)
-                .help(hex)
+            ForEach(palettes[picker.page], id: \.self) { preset in
+                // A light or a dark appearance keeps its lightness, like Arc's.
+                Button { picker.pick(preset) } label: { Swatch(preset: preset) }
+                    .buttonStyle(SwatchStyle())
+                    .help(preset.key)
             }
             Button {
                 picker.page += 1
@@ -433,6 +471,44 @@ struct Palette: View {
             .disabled(picker.page == palettes.count - 1)
             .help("More colors")
         }
+    }
+}
+
+/// A palette's choice, like Arc's: a dot of its colors, blending into each other.
+struct Swatch: View {
+    let preset: Preset
+
+    var body: some View {
+        let colors = harmony(preset.key, preset.count, analogous: preset.analogous)
+        // The leading color in the middle, between its neighbors.
+        let ordered = colors.count == 3 ? [colors[2], colors[0], colors[1]] : colors
+        Circle()
+            .fill(LinearGradient(colors: ordered.map(color), startPoint: .leading, endPoint: .trailing))
+            .overlay(Circle().strokeBorder(pen.opacity(0.3)))
+            .frame(width: 24, height: 24)
+            .contentShape(Circle())
+    }
+}
+
+/// A swatch grows a little under the pointer, and shrinks as it is pressed.
+struct SwatchStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Hovering { hovered in
+            configuration.label
+                .scaleEffect(configuration.isPressed ? 0.92 : hovered ? 1.08 : 1)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+                .animation(.easeOut(duration: 0.12), value: hovered)
+        }
+    }
+}
+
+/// Content that knows whether the pointer is on it.
+struct Hovering<Content: View>: View {
+    @ViewBuilder let content: (Bool) -> Content
+    private let hovered = State(initialValue: false)
+
+    var body: some View {
+        content(hovered.wrappedValue).onHover { hovered.wrappedValue = $0 }
     }
 }
 
