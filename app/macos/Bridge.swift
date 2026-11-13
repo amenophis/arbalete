@@ -83,9 +83,11 @@ final class AppModel: ObservableObject {
             if Self.sidebarDrag === self { Self.sidebarDrag = nil }
         }
     }
-    /// The window whose sidebar a drag started from, which the other windows' sidebars take too,
-    /// like Arc's (joinDrag).
+    /// The window whose sidebar a drag started from, which the other windows take too, like
+    /// Arc's (joinDrag).
     static weak var sidebarDrag: AppModel?
+    /// Every window's model, which a drag from one window's sidebar reaches.
+    static let all = NSHashTable<AppModel>.weakObjects()
     /// The drag came from another window's sidebar.
     var joined = false
     /// The tab a drop from another window shows here once it lands, like Arc's (land).
@@ -167,6 +169,7 @@ final class AppModel: ObservableObject {
     init(window: UInt32, send: @escaping Send) {
         self.window = window
         self.send = send
+        Self.all.add(self)
         recent.start { [weak self] in self?.refreshRecent() }
         flags = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.optionHeld = event.modifierFlags.contains(.option)
