@@ -346,14 +346,14 @@ pub(super) fn keep_picture(tab: NodeId, jpeg: &str) {
     }
 }
 
-/// Lets a page shown run again, if it was frozen or asleep while hidden.
+/// Lets a page shown run again, if it was frozen or unloaded while hidden.
 pub(super) fn wake_page(tab: NodeId) {
     let frozen = PAGES.with_borrow_mut(|pages| {
         let live = pages.get_mut(&tab)?;
         live.hidden_since = None;
         Some((std::mem::take(&mut live.frozen), live.browser.host()))
     });
-    ASLEEP.with_borrow_mut(|asleep| asleep.remove(&tab));
+    UNLOADED.with_borrow_mut(|unloaded| unloaded.remove(&tab));
     if let Some((true, host)) = frozen {
         set_frozen(host.as_ref(), false);
     }
@@ -473,8 +473,8 @@ pub(super) fn prune_pages() {
 /// (BrowserLifeSpan's do_close).
 pub(super) fn close_page(tab: NodeId) {
     close_inspector(tab);
-    // A page unloaded to save memory falls asleep again (fall_asleep).
-    ASLEEP.with_borrow_mut(|asleep| asleep.remove(&tab));
+    // A page unloaded to save memory counts as open again (unload_page).
+    UNLOADED.with_borrow_mut(|unloaded| unloaded.remove(&tab));
     let Some(live) = PAGES.with_borrow_mut(|pages| pages.remove(&tab)) else {
         return;
     };

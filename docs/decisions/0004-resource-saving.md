@@ -25,7 +25,8 @@ Arbalete follows the same model, in the app (`app/src/shell/pages.rs`):
   minutes, all at once when it is critical; in Low Power Mode, frozen after a minute.
 - Never suspended: pages playing media (their elements or the Media Session) or capturing, and the sites kept
   awake from the site controls. A setting turns suspension off.
-- An unloaded page shows its last picture while it loads again, and the sidebar dims the tabs asleep.
+- An unloaded page shows its last picture while it loads again. Like Arc, the sidebar shows no sign of a
+  sleeping tab: a frozen or unloaded tab's row looks like any other.
 
 This is separate from auto-archive: an unloaded tab stays in the sidebar, an archived tab leaves it.
 
