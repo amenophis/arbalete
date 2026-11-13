@@ -16,22 +16,43 @@ pub(super) fn profile_context(profile: ProfileId) -> Option<RequestContext> {
     // rather than the home folder.
     let (downloads, _) = download_folder(Some(profile));
     for name in ["savefile.default_directory", "download.default_directory"] {
-        let Some(mut value) = value_create() else {
-            break;
-        };
-        value.set_string(Some(&CefString::from(downloads.to_string_lossy().as_ref())));
-        // Not empty: cef passes an empty string as none, which CEF turns down.
-        let mut error = CefString::from(" ");
-        let set = context.set_preference(
-            Some(&CefString::from(name)),
-            Some(&mut value),
-            Some(&mut error),
-        ) == 1;
-        if !set {
-            eprintln!("cannot set {name}: {error}");
-        }
+        set_string_preference(&context, name, &downloads.to_string_lossy());
     }
     Some(context)
+}
+
+/// Sets a string preference of a profile's web data, telling when CEF turns it down.
+fn set_string_preference(context: &RequestContext, name: &str, text: &str) {
+    let Some(mut value) = value_create() else {
+        return;
+    };
+    value.set_string(Some(&CefString::from(text)));
+    // Not empty: cef passes an empty string as none, which CEF turns down.
+    let mut error = CefString::from(" ");
+    let set = context.set_preference(
+        Some(&CefString::from(name)),
+        Some(&mut value),
+        Some(&mut error),
+    ) == 1;
+    if !set {
+        eprintln!("cannot set {name}: {error}");
+    }
+}
+
+/// Gives a profile's web data the profile's name, which Chromium's pages show (chrome://settings),
+/// rather than the "Person 1" Chromium makes up for it.
+pub(super) fn name_web_data(profile: ProfileId) {
+    let context = CONTEXTS.with_borrow(|contexts| contexts.get(&profile).cloned().flatten());
+    let name = STATE.with_borrow(|state| {
+        let profiles = state.sidebar.profiles();
+        profiles
+            .iter()
+            .find(|p| p.id == profile)
+            .map(|p| p.name.clone())
+    });
+    if let (Some(context), Some(name)) = (context, name) {
+        set_string_preference(&context, "profile.name", &name);
+    }
 }
 
 /// Where a profile's downloads go, and whether they ask where each time, like Arc's: the
@@ -271,6 +292,7 @@ wrap_request_context_handler! {
                 context.set_chrome_color_scheme(ColorVariant::DARK, 0);
             }
             CONTEXTS.with_borrow_mut(|contexts| contexts.insert(self.profile, Some(context.clone())));
+            name_web_data(self.profile);
             extensions::profile_ready(self.profile, &profile_dir(self.profile));
             in_each_window(show_selected);
         }

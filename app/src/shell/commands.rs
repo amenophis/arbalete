@@ -291,6 +291,7 @@ fn run_command(command: Command) {
         // Like a folder, an unknown profile or a blank name from the UI is ignored.
         (Command::RenameProfile(id, name), _) => {
             if update_sidebar(|sidebar| sidebar.rename_profile(id, &name)).is_ok() {
+                name_web_data(id);
                 send_settings();
             }
         }
