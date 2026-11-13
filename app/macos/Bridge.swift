@@ -235,6 +235,9 @@ final class AppModel: ObservableObject {
             } catch {
                 NSLog("arbalete: cannot read the state: \(error)")
             }
+            if let shown, let now = displayedIndex, now != shown {
+                spaceStep = now > shown ? 1 : -1
+            }
             paintWindow()
             followDraft()
             for page in state?.pages ?? [] { seenPages[page.space] = page }
@@ -370,6 +373,10 @@ final class AppModel: ObservableObject {
     }
 
     /// Where the displayed Space is among the Spaces.
+    /// Which way the displayed Space last went among the Spaces: 1 to a later one, -1 to an
+    /// earlier one.
+    private(set) var spaceStep = 1
+
     private var displayedIndex: Int? {
         guard let state else { return nil }
         return state.spaces.firstIndex { $0.id == state.space }
