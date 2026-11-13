@@ -206,8 +206,8 @@ thread_local! {
     static HIDE_STRAYS: Cell<bool> = const { Cell::new(false) };
     /// The app's settings, loaded when the context is initialized.
     static SETTINGS: RefCell<Settings> = RefCell::new(Settings::default());
-    /// The tabs whose page is frozen or was unloaded, which the sidebar dims.
-    static ASLEEP: RefCell<HashSet<NodeId>> = RefCell::default();
+    /// The tabs whose page was unloaded to save memory: they still count as open (has_page).
+    static UNLOADED: RefCell<HashSet<NodeId>> = RefCell::default();
     /// The last picture of each tab's page, a JPEG in base64, which covers the page while it
     /// loads again once unloaded.
     static SNAPSHOTS: RefCell<HashMap<NodeId, String>> = RefCell::default();
@@ -861,7 +861,6 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "favicon": favicon_url(profile, tab),
         "muted": tab.muted,
         "audible": audible(id),
-        "asleep": ASLEEP.with_borrow(|asleep| asleep.contains(&id)),
         "open": has_page(id),
         "developer": developer_mode(&tab.url),
         "boosted": boosts::boosted(profile, &tab.url),
@@ -875,7 +874,7 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
 /// memory: closing an open pinned tab takes it back to its saved url instead of removing it.
 fn has_page(tab: NodeId) -> bool {
     PAGES.with_borrow(|pages| pages.contains_key(&tab))
-        || ASLEEP.with_borrow(|asleep| asleep.contains(&tab))
+        || UNLOADED.with_borrow(|unloaded| unloaded.contains(&tab))
 }
 
 /// Where the UI loads a tab's icon from: the app serves the profile's cached icons (favicon_file),
@@ -1482,7 +1481,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "theme": { "colors": ["#a352ff", "#5289ff", "#ff5252"], "mode": "auto", "intensity": 0.8, "noise": 0.4 }, "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "audible": false, "asleep": false, "open": false, "developer": false, "boosted": false, "shareInstead": false, "recording": false, "shared": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "audible": false, "open": false, "developer": false, "boosted": false, "shareInstead": false, "recording": false, "shared": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);

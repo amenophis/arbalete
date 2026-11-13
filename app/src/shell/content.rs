@@ -162,8 +162,7 @@ fn page_ended(browser: &Browser) {
         })
     });
     if let Some(tab) = hidden {
-        close_page(tab);
-        fall_asleep(tab);
+        unload_page(tab);
         return;
     }
     let (id, now) = (browser.identifier(), now());

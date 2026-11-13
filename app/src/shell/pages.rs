@@ -80,8 +80,7 @@ pub(super) fn suspend_hidden_pages() {
             .partition(|(_, _, unload)| !unload)
     });
     for (tab, _, _) in unload {
-        close_page(tab);
-        fall_asleep(tab);
+        unload_page(tab);
     }
     // A player tells the system what it plays through the Media Session API, even without an
     // element in the page, like a Web Audio player.
@@ -236,11 +235,10 @@ pub(super) fn tab_url(tab: NodeId) -> Option<String> {
     })
 }
 
-/// Dims a tab whose page was frozen or unloaded in the sidebar.
-pub(super) fn fall_asleep(tab: NodeId) {
-    if ASLEEP.with_borrow_mut(|asleep| asleep.insert(tab)) {
-        send_state();
-    }
+/// Closes a hidden tab's page to save memory: it opens again at its url when the tab shows.
+pub(super) fn unload_page(tab: NodeId) {
+    close_page(tab);
+    UNLOADED.with_borrow_mut(|unloaded| unloaded.insert(tab));
 }
 
 /// Makes the frozen pages whose url `wake` picks run again.
@@ -249,17 +247,15 @@ pub(super) fn wake_frozen(wake: impl Fn(&str) -> bool) {
         pages
             .iter_mut()
             .filter(|(tab, live)| live.frozen && tab_url(**tab).is_some_and(|url| wake(&url)))
-            .map(|(tab, live)| {
+            .map(|(_, live)| {
                 live.frozen = false;
-                (*tab, live.browser.host())
+                live.browser.host()
             })
             .collect()
     });
-    for (tab, host) in woken {
+    for host in woken {
         set_frozen(host.as_ref(), false);
-        ASLEEP.with_borrow_mut(|asleep| asleep.remove(&tab));
     }
-    send_state();
 }
 
 /// Freezes or unloads a hidden page that plays no media, as long as it has been hidden; the page
@@ -275,7 +271,7 @@ pub fn page_playing(page: i32, playing: bool) {
         return;
     };
     if now() - hidden_since >= current_suspend_delays().1 {
-        close_page(tab);
+        unload_page(tab);
     } else {
         set_frozen(host.as_ref(), true);
         PAGES.with_borrow_mut(|pages| {
@@ -284,7 +280,6 @@ pub fn page_playing(page: i32, playing: bool) {
             }
         });
     }
-    fall_asleep(tab);
 }
 
 /// Freezes a page through Chromium's DevTools, or makes it run again.

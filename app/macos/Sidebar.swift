@@ -1287,7 +1287,7 @@ struct TabRow: View {
             // Like Arc's, before the icon while its page records.
             if tab.recording == true { RecordingDot() }
             // A 16-point icon in a 24-point slot, like Arc's.
-            Favicon(url: tab.favicon, size: 16).opacity(tab.asleep == true ? 0.55 : 1)
+            Favicon(url: tab.favicon, size: 16)
                 .frame(width: 24, height: 24)
             // Like Arc's, after the icon while its page plays sound or is muted: it mutes the
             // tab, or gives it its sound back.
@@ -1298,7 +1298,7 @@ struct TabRow: View {
                 NameField(model: model, id: tab.id, title: tab.label, blank: true)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(tab.label).lineLimit(1).opacity(tab.asleep == true ? 0.55 : 1)
+                    Text(tab.label).lineLimit(1)
                     if model.renameHint == tab.id {
                         Text("Double-click to rename")
                             .font(.system(size: 11))
