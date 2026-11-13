@@ -908,8 +908,6 @@ fn icon_url(profile: ProfileId, source: &str) -> String {
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Page {
-    /// From 0 to 1.
-    progress: f64,
     loading: bool,
     can_go_back: bool,
     can_go_forward: bool,

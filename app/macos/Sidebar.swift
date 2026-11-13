@@ -392,14 +392,6 @@ struct AddressRow: View {
         }
         .padding(.trailing, 4)
         .background(RoundedRectangle(cornerRadius: Measure.radius).fill(Ink.item))
-        .overlay(alignment: .bottom) {
-            if let page = model.state?.page, page.loading {
-                ProgressView(value: page.progress)
-                    .progressViewStyle(.linear)
-                    .controlSize(.mini)
-                    .padding(.horizontal, 10)
-            }
-        }
         // 46 points from the window's top, like Arc's.
         .padding(.top, 46 - windowButtonsCenter - 20)
         .padding(.bottom, 7)

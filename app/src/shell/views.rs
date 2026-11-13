@@ -389,7 +389,7 @@ fn space_tint(tab: NodeId) -> u32 {
         .unwrap_or(0x80_8080)
 }
 
-/// Tells the UI how the shown page stands: its progress and history are its own.
+/// Tells the UI how the shown page stands: whether it loads and its history are its own.
 fn send_page_state() {
     let browser = content();
     // A page about to open loads; an Easel's board never does.
@@ -399,7 +399,6 @@ fn send_page_state() {
         .map_or(!board, |browser| browser.is_loading() == 1);
     update_page(|page| {
         page.loading = loading;
-        page.progress = if loading { 0.0 } else { 1.0 };
         page.can_go_back = browser
             .as_ref()
             .is_some_and(|browser| browser.can_go_back() == 1);
