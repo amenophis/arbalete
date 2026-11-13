@@ -475,6 +475,7 @@ fn run_command(command: Command) {
         (Command::ResetSitePermissions, _) => {
             set_site_permissions(None, ContentSettingValues::DEFAULT);
         }
+        (Command::ShareScreen(id, source, sound), _) => share_screen(id, source, sound),
         (Command::PermissionPromptHeight(height), _) => {
             win().permission_height.set(height);
             surfaces_changed();

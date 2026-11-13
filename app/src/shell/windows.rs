@@ -280,6 +280,13 @@ wrap_browser_process_handler! {
             open_main_window(0);
         }
 
+        /// Each profile keeps the source a screen sharing picked, for CEF (screen_share).
+        fn on_register_custom_preferences(&self, type_: PreferencesType, registrar: Option<&mut PreferenceRegistrar>) {
+            if let (PreferencesType::REQUEST_CONTEXT, Some(registrar)) = (type_, registrar) {
+                register_source(registrar);
+            }
+        }
+
         fn default_client(&self) -> Option<Client> {
             Some(StrayClient::new())
         }

@@ -197,6 +197,9 @@ pub enum Command {
     AnswerPermission(u64, bool),
     /// The permission prompt takes this height.
     PermissionPromptHeight(i32),
+    /// Shares, for a site's request by its id, what the picker picked: "screen:<id>:0",
+    /// "window:<id>:0" or "tab:<tab id>", with its sound or without; or nothing.
+    ShareScreen(u64, Option<String>, bool),
     /// Allows or blocks a permission for the selected tab's site, from its site controls, by the
     /// content setting that keeps it.
     SetSitePermission(u32, bool),
