@@ -34,6 +34,19 @@ pub(super) fn new_blank_window() {
     open_window(view, true);
 }
 
+/// Opens a blank window at `place`, like Arc's, holding the tabs or splits a drag carried out of
+/// the windows, in their profile; the windows they left stop showing them.
+pub(super) fn drop_outside(tabs: &[NodeId], place: Place) {
+    let view = update_sidebar(|sidebar| sidebar.take_into_standalone(tabs).ok());
+    let Some(view) = view else {
+        return;
+    };
+    // Like a drag into another window's sidebar: that window shows them, the one they left then
+    // stops showing them while it does not have the focus, which would show its Command Bar.
+    open_window_at(view, false, None, Some(place));
+    show_selected_elsewhere();
+}
+
 /// Archives a blank window's tabs and forgets its Space as the focused window closes, like Arc's;
 /// any other window keeps its own.
 fn close_standalone() {

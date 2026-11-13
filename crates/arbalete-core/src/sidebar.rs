@@ -609,6 +609,46 @@ impl Sidebar {
         Ok(space)
     }
 
+    /// Moves tabs or splits dragged out of the windows into a new blank window's Space, in their
+    /// profile, like Arc's, and says what that window shows: the first of them. None from an
+    /// incognito window, nor of several profiles, nor a favorite.
+    pub fn take_into_standalone(&mut self, tabs: &[NodeId]) -> Result<View, Error> {
+        let first = *tabs.first().ok_or(Error::NotATab)?;
+        let profile = self.profile_of(first).ok_or(Error::UnknownNode)?;
+        for &tab in tabs {
+            self.check_tab(tab)?;
+            if self.is_favorite(tab) || self.profile_of(tab) != Some(profile) {
+                return Err(Error::NotATab);
+            }
+        }
+        if self.profiles.iter().any(|p| p.id == profile && p.incognito) {
+            return Err(Error::Incognito);
+        }
+        let space = self.open_standalone(profile)?;
+        let today = self.space(space)?.today;
+        for &tab in tabs {
+            let row = self.row_of(tab);
+            // A split carried once, by its first tab.
+            if self.node(row).and_then(|n| n.parent) != Some(today) {
+                self.move_node(row, today, usize::MAX)?;
+            }
+        }
+        // The window they left no longer shows them.
+        let left: Vec<_> = self
+            .spaces
+            .iter()
+            .filter(|s| {
+                s.selected
+                    .is_some_and(|tab| self.space_of(tab) == Some(space))
+            })
+            .map(|s| s.id)
+            .collect();
+        for id in left {
+            self.space_mut(id)?.selected = None;
+        }
+        Ok(self.view_on(space, first))
+    }
+
     /// Forgets a blank window's Space as the window closes, its tabs archived, like Arc's: they
     /// can be restored, into the displayed Space.
     pub fn close_standalone(&mut self, space: SpaceId, now: u64) -> Result<(), Error> {
@@ -4439,6 +4479,43 @@ mod tests {
         assert!(archived.contains(&"https://b.test"));
         assert!(sidebar.close_standalone(home, 7).is_err());
         sidebar.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn takes_tabs_dragged_out_of_the_windows_into_a_blank_window() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let profile = sidebar.profiles()[0].id;
+        let a = sidebar.open_tab(home, "https://a.test").unwrap();
+        let b = sidebar.open_tab(home, "https://b.test").unwrap();
+        let c = sidebar.open_tab(home, "https://c.test").unwrap();
+        let split = sidebar.split(c, b).unwrap();
+        sidebar.select(home, a).unwrap();
+        // A tab and a split, carried by both of its tabs.
+        let view = sidebar.take_into_standalone(&[a, b, c]).unwrap();
+        let blank = sidebar.space_of(a).unwrap();
+        assert!(sidebar.space(blank).unwrap().standalone);
+        assert_eq!(sidebar.profile_of(a), Some(profile));
+        assert_eq!(
+            children(&sidebar, sidebar.space(blank).unwrap().today),
+            [a, split]
+        );
+        assert_eq!(sidebar.space(home).unwrap().selected, None);
+        sidebar.set_view(&view);
+        assert_eq!(sidebar.displayed().id, blank);
+        assert_eq!(sidebar.displayed().selected, Some(a));
+        // Neither a favorite nor an incognito window's tab.
+        let favorite = sidebar.open_tab(home, "https://d.test").unwrap();
+        let favorites = sidebar.profiles()[0].favorites;
+        sidebar.move_node(favorite, favorites, 0).unwrap();
+        assert!(sidebar.take_into_standalone(&[favorite]).is_err());
+        let incognito = sidebar.open_incognito();
+        let secret = sidebar.open_tab(incognito, "https://secret.test").unwrap();
+        assert_eq!(
+            sidebar.take_into_standalone(&[secret]),
+            Err(Error::Incognito)
+        );
+        assert!(sidebar.take_into_standalone(&[]).is_err());
     }
 
     #[test]
