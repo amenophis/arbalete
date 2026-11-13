@@ -862,6 +862,8 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "developer": developer_mode(&tab.url),
         "boosted": boosts::boosted(profile, &tab.url),
         "shareInstead": offers_instead(id, &tab.url, profile),
+        "recording": recording(id),
+        "shared": shows_tab(id),
     })
 }
 
@@ -1461,7 +1463,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "theme": { "colors": ["#a352ff", "#5289ff", "#ff5252"], "mode": "auto", "intensity": 0.8, "noise": 0.4 }, "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false, "boosted": false, "shareInstead": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "asleep": false, "open": false, "developer": false, "boosted": false, "shareInstead": false, "recording": false, "shared": false },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);

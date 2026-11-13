@@ -168,6 +168,17 @@ pub(super) fn shareable_tabs(asking: &Browser) -> Vec<serde_json::Value> {
     tabs.into_iter().map(|(_, json)| json).collect()
 }
 
+/// Whether a tab's row shows the recording dot, like Arc's: its page uses the camera, the
+/// microphone or the screen.
+pub(super) fn recording(tab: NodeId) -> bool {
+    PAGES.with_borrow(|pages| pages.get(&tab).is_some_and(|live| live.capturing))
+}
+
+/// Whether a screen sharing shows `tab`, whose row is framed in yellow, like Arc's.
+pub(super) fn shows_tab(tab: NodeId) -> bool {
+    started(|sharing| sharing.shared == Shared::Tab(tab)).unwrap_or(false)
+}
+
 /// Whether a tab is shared: its page stays awake while hidden.
 pub(super) fn is_shared(tab: NodeId) -> bool {
     SHARING.with_borrow(|current| {

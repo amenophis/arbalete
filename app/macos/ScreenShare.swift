@@ -453,3 +453,22 @@ private struct SharingButton: View {
     }
 }
 
+/// The red dot before a tab's icon while its page uses the camera, the microphone or the screen,
+/// like Arc's: it pulses slowly, unless the system reduces motion.
+struct RecordingDot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let _dim = State(initialValue: false)
+
+    var body: some View {
+        Circle()
+            .fill(Color(nsColor: .systemRed))
+            .frame(width: 8, height: 8)
+            .opacity(_dim.wrappedValue ? 0.4 : 1)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
+                    _dim.wrappedValue = true
+                }
+            }
+    }
+}
