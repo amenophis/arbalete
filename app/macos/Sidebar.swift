@@ -591,6 +591,27 @@ struct ProfileTag: View {
     }
 }
 
+/// The theme of the Space whose page a view shows while the pages slide, like Arc's (its
+/// WindowThemeContext): nil for the displayed Space's.
+private struct SpaceThemeKey: EnvironmentKey {
+    static let defaultValue: Theme? = nil
+}
+
+extension EnvironmentValues {
+    var spaceTheme: Theme? {
+        get { self[SpaceThemeKey.self] }
+        set { self[SpaceThemeKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Draws a Space's page in its own theme and appearance while the pages slide, like Arc's,
+    /// rather than in the displayed Space's until they settle.
+    func spaceAppearance(_ theme: Theme) -> some View {
+        environment(\.spaceTheme, theme).environment(\.colorScheme, isDark(theme) ? .dark : .light)
+    }
+}
+
 /// The displayed Space's tabs between its neighbors', like Arc's: a swipe slides them along, the
 /// neighbor coming in beside it, and past a threshold carries on to it.
 struct SpacePager: View {
@@ -618,6 +639,7 @@ struct SpacePager: View {
                             if let (page, space) = neighbor.shown {
                                 SpaceSections(model: model, page: page, space: space)
                                     .padding(.top, heights[space.profile] ?? 0)
+                                    .spaceAppearance(space.theme)
                             } else {
                                 Color.clear
                             }
@@ -632,6 +654,7 @@ struct SpacePager: View {
                 ForEach(Self.trays(pages.map(\.shown), shown: model.state?.space), id: \.key) {
                     tray in
                     Favorites(model: model, page: tray.page)
+                        .spaceAppearance(tray.theme)
                         .frame(width: width)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                             _heights.wrappedValue[tray.profile] = $0
@@ -656,8 +679,10 @@ struct SpacePager: View {
         /// The run's first and last pages.
         var first: Int
         var last: Int
-        /// The page whose favorites show: the displayed Space's, or the run's first.
+        /// The page whose favorites show: the displayed Space's, or the run's first; and its
+        /// Space's theme.
         var page: SpacePage
+        var theme: Theme
     }
 
     /// The runs of side by side pages of one profile's Spaces, among `pages`.
@@ -668,7 +693,10 @@ struct SpacePager: View {
             guard let (page, space) = page else { continue }
             if var tray = trays.last, tray.profile == space.profile, tray.last == index - 1 {
                 tray.last = index
-                if page.space == shown { tray.page = page }
+                if page.space == shown {
+                    tray.page = page
+                    tray.theme = space.theme
+                }
                 trays[trays.count - 1] = tray
             } else {
                 let run = runs[space.profile, default: 0]
@@ -676,7 +704,7 @@ struct SpacePager: View {
                 trays.append(
                     Tray(
                         key: "\(space.profile)-\(run)", profile: space.profile, first: index,
-                        last: index, page: page))
+                        last: index, page: page, theme: space.theme))
             }
         }
         return trays
@@ -893,7 +921,8 @@ struct FavoriteTile: View {
     @ObservedObject var model: AppModel
     let item: Item
     let active: Bool
-    private var dark: Bool { isDark(model.space?.theme) }
+    @Environment(\.spaceTheme) private var spaceTheme
+    private var dark: Bool { isDark(spaceTheme ?? model.space?.theme) }
     /// The tab under the pointer, among a split's.
     private let _hovered = State<Int?>(initialValue: nil)
     private var hovered: Int? {
@@ -991,7 +1020,9 @@ struct FavoritesHint: View {
     @ObservedObject var model: AppModel
     let space: Int
 
-    private var dark: Bool { isDark(model.space?.theme) }
+    @Environment(\.spaceTheme) private var spaceTheme
+    private var dark: Bool { isDark(spaceTheme ?? model.space?.theme) }
+    private var accent: Color { model.accent(in: spaceTheme) }
 
     var body: some View {
         let targeted = model.favoritesTargeted
@@ -1003,11 +1034,11 @@ struct FavoritesHint: View {
                 .foregroundStyle(
                     dark
                         ? Color(
-                            nsColor: NSColor(model.accent).blended(withFraction: 0.5, of: .black)!)
+                            nsColor: NSColor(accent).blended(withFraction: 0.5, of: .black)!)
                         : .white,
-                    dark ? .white : model.accent)
+                    dark ? .white : accent)
                 .font(.system(size: 16))
-                .shadow(color: model.accent.opacity(dark ? 0.8 : 0), radius: 4)
+                .shadow(color: accent.opacity(dark ? 0.8 : 0), radius: 4)
             // Our own words, as long as Arc's: two lines at its narrowest.
             Text("Drag tabs to Favorites").font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Ink.primary)
@@ -1025,12 +1056,12 @@ struct FavoritesHint: View {
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
                 .strokeBorder(
-                    dark ? Color.white.opacity(0.3) : model.accent.opacity(0.35),
+                    dark ? Color.white.opacity(0.3) : accent.opacity(0.35),
                     style: StrokeStyle(lineWidth: 1, dash: targeted ? [] : [4, 3])))
         // Like Arc's, in the dark, the accent glows inside the border.
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
-                .strokeBorder(model.accent.opacity(dark ? 0.25 : 0), lineWidth: 4)
+                .strokeBorder(accent.opacity(dark ? 0.25 : 0), lineWidth: 4)
                 .blur(radius: 4)
                 .clipShape(RoundedRectangle(cornerRadius: Measure.radius)))
         .overlay(alignment: .topTrailing) {
@@ -1358,6 +1389,7 @@ func drop(_ ids: [String], _ move: (Int) -> Void) -> Bool {
 /// Its menu's Rename Tab edits its name in place.
 struct TabRow: View {
     @ObservedObject var model: AppModel
+    @Environment(\.spaceTheme) private var spaceTheme
     let tab: Tab
     let active: Bool
     var pinned = false
@@ -1414,7 +1446,7 @@ struct TabRow: View {
         .padding(.leading, 6)
         .padding(.trailing, 6)
         .font(.system(size: 14))
-        .foregroundStyle(model.titleInk)
+        .foregroundStyle(model.titleInk(in: spaceTheme))
         .frame(height: Measure.rowFill)
         .background(
             RoundedRectangle(cornerRadius: Measure.radius)
@@ -1455,6 +1487,7 @@ struct TabRow: View {
 /// A click collapses or expands the folder; its menu's Rename edits its title.
 struct FolderRow: View {
     @ObservedObject var model: AppModel
+    @Environment(\.spaceTheme) private var spaceTheme
     let id: Int
     let title: String
     let expanded: Bool
@@ -1466,7 +1499,7 @@ struct FolderRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            FolderIcon(open: expanded, tint: model.accent)
+            FolderIcon(open: expanded, tint: model.accent(in: spaceTheme))
                 .frame(width: 16)
             if model.renaming == id {
                 NameField(model: model, id: id, title: title, blank: false)

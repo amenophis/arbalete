@@ -173,8 +173,11 @@ extension AppModel {
     /// The color that marks where a drop lands and the focused pane, like Arc's: the one standing
     /// out most on the theme (maxContrastColor); without colors, Arc's lavender in a dark window,
     /// measured, and its indigo in a light one.
-    var themeColor: Color {
-        guard let theme = space?.theme, let lead = theme.colors.first else {
+    var themeColor: Color { themeColor(in: nil) }
+
+    /// The same, in `theme`, a page's Space's while it slides, or else the displayed Space's.
+    func themeColor(in theme: Theme?) -> Color {
+        guard let theme = theme ?? space?.theme, let lead = theme.colors.first else {
             return color(systemDark() ? "#e2e1f3" : "#333ce8")
         }
         return color(ThemePalette(lead).strongest(dark: isDark(theme)))
@@ -197,8 +200,11 @@ extension AppModel {
     }
 
     /// The color of a Space's main buttons, like Arc's: its theme's, or its blue without colors.
-    var accent: Color {
-        (space?.theme.colors.isEmpty ?? true) ? color("#333ce8") : themeColor
+    var accent: Color { accent(in: nil) }
+
+    func accent(in theme: Theme?) -> Color {
+        ((theme ?? space?.theme)?.colors.isEmpty ?? true)
+            ? color("#333ce8") : themeColor(in: theme)
     }
 
     /// The text on those buttons: white, or the theme's dark shade on a dark theme, whose
@@ -227,8 +233,12 @@ extension AppModel {
     }
 
     /// The tabs' titles, like Arc's: the theme's title color, or the sidebar's ink without colors.
-    var titleInk: Color {
-        guard let theme = space?.theme, let lead = theme.colors.first else { return Ink.primary }
+    var titleInk: Color { titleInk(in: nil) }
+
+    func titleInk(in theme: Theme?) -> Color {
+        guard let theme = theme ?? space?.theme, let lead = theme.colors.first else {
+            return Ink.primary
+        }
         let titles = ThemePalette(lead).titles
         return color(isDark(theme) ? titles.dark : titles.light)
     }
