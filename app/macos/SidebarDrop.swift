@@ -395,6 +395,24 @@ extension AppModel {
         }
     }
 
+    /// Whether a drag over the sidebar carries a link, from a page or another app, which a drop
+    /// opens as a tab there, like Arc's.
+    func carriesLink(_ info: DropInfo) -> Bool {
+        dragged == nil && info.hasItemsConforming(to: [.url])
+    }
+
+    /// Opens the link a drag carries as a tab at `index` in `parent`, and shows it.
+    func dropLink(_ info: DropInfo, into parent: Int, at index: Int) {
+        dropTarget = nil
+        guard let provider = info.itemProviders(for: [.url]).first else { return }
+        _ = provider.loadObject(ofClass: URL.self) { [weak self] url, _ in
+            guard let url = url?.absoluteString else { return }
+            DispatchQueue.main.async {
+                self?.run("drop-link", ["url": url, "parent": parent, "index": index])
+            }
+        }
+    }
+
     /// The drag ends: what it carried, and where it landed, if anywhere.
     func endDrag() -> (Int, DropTarget)? {
         // A folder from another window lands without showing a tab.
@@ -447,7 +465,7 @@ struct DropRow<Content: View>: View {
             }
             .onDrag { model.startDrag(item) }
             .onDrop(
-                of: [sidebarNode],
+                of: [sidebarNode, .url],
                 delegate: RowDrop(model: model, item: item, size: _size.wrappedValue, place: place))
     }
 }
@@ -461,11 +479,16 @@ struct TailDrop: DropDelegate {
     let width: CGFloat
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        // Without today's tabs, the line shows under New Tab.
+        let shown: DropTarget = page.today.last.map { .after($0.id) } ?? .into(page.roots.today)
+        if model.carriesLink(info) {
+            model.dropTarget = shown
+            return DropProposal(operation: .copy)
+        }
         guard model.joinDrag() else { return DropProposal(operation: .forbidden) }
         let x = info.location.x
         model.edge(x <= edgeBand ? true : x >= width - edgeBand ? false : nil)
-        // Without today's tabs, the line shows under New Tab.
-        model.hover(page.today.last.map { .after($0.id) } ?? .into(page.roots.today))
+        model.hover(shown)
         return DropProposal(operation: .move)
     }
 
@@ -474,6 +497,10 @@ struct TailDrop: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        if model.carriesLink(info) {
+            model.dropLink(info, into: page.roots.today, at: page.today.count)
+            return true
+        }
         // Only what a drag from the sidebar carries.
         guard model.dragged != nil else { return false }
         let ids = model.draggedTabs
@@ -577,6 +604,10 @@ struct SectionDrop: DropDelegate {
     let shown: DropTarget?
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        if model.carriesLink(info) {
+            model.dropTarget = shown
+            return DropProposal(operation: .copy)
+        }
         guard model.joinDrag() else { return DropProposal(operation: .forbidden) }
         model.hover(shown)
         return DropProposal(operation: .move)
@@ -585,6 +616,10 @@ struct SectionDrop: DropDelegate {
     func dropExited(info: DropInfo) { model.hover(nil) }
 
     func performDrop(info: DropInfo) -> Bool {
+        if model.carriesLink(info) {
+            model.dropLink(info, into: parent, at: index)
+            return true
+        }
         guard model.dragged != nil else { return false }
         let ids = model.draggedTabs
         model.marked = []
@@ -604,6 +639,10 @@ private struct RowDrop: DropDelegate {
     let place: (Int, Int) -> Void
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        if model.carriesLink(info) {
+            model.dropTarget = linkTarget(at: info.location)
+            return DropProposal(operation: .copy)
+        }
         guard model.joinDrag() else { return DropProposal(operation: .forbidden) }
         // The row is inset from the sidebar's edges.
         let band = edgeBand - Measure.inset
@@ -615,7 +654,39 @@ private struct RowDrop: DropDelegate {
 
     func dropExited(info: DropInfo) { model.leave(item.id) }
 
+    /// Where a link dropped at `point` opens, as a new tab: into a folder on its middle, else
+    /// before or after the row.
+    private func linkTarget(at point: CGPoint) -> DropTarget {
+        let band = min(size.height / 4, 8)
+        if case .folder(let id, _, _, _) = item, point.y >= band, point.y <= size.height - band {
+            return .into(id)
+        }
+        return fallback(at: point)
+    }
+
+    /// Opens a link dropped on the row as a tab where `linkTarget` says.
+    private func dropLink(_ info: DropInfo) {
+        let target = linkTarget(at: info.location)
+        if case .into(let folder) = target, case .folder(_, _, _, let children) = item {
+            return model.dropLink(info, into: folder, at: children.count)
+        }
+        // After an open folder is before what it holds.
+        if case .after = target, case .folder(let folder, _, true, _) = item {
+            return model.dropLink(info, into: folder, at: 0)
+        }
+        guard let (parent, index) = model.place(of: item.id) else { return }
+        if case .after = target {
+            model.dropLink(info, into: parent, at: index + 1)
+        } else {
+            model.dropLink(info, into: parent, at: index)
+        }
+    }
+
     func performDrop(info: DropInfo) -> Bool {
+        if model.carriesLink(info) {
+            dropLink(info)
+            return true
+        }
         let ids = model.draggedTabs
         model.marked = []
         guard let (id, target) = model.endDrag(), !ids.contains(item.id), id != item.id else {
@@ -743,10 +814,12 @@ struct FavoritesTarget: NSViewRepresentable {
     let hover: (CGPoint?) -> Void
     /// Drops the node with this id, which the drag carries.
     let drop: (Int) -> Bool
+    /// Makes a link dragged in from a page or another app a favorite.
+    var dropLink: (String) -> Bool = { _ in false }
 
     func makeNSView(context: Context) -> Target {
         let view = Target()
-        view.registerForDraggedTypes([.sidebarNode])
+        view.registerForDraggedTypes([.sidebarNode, .URL])
         return view
     }
 
@@ -755,6 +828,7 @@ struct FavoritesTarget: NSViewRepresentable {
         view.tile = tile
         view.hover = hover
         view.drop = drop
+        view.dropLink = dropLink
     }
 
     final class Target: NSView {
@@ -762,6 +836,7 @@ struct FavoritesTarget: NSViewRepresentable {
         var tile = CGSize.zero
         var hover: (CGPoint?) -> Void = { _ in }
         var drop: (Int) -> Bool = { _ in false }
+        var dropLink: (String) -> Bool = { _ in false }
         private let shape = DragShape()
 
         override var isFlipped: Bool { true }
@@ -783,8 +858,19 @@ struct FavoritesTarget: NSViewRepresentable {
                 .flatMap { Int(String(decoding: $0, as: UTF8.self)) }
         }
 
-        /// Like Arc's, the favorites take tabs and splits, not folders.
+        /// A web link a drag from a page or another app carries, which becomes a favorite.
+        private func link(_ sender: any NSDraggingInfo) -> String? {
+            guard carried(sender) == nil,
+                let url = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self])?.first
+                    as? URL,
+                ["http", "https"].contains(url.scheme?.lowercased())
+            else { return nil }
+            return url.absoluteString
+        }
+
+        /// Like Arc's, the favorites take tabs and splits, not folders, and links.
         private func takes(_ sender: any NSDraggingInfo) -> Bool {
+            if link(sender) != nil { return true }
             guard model?.joinDrag() == true, let id = carried(sender), let item = model?.item(id)
             else { return false }
             if case .folder = item { return false }
@@ -793,14 +879,16 @@ struct FavoritesTarget: NSViewRepresentable {
 
         override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
             guard takes(sender) else { return [] }
-            shape.morph(sender, in: self, size: tile, image: tileImage(carried(sender)))
+            if link(sender) == nil {
+                shape.morph(sender, in: self, size: tile, image: tileImage(carried(sender)))
+            }
             return draggingUpdated(sender)
         }
 
         override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
             guard takes(sender) else { return [] }
             hover(convert(sender.draggingLocation, from: nil))
-            return .move
+            return link(sender) == nil ? .move : .copy
         }
 
         override func draggingExited(_ sender: (any NSDraggingInfo)?) {
@@ -814,6 +902,7 @@ struct FavoritesTarget: NSViewRepresentable {
 
         override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
             shape.forget()
+            if let url = link(sender) { return dropLink(url) }
             guard let id = carried(sender) else { return false }
             return drop(id)
         }
