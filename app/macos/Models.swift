@@ -99,6 +99,8 @@ struct Tab: Decodable, Identifiable {
     var title: String
     var favicon: String?
     var muted: Bool?
+    /// Its page plays sound: its row shows the speaker, which mutes it.
+    var audible: Bool?
     /// Its page is frozen or unloaded to save memory.
     var asleep: Bool?
     /// Its page was shown since it opened, even if unloaded since.

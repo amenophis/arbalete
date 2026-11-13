@@ -1639,8 +1639,15 @@ wrap_dev_tools_message_observer! {
     }
 
     impl DevToolsMessageObserver {
-        fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
-            let Some(message) = parse(message).filter(|m| m["sessionId"].is_null()) else { return 0 };
+        fn on_dev_tools_message(&self, browser: Option<&mut Browser>, message: Option<&[u8]>) -> i32 {
+            let Some(message) = parse(message) else { return 0 };
+            if let Some(browser) = browser {
+                crate::shell::page_sound(browser, &message);
+            }
+            // The sessions of the page's frames of other sites only tell of sound.
+            if !message["sessionId"].is_null() {
+                return 0;
+            }
             if message["id"] == CONTENT_INFO {
                 content_info(self.profile, self.page, &message);
             } else if message["id"] == PLAYING {
