@@ -439,6 +439,15 @@ pub(super) fn new_folder(parent: Option<NodeId>) {
     }
 }
 
+/// Puts tabs in a new folder and asks the sidebar to rename it, like Arc's. Like a selection,
+/// unknown tabs are ignored.
+pub(super) fn folder_with(tabs: &[NodeId]) {
+    // Named like a new folder.
+    if let Ok(folder) = update_sidebar(|sidebar| sidebar.folder_with(tabs, "Untitled")) {
+        ask("arbalete:rename", &json!(folder));
+    }
+}
+
 /// Reopens a closed tab, by its rank from the last closed one, and shows it with its Space: back
 /// in its split, beside the tab it showed with while that one is open, like Arc's; else back in
 /// its folder or section at its index; else in the displayed Space.

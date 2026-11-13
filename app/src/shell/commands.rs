@@ -154,6 +154,7 @@ fn run_command(command: Command) {
         (Command::UndoClose, _) => undo_close(),
         (Command::Pin(tab), _) => toggle_pin(tab),
         (Command::NewFolder(parent), _) => new_folder(parent),
+        (Command::FolderWith(tabs), _) => folder_with(&tabs),
         (Command::NewEasel, _) => new_easel(),
         (Command::ShowLiveCapture(number, id, url, page, scale), _) => {
             show_live_capture((number, id), &url, page, scale)

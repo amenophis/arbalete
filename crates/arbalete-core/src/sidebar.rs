@@ -1842,6 +1842,50 @@ impl Sidebar {
         Ok(())
     }
 
+    /// Puts tabs, with their splits, and folders in a new folder of their Space, in the sidebar's
+    /// order, like Arc's "New Folder with N Items": the new folder takes the place of the first
+    /// of them if it is pinned, else goes at the end of the pinned tabs. Favorites stay where
+    /// they are, and so does what is in another Space than the first one.
+    pub fn folder_with(&mut self, ids: &[NodeId], title: &str) -> Result<NodeId, Error> {
+        let rows = self.rows_of(ids);
+        let &(_, first) = rows.first().ok_or(Error::NotATab)?;
+        let space = self.space_of(first).ok_or(Error::UnknownNode)?;
+        let (parent, index) = if self.is_pinned(first) {
+            self.place_of(first).ok_or(Error::UnknownNode)?
+        } else {
+            (self.space(space)?.pinned, usize::MAX)
+        };
+        let folder = self.add_folder(parent, title)?;
+        self.move_node(folder, parent, index)?;
+        for (_, row) in rows {
+            if self.space_of(row) == Some(space) {
+                self.move_node(row, folder, usize::MAX)?;
+            }
+        }
+        Ok(folder)
+    }
+
+    /// The Spaces' tabs and folders among `ids`, in the sidebar's order, each with its row, the
+    /// split a tab is in or the folder itself, but for what moves with a row before it.
+    fn rows_of(&self, ids: &[NodeId]) -> Vec<(NodeId, NodeId)> {
+        let mut order = Vec::new();
+        for space in &self.spaces {
+            self.push_nodes(space.pinned, &mut order);
+            self.push_nodes(space.today, &mut order);
+        }
+        let mut rows: Vec<(NodeId, NodeId)> = Vec::new();
+        for id in order.into_iter().filter(|id| ids.contains(id)) {
+            let row = if self.is_tab(id) { self.row_of(id) } else { id };
+            if !self
+                .ancestors(row)
+                .any(|ancestor| rows.iter().any(|&(_, seen)| seen == ancestor))
+            {
+                rows.push((id, row));
+            }
+        }
+        rows
+    }
+
     /// The tabs inside a folder, those of the folders it holds included, in the sidebar's order.
     pub fn folder_tabs(&self, folder: NodeId) -> Result<Vec<NodeId>, Error> {
         match self.nodes.get(&folder).map(|n| &n.kind) {
@@ -2252,6 +2296,14 @@ impl Sidebar {
         }
     }
 
+    /// Appends every node inside `parent`, each before what it holds.
+    fn push_nodes(&self, parent: NodeId, nodes: &mut Vec<NodeId>) {
+        for &id in &self.nodes[&parent].children {
+            nodes.push(id);
+            self.push_nodes(id, nodes);
+        }
+    }
+
     /// Appends every tab inside `parent`, collapsed folders included, depth first.
     fn push_tabs(&self, parent: NodeId, tabs: &mut Vec<NodeId>) {
         for &id in &self.nodes[&parent].children {
@@ -2544,6 +2596,46 @@ mod tests {
         assert_eq!(sidebar.displayed().selected, None);
         // Pinned, its tabs keep their url.
         assert!(sidebar.is_pinned(tab));
+    }
+
+    #[test]
+    fn puts_tabs_in_a_folder_at_the_first_pinned_ones_place() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let first = sidebar
+            .add_tab(home.pinned, "https://a.test/", "A")
+            .unwrap();
+        let second = sidebar
+            .add_tab(home.pinned, "https://b.test/", "B")
+            .unwrap();
+        let other = sidebar
+            .add_tab(home.pinned, "https://c.test/", "C")
+            .unwrap();
+        let split = sidebar.add_tab(home.today, "https://d.test/", "D").unwrap();
+        let beside = sidebar.add_tab(home.today, "https://e.test/", "E").unwrap();
+        let joined = sidebar.split(beside, split).unwrap();
+        let folder = sidebar
+            .folder_with(&[beside, other, second, split], "Untitled")
+            .unwrap();
+        assert_eq!(children(&sidebar, home.pinned), [first, folder]);
+        // A split moves whole, once, and its tabs become pinned.
+        assert_eq!(children(&sidebar, folder), [second, other, joined]);
+        assert!(sidebar.is_pinned(split));
+        assert!(children(&sidebar, home.today).is_empty());
+    }
+
+    #[test]
+    fn puts_today_tabs_in_a_folder_at_the_end_of_the_pinned_ones() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let pinned = sidebar
+            .add_tab(home.pinned, "https://a.test/", "A")
+            .unwrap();
+        let tab = sidebar.add_tab(home.today, "https://b.test/", "B").unwrap();
+        let folder = sidebar.folder_with(&[tab], "Untitled").unwrap();
+        assert_eq!(children(&sidebar, home.pinned), [pinned, folder]);
+        assert_eq!(children(&sidebar, folder), [tab]);
+        assert_eq!(sidebar.folder_with(&[], "Untitled"), Err(Error::NotATab));
     }
 
     #[test]

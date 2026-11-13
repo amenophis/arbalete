@@ -157,7 +157,8 @@ pub fn find(entries: Vec<Entry>, id: &str) -> Option<Action> {
     })
 }
 
-/// The menu of several tabs selected at once, like Arc's: their links, moving and closing them all.
+/// The menu of several tabs selected at once, like Arc's: their links, moving them, putting them
+/// in a new folder and closing them all.
 pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
     let urls: Vec<&str> = ids
         .iter()
@@ -172,13 +173,7 @@ pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
         .map(|space| {
             Entry::Item(Item {
                 id: format!("move/{}", serde_json::to_string(&space.id).expect("an id")),
-                title: match &space.emoji {
-                    // A symbol or a site's icon shows only in the sidebar.
-                    Some(emoji) if !emoji.starts_with("symbol:") && !emoji.starts_with("site:") => {
-                        format!("{emoji}  {}", space.title)
-                    }
-                    _ => space.title.clone(),
-                },
+                title: space_title(space),
                 checked: false,
                 enabled: true,
                 action: Action::RunEach(
@@ -197,6 +192,12 @@ pub fn tabs_menu(sidebar: &Sidebar, ids: &[NodeId]) -> Vec<Entry> {
         ),
         Entry::Separator,
         Entry::Submenu("Move to".to_string(), spaces),
+        // In Arc's words, whose selections may hold folders.
+        item(
+            "new-folder",
+            &format!("New Folder with {} Items", urls.len()),
+            Action::Run(Command::FolderWith(ids.to_vec())),
+        ),
         Entry::Separator,
         item(
             "close",
@@ -730,6 +731,31 @@ mod tests {
 
     fn choose(sidebar: &Sidebar, id: NodeId, item: &str) -> Option<Action> {
         find(build(sidebar, Target::Node(id))?, item)
+    }
+
+    #[test]
+    fn selected_tabs_move_to_a_new_folder() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let tabs =
+            ["https://a.test/", "https://b.test/"].map(|url| sidebar.open_tab(home, url).unwrap());
+        let menu = tabs_menu(&sidebar, &tabs);
+        assert_eq!(
+            titles(&menu),
+            [
+                "Copy Links",
+                "-",
+                "Move to ▸",
+                "  Home",
+                "New Folder with 2 Items",
+                "-",
+                "Close 2 Tabs",
+            ]
+        );
+        assert_eq!(
+            find(menu, "new-folder"),
+            Some(Action::Run(Command::FolderWith(tabs.to_vec())))
+        );
     }
 
     #[test]
