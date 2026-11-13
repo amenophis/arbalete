@@ -402,6 +402,8 @@ pub enum Error {
     DefaultProfile,
     /// Like Arc's, only a profile no Space uses can be deleted.
     ProfileInUse,
+    /// Nothing goes in or out of an incognito window, which another window's drag could reach.
+    Incognito,
 }
 
 /// What a window shows of the sidebar: its displayed Space, each Space's selected tab and the
@@ -541,6 +543,21 @@ impl Sidebar {
             .ok()
             .and_then(|s| self.profiles.iter().find(|p| p.id == s.profile))
             .is_some_and(|p| p.incognito)
+    }
+
+    /// Refuses to move or split `id` into `into`, a container or a tab, across an incognito
+    /// window's edge, as a drag from another window could.
+    fn check_incognito(&self, id: NodeId, into: NodeId) -> Result<(), Error> {
+        let incognito = |node| {
+            self.profile_of(node)
+                .and_then(|id| self.profiles.iter().find(|p| p.id == id))
+                .is_some_and(|p| p.incognito)
+        };
+        if incognito(id) == incognito(into) {
+            Ok(())
+        } else {
+            Err(Error::Incognito)
+        }
     }
 
     /// Whether a window showing the Space `shown` may show the tab or Space `space`: an
@@ -738,13 +755,23 @@ impl Sidebar {
         }
         self.displayed = view.displayed.filter(|&id| self.space(id).is_ok());
         let selected: HashMap<_, _> = view.selected.iter().copied().collect();
+        // A tab another window moved out of a Space, by a drag, no longer shows in it; a favorite
+        // of the Space's profile still does.
         let tabs: Vec<_> = self
             .spaces
             .iter()
-            .map(|s| selected.get(&s.id).copied().flatten())
+            .map(|s| {
+                selected.get(&s.id).copied().flatten().filter(|&tab| {
+                    self.nodes.contains_key(&tab)
+                        && match self.space_of(tab) {
+                            Some(space) => space == s.id,
+                            None => self.profile_of(tab) == Some(s.profile),
+                        }
+                })
+            })
             .collect();
         for (space, tab) in self.spaces.iter_mut().zip(tabs) {
-            space.selected = tab.filter(|tab| self.nodes.contains_key(tab));
+            space.selected = tab;
         }
     }
 
@@ -1293,6 +1320,7 @@ impl Sidebar {
             favicon,
             ..
         } = original.clone();
+        self.check_incognito(tab, parent)?;
         let copy = self.add_tab(parent, &url, &title)?;
         self.tab_mut(copy).expect("just added").favicon = favicon;
         let children = self.children_mut(parent);
@@ -1368,6 +1396,7 @@ impl Sidebar {
     pub fn move_node(&mut self, id: NodeId, parent: NodeId, index: usize) -> Result<(), Error> {
         let old_parent = self.movable(id)?;
         self.check_container(parent)?;
+        self.check_incognito(id, parent)?;
         if self.ancestors(parent).any(|ancestor| ancestor == id) {
             return Err(Error::MoveIntoItself);
         }
@@ -1407,6 +1436,7 @@ impl Sidebar {
     ) -> Result<NodeId, Error> {
         self.check_tab(tab)?;
         self.check_tab(target)?;
+        self.check_incognito(tab, target)?;
         let parent = self.movable(target)?;
         if tab == target || self.is_favorite(target) || self.row_of(tab) == self.row_of(target) {
             return Err(Error::NotSplittable);
@@ -4255,6 +4285,32 @@ mod tests {
     }
 
     #[test]
+    fn forgets_a_tab_another_window_moved_out_of_a_space() {
+        let mut sidebar = Sidebar::default();
+        let home = sidebar.spaces()[0].id;
+        let profile = sidebar.profiles()[0].id;
+        let work = sidebar.create_space("Work", profile).unwrap();
+        let tab = sidebar.open_tab(home, "https://a.test").unwrap();
+        let favorite = sidebar.open_tab(home, "https://b.test").unwrap();
+        let favorites = sidebar.profiles()[0].favorites;
+        sidebar.move_node(favorite, favorites, 0).unwrap();
+        // One window shows the tab in Home, another shows Work.
+        sidebar.select(home, tab).unwrap();
+        let first = sidebar.view();
+        sidebar.set_view(&sidebar.view_showing(work));
+        // The other window's drag moves the tab into Work.
+        let today = sidebar.space(work).unwrap().today;
+        sidebar.move_node(tab, today, 0).unwrap();
+        sidebar.set_view(&first);
+        assert_eq!(sidebar.space(home).unwrap().selected, None);
+        // A favorite of the Space's profile still shows in it.
+        sidebar.select(home, favorite).unwrap();
+        let first = sidebar.view();
+        sidebar.set_view(&first);
+        assert_eq!(sidebar.space(home).unwrap().selected, Some(favorite));
+    }
+
+    #[test]
     fn keeps_an_incognito_space_unlisted_unsaved_and_apart() {
         let mut sidebar = Sidebar::default();
         let home = sidebar.spaces()[0].id;
@@ -4278,6 +4334,16 @@ mod tests {
         assert_eq!(sidebar.space_at(1), Some(home));
         assert!(sidebar.move_to_space(tab, incognito).is_err());
         assert!(sidebar.move_to_space(secret, home).is_err());
+        // Nor by a drag from another window.
+        let (pinned, today) = (sidebar.spaces()[0].pinned, sidebar.spaces()[0].today);
+        let into = sidebar.space(incognito).unwrap().today;
+        assert_eq!(sidebar.move_node(tab, into, 0), Err(Error::Incognito));
+        assert_eq!(sidebar.move_node(secret, pinned, 0), Err(Error::Incognito));
+        assert_eq!(sidebar.split(tab, secret), Err(Error::Incognito));
+        assert_eq!(sidebar.split(secret, tab), Err(Error::Incognito));
+        assert_eq!(sidebar.duplicate(secret, today, 0), Err(Error::Incognito));
+        assert_eq!(sidebar.space_of(tab), Some(home));
+        assert_eq!(sidebar.space_of(secret), Some(incognito));
         assert!(sidebar.delete_space(incognito).is_err());
         assert!(sidebar.reaches(incognito, incognito));
         assert!(!sidebar.reaches(incognito, home));

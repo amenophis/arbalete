@@ -245,11 +245,15 @@ fn run_command(command: Command) {
         (Command::Move(id, parent, index), _) => {
             if update_sidebar(|sidebar| sidebar.move_node(id, parent, index)).is_ok() {
                 show_selected();
+                show_selected_elsewhere();
             }
         }
         (Command::Split(tab, target, before), _) => {
             match update_sidebar(|sidebar| sidebar.split_beside(tab, target, before)) {
-                Ok(_) => show_selected(),
+                Ok(_) => {
+                    show_selected();
+                    show_selected_elsewhere();
+                }
                 Err(Error::SplitFull) => tell_split_full(),
                 Err(_) => {}
             }

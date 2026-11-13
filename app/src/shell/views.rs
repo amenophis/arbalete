@@ -85,6 +85,24 @@ pub(super) fn show_selected() {
     }
 }
 
+/// Each other window that shows a page while it selects none, as a drag from another window
+/// moved its tab out of its Space, shows what it selects now: nothing, like a tab moved to
+/// another Space.
+pub(super) fn show_selected_elsewhere() {
+    let current = FOCUSED.get();
+    let others: Vec<u32> =
+        WINDOWS.with_borrow(|windows| windows.iter().map(|win| win.id).collect());
+    for other in others.into_iter().filter(|&id| id != current) {
+        focus(other);
+        let selected = STATE.with_borrow(|state| state.sidebar.displayed().selected);
+        let shows = win().shown.get().is_some() || !win().split.borrow().0.is_empty();
+        if selected.is_none() && shows {
+            show_selected();
+        }
+    }
+    focus(current);
+}
+
 /// Starts loading a tab's page while it stays hidden, like a link opened behind the page shown:
 /// its title and icon come in the sidebar meanwhile. Until its profile's web data is ready, it
 /// loads once shown instead.
