@@ -10,7 +10,6 @@ import SwiftUI
 @MainActor
 final class Backdrop {
     private let effect: NSVisualEffectView
-    private var watch: AnyCancellable?
     private var activity: [NSObjectProtocol] = []
 
     init(content: NSView, model: AppModel) {
@@ -38,12 +37,8 @@ final class Backdrop {
                 }
             }
         // Like Arc's, a theme's colors lie over a light blur, whatever the appearance; without
-        // colors, the blur is the system's appearance's.
-        // Once the state changed: its publisher tells before.
-        watch = model.$state.receive(on: DispatchQueue.main).sink { [effect] _ in
-            let colored = !(model.space?.theme.colors.isEmpty ?? true)
-            effect.material = colored || !systemDark() ? .light : .dark
-        }
+        // colors, in the dark, a dark blur fades in over it (PagingTint).
+        effect.material = .light
     }
 }
 
@@ -199,16 +194,36 @@ private struct PagingTint: View, Animatable {
         let first = Int(at.rounded(.down))
         let share = at - Double(first)
         let dark = systemDark()
-        let look = TintLook(
-            themes.indices.contains(first) ? themes[first] : nil, active: active,
-            systemIsDark: dark)
-        if share > 0, first < last {
-            look.blended(
-                with: TintLook(themes[first + 1], active: active, systemIsDark: dark), share
+        let from = themes.indices.contains(first) ? themes[first] : nil
+        let to = share > 0 && first < last ? themes[first + 1] : from
+        // The dark blur of a Space without colors, in the dark, fades as the pages slide.
+        let darkBlur = [from, to].map { dark && ($0?.colors.isEmpty ?? true) ? 1.0 : 0 }
+        let fade = darkBlur[0] + (darkBlur[1] - darkBlur[0]) * share
+        ZStack {
+            if fade > 0 {
+                DarkBlur(active: active).opacity(fade)
+            }
+            TintLook(from, active: active, systemIsDark: dark).blended(
+                with: TintLook(to, active: active, systemIsDark: dark), share
             ).view
-        } else {
-            look.view
         }
+    }
+}
+
+/// The desktop blurred through the window, darkly, over the backdrop's light blur.
+private struct DarkBlur: NSViewRepresentable {
+    let active: Bool
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .dark
+        view.blendingMode = .behindWindow
+        view.isEmphasized = true
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.state = active ? .active : .inactive
     }
 }
 
