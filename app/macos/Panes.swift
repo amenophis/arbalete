@@ -508,7 +508,7 @@ final class PagePlacer {
 }
 
 /// A page's bar, like Arc's: back and forward, the host the page shows, and × to close it; the
-/// focused page's has reload and the split's menu too.
+/// focused page's has reload and the split's menu too. Dragged, it carries the page.
 struct PaneBar: View {
     @ObservedObject var model: AppModel
     let pane: Pane?
@@ -573,6 +573,9 @@ struct PaneBar: View {
             // Its ink reads on its color: the page's at its top, or the card's.
             .environment(
                 \.colorScheme, luminance(pane.color ?? model.cardColor) < 0.179 ? .dark : .light)
+            // Dragged by its bar, the page goes like its tab dragged from the sidebar: to another
+            // window's sidebar or page, out of the windows, or out of the split.
+            .onDrag { model.item(pane.tab).map(model.startDrag) ?? NSItemProvider() }
         }
     }
 
