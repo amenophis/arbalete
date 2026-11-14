@@ -17,11 +17,11 @@ use objc2_app_kit::NSUserInterfaceItemIdentification;
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApp, NSApplication, NSAutoresizingMaskOptions, NSColor,
     NSControlStateValueOff, NSControlStateValueOn, NSDownArrowFunctionKey, NSEvent, NSEventMask,
-    NSEventModifierFlags, NSEventPhase, NSEventType, NSF12FunctionKey, NSImage,
-    NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString,
-    NSRightArrowFunctionKey, NSSharingServicePicker, NSText, NSTextField, NSUpArrowFunctionKey,
-    NSView, NSWindow, NSWindowButton, NSWindowDidBecomeKeyNotification, NSWindowStyleMask,
-    NSWindowTitleVisibility, NSWorkspace,
+    NSEventModifierFlags, NSEventPhase, NSEventType, NSF12FunctionKey, NSFloatingWindowLevel,
+    NSImage, NSLeftArrowFunctionKey, NSMenu, NSMenuItem, NSNormalWindowLevel, NSPasteboard,
+    NSPasteboardTypeString, NSRightArrowFunctionKey, NSSharingServicePicker, NSText, NSTextField,
+    NSUpArrowFunctionKey, NSView, NSWindow, NSWindowButton, NSWindowDidBecomeKeyNotification,
+    NSWindowStyleMask, NSWindowTitleVisibility, NSWorkspace,
 };
 use objc2_foundation::{
     NSAppleEventDescriptor, NSAppleEventManager, NSArray, NSData, NSDataBase64DecodingOptions,
@@ -396,6 +396,13 @@ define_class!(
             if action == Some(sel!(arbaleteClosePeek:)) {
                 return Bool::new(crate::shell::peek_shown());
             }
+            if action == Some(sel!(arbaleteKeepOnTop:)) {
+                let mtm = MainThreadMarker::new().expect("main thread");
+                let window = NSApp(mtm).mainWindow();
+                let on_top = window.as_ref().is_some_and(|w| w.level() == NSFloatingWindowLevel);
+                item.setState(if on_top { NSControlStateValueOn } else { NSControlStateValueOff });
+                return Bool::new(window.is_some());
+            }
             if action == Some(sel!(arbaleteCheckForUpdates:)) {
                 return Bool::new(crate::native::can_check_for_updates());
             }
@@ -463,6 +470,16 @@ define_class!(
         #[unsafe(method(arbaleteMakeDefaultBrowser:))]
         fn make_default_browser(&self, _sender: Option<&AnyObject>) {
             crate::native::make_default_browser();
+        }
+
+        // Like Arc's Keep Window on Top: the window stays above other apps' until turned off.
+        #[unsafe(method(arbaleteKeepOnTop:))]
+        fn keep_on_top(&self, _sender: Option<&AnyObject>) {
+            let mtm = MainThreadMarker::new().expect("main thread");
+            if let Some(window) = NSApp(mtm).mainWindow() {
+                let on_top = window.level() == NSFloatingWindowLevel;
+                window.setLevel(if on_top { NSNormalWindowLevel } else { NSFloatingWindowLevel });
+            }
         }
 
         #[unsafe(method(arbaleteLibrary:))]
@@ -1328,6 +1345,12 @@ fn window_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
             );
             item
         },
+        item(
+            mtm,
+            ns_string!("Keep Window on Top"),
+            sel!(arbaleteKeepOnTop:),
+            ns_string!(""),
+        ),
         NSMenuItem::separatorItem(mtm),
         item(
             mtm,
