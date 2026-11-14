@@ -1,6 +1,6 @@
 # 0012 — Importing cookies
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-14
 
 ## Context
@@ -74,22 +74,27 @@ each cookie through the destination profile's cookie manager, leaving out cookie
   `persist_session_cookies`, and many sign-ins live in one), except partitioned ones (`top_frame_site_key` not empty), which `CefCookie` cannot express;
   they are third-party embeds' state, not sign-ins. Firefox and Safari keep cookies otherwise (Firefox's
   `cookies.sqlite` in clear, Safari's `Cookies.binarycookies` behind Full Disk Access): left for later.
-- **Asked**: a "Cookies (stay signed in)" switch per browser in the import assistant and the welcome flow's
-  import step, on by default, with one line under it: macOS will ask for that browser's key, choose Allow. The
-  key is asked for only when the switch is on and the import starts, once per browser.
+- **Asked**: one "Cookies, to stay signed in" switch for the import, in the import assistant and the welcome
+  flow's import step, shown when a Chromium browser is ticked, on by default, with one line under it: macOS
+  asks for each browser's key, choose Allow. One switch rather than one per browser: the browsers ticked
+  already say which. The key is asked for only when the switch is on and the import starts, once per browser.
 - **Read** in `arbalete-core` (`import::cookies`), on the import's own thread, like the history: copy the
   database, read the rows, decrypt with the key given, check the host hash, convert. The key comes from
-  `app` (`mac.rs`, next to `ensure_keychain_access`), found by the browser's service name and read with
-  `SecItemCopyMatching`; decryption uses small pure-Rust crates (`aes`, `cbc`, `pbkdf2`, `sha1`, MIT or
+  `app` (`mac.rs`, next to `ensure_keychain_access`), read by the browser's service name, whatever its
+  account, with `SecKeychainFindGenericPassword` like Arbalete's own key (`import::safe_storage` names each
+  browser's item: Arc's and Dia's after them, unconfirmed); decryption uses small pure-Rust crates (`aes`, `cbc`, `pbkdf2`, `sha1`, MIT or
   Apache-2.0), so the core stays testable without a keychain.
-- **Written** with `CefCookieManager::SetCookie` (option 2), into the profile imported into, once its request
-  context is ready: the URL is `https://` (or `http://` when not secure) plus `host_key` without its dot plus
+- **Written** with `CefCookieManager::SetCookie` (option 2), into the profile imported into, through a request
+  context sharing its storage (`profile_context`), whose cookie manager queues the calls until it is ready: the URL is `https://` (or `http://` when not secure) plus `host_key` without its dot plus
   `path`; a domain cookie keeps its `domain`, a host-only one gets none; expiry, `httponly`, `secure`,
   SameSite and priority map one to one. A cookie the Arbalete profile already has (same name, domain and path)
-  is kept, not replaced: it is the newer sign-in, as in Arc. `FlushStore` at the end.
-- **Told**: "Import done" counts the cookies imported, and lists each browser whose cookies were not, with
-  why (key not allowed, database missing or unreadable); "Try again" re-runs only the cookies of that browser.
-  Cookies failing `SetCookie` one by one are counted, not listed.
+  is kept, not replaced: it is the newer sign-in, as in Arc (the profile's cookies are visited first).
+  `FlushStore` at the end.
+- **Told**: the welcome flow's "All moved in" counts the cookies imported, and lists each browser whose
+  cookies were not, with why (key not allowed or missing, database unreadable, not decrypted); the import
+  assistant, which closes once done, says the same in a toast. To try again, the user imports that browser
+  again: no separate "Try again" for its cookies. Cookies failing `SetCookie` one by one are counted in the
+  log, not listed.
 - **Kept secret**: decrypted values exist only in memory, from the import thread to the cookie manager, never
   in the sidebar, the UI's JSON, logs, errors or crash reports. The cookie type's `Debug` prints neither name
   nor value; errors name the browser and a count. The other browser's key is dropped once its profiles are
