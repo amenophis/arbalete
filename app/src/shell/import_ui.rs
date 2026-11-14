@@ -1,6 +1,8 @@
 //! The import assistant, which brings other browsers' data into Arbalete's.
 
 use super::*;
+use arbalete_core::boosts::Boost;
+use arbalete_core::import::arc_boosts;
 
 /// The import assistant's size, at most (app/macos/Import.swift).
 const IMPORT_SIZE: Size = Size {
@@ -132,7 +134,8 @@ pub(super) fn run_import(choices: Vec<Choice>) {
     thread::spawn(move || {
         let sources = import::read(&browsers, &choices);
         let found = importable_extensions(&browsers, &choices);
-        let read = Arc::new(Mutex::new(Some((sources, found))));
+        let arc = arc_boosts(&browsers, &choices);
+        let read = Arc::new(Mutex::new(Some((sources, found, arc))));
         post_task(ThreadId::UI, Some(&mut ApplyImport::new(read)));
     });
 }
@@ -153,8 +156,28 @@ fn importable_extensions(browsers: &[browsers::Browser], choices: &[Choice]) -> 
     found.collect()
 }
 
-/// The chosen profiles read, and their extensions, handed to the UI thread.
-type Read = Arc<Mutex<Option<(Vec<import::Source>, Found)>>>;
+/// Arc's Boosts, for each chosen profile of Arc, by its browser's and its own index: Arc's
+/// Boosts are its user's, in every profile.
+type ArcBoosts = HashMap<(usize, usize), Vec<Boost>>;
+
+fn arc_boosts(browsers: &[browsers::Browser], choices: &[Choice]) -> ArcBoosts {
+    let found = choices.iter().filter_map(|choice| {
+        let browser = browsers.get(choice.browser)?;
+        let profile = browser.profiles.get(choice.profile)?;
+        // Arc's data directory holds `User Data`, which holds its profiles.
+        let dir = profile.path.parent()?.parent()?;
+        let read = (browser.family == Family::Arc).then(|| arc_boosts::read_boosts(dir))?;
+        let boosts = read.unwrap_or_else(|error| {
+            eprintln!("cannot import Arc's Boosts: {error}");
+            Vec::new()
+        });
+        Some(((choice.browser, choice.profile), boosts))
+    });
+    found.collect()
+}
+
+/// The chosen profiles read, their extensions and Arc's Boosts, handed to the UI thread.
+type Read = Arc<Mutex<Option<(Vec<import::Source>, Found, ArcBoosts)>>>;
 
 wrap_task! {
     struct ApplyImport {
@@ -164,8 +187,8 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             let read = self.read.lock().ok().and_then(|mut read| read.take());
-            let (sources, found) = read.unwrap_or_default();
-            apply_import(sources, &found);
+            let (sources, found, arc) = read.unwrap_or_default();
+            apply_import(sources, &found, arc);
         }
     }
 }
@@ -199,7 +222,7 @@ fn offered_extensions(targets: &[(Choice, ProfileId)], found: &Found) -> Vec<ser
 /// Adds the browser profiles read to the sidebar as it is now, then shows the first Space
 /// imported with its first tab, or a blank page when it has none. Their histories are merged on
 /// a thread of their own.
-fn apply_import(sources: Vec<import::Source>, found: &Found) {
+fn apply_import(sources: Vec<import::Source>, found: &Found, mut arc: ArcBoosts) {
     IMPORTING.set(false);
     let (imported, shown, spaces) = update_sidebar(|sidebar| {
         let mut new = if is_untouched(sidebar) {
@@ -236,6 +259,11 @@ fn apply_import(sources: Vec<import::Source>, found: &Found) {
     }
     let pages = imported.histories.iter().map(|(_, entries)| entries.len());
     let pages: usize = pages.sum();
+    for (choice, profile) in &imported.targets {
+        if let Some(list) = arc.remove(&(choice.browser, choice.profile)) {
+            boosts::import_boosts(*profile, list);
+        }
+    }
     let offered = offered_extensions(&imported.targets, found);
     let histories = imported.histories.into_iter();
     let histories: Vec<_> = histories
