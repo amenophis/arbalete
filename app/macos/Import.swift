@@ -1,7 +1,8 @@
 // The import assistant, shown above the page by the app on the first launch and from the menu
 // (show_import in app/src/shell/import_ui.rs), to import other browsers' data. Arc is picked by
 // default: Arbalete users most likely come from it. While the app reads the browsers' data, it
-// shows the import running; the app hides it once done.
+// shows the import running; the app hides it once done. The Chromium browsers' cookies come too
+// unless turned off: macOS asks for each browser's key.
 
 import AppKit
 import SwiftUI
@@ -15,6 +16,8 @@ struct Sources: Decodable {
         var name: String
         /// Arc's sidebar is imported as Spaces: it has no bookmarks bar to place.
         var arc: Bool
+        /// A Chromium browser, whose cookies can come too (decision 0012).
+        var cookies: Bool
         var profiles: [BrowserProfile]
     }
     struct Target: Decodable, Identifiable {
@@ -56,9 +59,10 @@ struct ImportChoice: Encodable {
     var checked: Bool
     var into: Int?
     var bar: String
+    var cookies = false
 
     private enum Keys: String, CodingKey {
-        case browser, profile, into, bar
+        case browser, profile, into, bar, cookies
     }
 
     func encode(to encoder: Encoder) throws {
@@ -67,6 +71,7 @@ struct ImportChoice: Encodable {
         try keys.encode(profile, forKey: .profile)
         try keys.encode(into, forKey: .into)
         try keys.encode(bar, forKey: .bar)
+        try keys.encode(cookies, forKey: .cookies)
     }
 }
 
@@ -75,6 +80,8 @@ final class ImportModel: ObservableObject {
     @Published var sources: Sources?
     @Published var choices: [ImportChoice] = []
     @Published var importing = false
+    /// Whether the Chromium browsers' cookies come too.
+    @Published var cookies = true
     /// Once imported, the extensions found, and those to add.
     @Published var found: [FoundExtension] = []
     @Published var adding: Set<FoundExtension> = []
@@ -114,7 +121,11 @@ final class ImportModel: ObservableObject {
     }
 
     func run() {
-        let picked = choices.filter(\.checked)
+        let picked = choices.filter(\.checked).map { choice in
+            var choice = choice
+            choice.cookies = cookies
+            return choice
+        }
         guard !importing, !picked.isEmpty else { return }
         importing = true
         runAfterShowing { $0.app.run("import", jsonObject(picked)) }
@@ -159,6 +170,17 @@ struct ImportView: View {
                             .disabled(model.importing)
                         }
                     }
+                }
+                // Shown whatever is ticked, so that ticking moves nothing.
+                if sources.browsers.contains(where: \.cookies) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Toggle("Cookies, to stay signed in", isOn: $model.cookies)
+                        Text("macOS asks for each browser’s key in the keychain: choose Allow.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .disabled(model.importing
+                        || !model.choices.contains { $0.checked && sources.browsers[$0.browser].cookies })
                 }
                 HStack {
                     Spacer()

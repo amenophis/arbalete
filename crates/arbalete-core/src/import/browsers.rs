@@ -7,8 +7,8 @@
 //! | Safari | none | `Bookmarks.plist` | `History.db` (SQLite, seconds since 2001) |
 //!
 //! SQLite databases are copied before they are read, as a running browser locks them. Safari's
-//! data needs Full Disk Access, which macOS asks the user for. Passwords and cookies are left out:
-//! the browsers encrypt them with the system keychain.
+//! data needs Full Disk Access, which macOS asks the user for. Chromium browsers' cookies are
+//! encrypted with a key in the keychain (`cookies`, `safe_storage`); passwords are left out.
 
 use serde_json::Value;
 use std::fs;

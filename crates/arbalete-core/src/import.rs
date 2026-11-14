@@ -6,9 +6,11 @@ pub mod arc_easels;
 pub mod bookmarks;
 pub mod browsers;
 pub mod chromium;
+pub mod cookies;
 pub mod firefox;
 pub mod firestore;
 pub mod safari;
+pub mod safe_storage;
 
 use crate::history::Entry;
 use crate::sidebar::{ProfileId, Sidebar, SpaceId};
@@ -32,6 +34,9 @@ pub struct Choice {
     pub into: Option<ProfileId>,
     /// Ignored for Arc, which has no bookmarks bar.
     pub bar: Bar,
+    /// Whether to import its cookies too, for a Chromium browser (decision 0012).
+    #[serde(default)]
+    pub cookies: bool,
 }
 
 /// A chosen browser profile, read: what it adds to the sidebar and its history, or why it could
@@ -417,6 +422,7 @@ mod tests {
             profile,
             into,
             bar,
+            cookies: false,
         }
     }
 
