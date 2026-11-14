@@ -82,7 +82,11 @@ Later, each in a change of its own:
 
 - **Sharing**: no sharing at first. Later, an export as a self-contained web page folder that any static host
   serves.
-- **Arc's Easels**: importing the folders Arc exports (their `easel.json`) once the format is pinned down.
+- **Arc's Easels**: done. Arc keeps them in its cloud, but its Firestore client keeps a copy of what it last
+  read on the Mac, and its URL cache the pictures it showed: the Arc import reads both, by itself, and puts
+  each Easel where Arc's sidebar shows it. Rich text keeps its text, a link shows as a capture of its preview,
+  and live pages and pictures not cached are left out. Arc's "Export All Easels" folder is not read: what
+  Arc never opened on the Mac is not imported.
 
 ## Consequences
 

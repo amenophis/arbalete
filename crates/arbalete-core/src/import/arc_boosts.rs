@@ -1,11 +1,7 @@
 //! Reads Arc's Boosts.
 //!
-//! Arc keeps them in its Firebase project, `bcny-arc-server`, and its Firestore client keeps a copy
-//! of what it read: a LevelDB database in `~/Library/Application Support/firestore/<app>/
-//! bcny-arc-server/main`, next to Arc's own directory. Each value is a cached document (its
-//! `MaybeDocument` message, protocol buffers), whose field 2 is the document: its name (1), a path
-//! ending in `/boosts/<id>`, and its fields (2), entries of a name (1) and a value (2), Arc's
-//! being all strings (17):
+//! Arc keeps them in its Firebase project, whose copy its Firestore client keeps on the Mac
+//! (firestore), as documents ending in `/boosts/<id>`, Arc's fields being all strings:
 //!
 //! - `hostPattern`: the site; `title`; `isActive`: `true` or `false`;
 //! - `data`: JSON, with `css`, `js`, `font` (`family`), `textTransform` (`capitalize`,
@@ -18,165 +14,27 @@
 //! the second hue and the other advanced color settings, and what is only for sharing (author,
 //! signature, the Boosts installed from a link).
 
+use super::firestore;
 use crate::boosts::{self, Boost, Colors, TextCase, TextSize};
-use rusty_leveldb::{DB, LdbIterator, Options};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::{env, fs, io, path::Path, process};
-
-const PROJECT: &str = "bcny-arc-server";
+use std::{io, path::Path};
 
 /// Arc's Boosts, as Arc's data directory `dir` (`…/Application Support/Arc`) sits next to its
 /// Firestore copy, in the order of the database; none when there is no copy. Their ids are left
 /// to the profile they go into.
 pub fn read_boosts(dir: &Path) -> io::Result<Vec<Boost>> {
-    let Some(firestore) = dir.parent().map(|support| support.join("firestore")) else {
-        return Ok(Vec::new());
-    };
-    let apps = match fs::read_dir(&firestore) {
-        Ok(apps) => apps,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut boosts = Vec::new();
-    for app in apps {
-        let database = app?.path().join(PROJECT).join("main");
-        if database.is_dir() {
-            boosts.extend(read_database(&database)?);
-        }
-    }
-    Ok(boosts)
-}
-
-/// Reads a copy of the database: opening it writes to it, and Arc may have it open.
-fn read_database(database: &Path) -> io::Result<Vec<Boost>> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let copy = env::temp_dir().join(format!("arbalete-boosts-{}-{n}", process::id()));
-    fs::create_dir_all(&copy)?;
-    let read = copy_files(database, &copy).and_then(|()| documents(&copy));
-    let _ = fs::remove_dir_all(&copy);
-    Ok(read?.iter().filter_map(boost).collect())
-}
-
-fn copy_files(from: &Path, to: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(from)? {
-        let entry = entry?;
-        if entry.file_type()?.is_file() && entry.file_name() != "LOCK" {
-            fs::copy(entry.path(), to.join(entry.file_name()))?;
-        }
-    }
-    Ok(())
-}
-
-/// The fields of the database's Boost documents.
-fn documents(database: &Path) -> io::Result<Vec<HashMap<String, String>>> {
-    let options = Options {
-        create_if_missing: false,
-        ..Options::default()
-    };
-    let mut db = DB::open(database, options).map_err(io::Error::other)?;
-    let mut iter = db.new_iter().map_err(io::Error::other)?;
-    let mut documents = Vec::new();
-    while iter.advance() {
-        if let Some(fields) = iter.current().and_then(|(_, value)| boost_document(&value)) {
-            documents.push(fields);
-        }
-    }
-    Ok(documents)
-}
-
-/// The string fields of a cached document, when it is a Boost.
-fn boost_document(value: &[u8]) -> Option<HashMap<String, String>> {
-    let document = message(value)?
-        .into_iter()
-        .find_map(|(field, wire)| (field == 2).then_some(wire)?.bytes())?;
-    let mut name = None;
-    let mut fields = HashMap::new();
-    for (field, wire) in message(document)? {
-        match (field, wire.bytes()) {
-            (1, Some(bytes)) => name = std::str::from_utf8(bytes).ok(),
-            (2, Some(entry)) => {
-                let (mut key, mut text) = (None, None);
-                for (field, wire) in message(entry)? {
-                    match (field, wire.bytes()) {
-                        (1, Some(bytes)) => key = String::from_utf8(bytes.to_vec()).ok(),
-                        (2, Some(value)) => text = string_value(value),
-                        _ => {}
-                    }
-                }
-                if let (Some(key), Some(text)) = (key, text) {
-                    fields.insert(key, text);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut segments = name?.rsplit('/');
-    let collection = segments.nth(1)?;
-    (collection == "boosts").then_some(fields)
-}
-
-/// A Firestore value, when it is a string.
-fn string_value(value: &[u8]) -> Option<String> {
-    let bytes = message(value)?
-        .into_iter()
-        .find_map(|(field, wire)| (field == 17).then_some(wire)?.bytes())?;
-    String::from_utf8(bytes.to_vec()).ok()
-}
-
-/// A protocol buffers field's value, as written.
-enum Wire<'a> {
-    Number,
-    Bytes(&'a [u8]),
-}
-
-impl<'a> Wire<'a> {
-    fn bytes(self) -> Option<&'a [u8]> {
-        match self {
-            Wire::Bytes(bytes) => Some(bytes),
-            Wire::Number => None,
-        }
-    }
-}
-
-/// The fields of a protocol buffers message, by number; `None` when it is not one.
-fn message(mut bytes: &[u8]) -> Option<Vec<(u64, Wire<'_>)>> {
-    let mut fields = Vec::new();
-    while !bytes.is_empty() {
-        let key = varint(&mut bytes)?;
-        let wire = match key & 7 {
-            0 => varint(&mut bytes).map(|_| Wire::Number)?,
-            1 | 5 => {
-                let size = if key & 7 == 1 { 8 } else { 4 };
-                bytes = bytes.get(size..)?;
-                Wire::Number
-            }
-            2 => {
-                let size = usize::try_from(varint(&mut bytes)?).ok()?;
-                let value = bytes.get(..size)?;
-                bytes = &bytes[size..];
-                Wire::Bytes(value)
-            }
-            _ => return None,
-        };
-        fields.push((key >> 3, wire));
-    }
-    Some(fields)
-}
-
-fn varint(bytes: &mut &[u8]) -> Option<u64> {
-    let mut value = 0u64;
-    for shift in (0..64).step_by(7) {
-        let (&byte, rest) = bytes.split_first()?;
-        *bytes = rest;
-        value |= u64::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return Some(value);
-        }
-    }
-    None
+    let documents = firestore::documents(dir)?;
+    let boosts = documents
+        .iter()
+        .filter(|d| d.place().is_some_and(|(c, _)| c == "boosts"));
+    let fields = boosts.map(|document| {
+        let strings = document.fields.iter();
+        let strings =
+            strings.filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())));
+        strings.collect::<HashMap<_, _>>()
+    });
+    Ok(fields.filter_map(|fields| boost(&fields)).collect())
 }
 
 /// A Boost from an Arc document's fields; `None` without a site.
@@ -253,6 +111,7 @@ fn text_size(level: f64) -> Option<TextSize> {
 mod tests {
     use super::*;
     use crate::import::TestDir;
+    use rusty_leveldb::{DB, Options};
     use serde_json::json;
 
     /// A protocol buffers field holding bytes.

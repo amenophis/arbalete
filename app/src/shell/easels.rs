@@ -20,7 +20,7 @@ thread_local! {
 type LiveCapture = (u64, u64);
 
 /// The folder holding every Easel's.
-fn easels_dir() -> PathBuf {
+pub(super) fn easels_dir() -> PathBuf {
     DATA_DIR.get().expect("set").join("Easels")
 }
 
@@ -30,7 +30,7 @@ pub(super) fn easel_of(tab: NodeId) -> Option<u64> {
 }
 
 /// A number for a new Easel: none of the open, closed or archived tabs shows it.
-fn new_number() -> u64 {
+pub(super) fn new_number() -> u64 {
     let used: Vec<u64> = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
         let open = sidebar.tabs().map(|(_, tab)| tab.url.as_str());

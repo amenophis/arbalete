@@ -224,6 +224,8 @@ fn offered_extensions(targets: &[(Choice, ProfileId)], found: &Found) -> Vec<ser
 /// a thread of their own.
 fn apply_import(sources: Vec<import::Source>, found: &Found, mut arc: ArcBoosts) {
     IMPORTING.set(false);
+    // Before the sidebar changes: no tab, closed tab or archived one shows these numbers.
+    let first_easel = easels::new_number();
     let (imported, shown, spaces) = update_sidebar(|sidebar| {
         let mut new = if is_untouched(sidebar) {
             Sidebar::empty()
@@ -231,7 +233,7 @@ fn apply_import(sources: Vec<import::Source>, found: &Found, mut arc: ArcBoosts)
             sidebar.clone()
         };
         let before = new.spaces().len();
-        let imported = import::apply(&mut new, sources);
+        let imported = import::apply(&mut new, sources, first_easel);
         // Before the sidebar shows them; a few kilobytes each.
         for (profile, favicons) in &imported.favicons {
             for (source, png) in favicons {
@@ -256,6 +258,13 @@ fn apply_import(sources: Vec<import::Source>, found: &Found, mut arc: ArcBoosts)
     });
     for error in &imported.errors {
         eprintln!("cannot import {error}");
+    }
+    // Before they show; quick, as APFS clones the pictures.
+    for (number, exported) in &imported.easels {
+        let dir = arbalete_core::easel::dir(&easels::easels_dir(), *number);
+        if let Err(error) = import::arc_easels::write(exported, &dir) {
+            eprintln!("cannot import Arc's Easel: {error:?}");
+        }
     }
     let pages = imported.histories.iter().map(|(_, entries)| entries.len());
     let pages: usize = pages.sum();

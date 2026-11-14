@@ -2,10 +2,12 @@
 
 pub mod arc;
 pub mod arc_boosts;
+pub mod arc_easels;
 pub mod bookmarks;
 pub mod browsers;
 pub mod chromium;
 pub mod firefox;
+pub mod firestore;
 pub mod safari;
 
 use crate::history::Entry;
@@ -51,8 +53,14 @@ type Favicons = HashMap<String, Vec<u8>>;
 #[derive(Debug)]
 enum Data {
     /// Arc's sidebar, if any, the directory of the profile in `User Data`, Arc's archive and its
-    /// URL routing, if any.
-    Arc(Option<String>, String, Option<String>, Option<String>),
+    /// URL routing, if any, and the Easels its Firestore client cached, by their Arc id.
+    Arc(
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        HashMap<String, arc_easels::ArcEasel>,
+    ),
     Bookmarks(Bookmarks),
 }
 
@@ -68,6 +76,9 @@ pub struct Imported {
     pub errors: Vec<String>,
     /// Each browser profile imported, as chosen, and the profile it went into.
     pub targets: Vec<(Choice, ProfileId)>,
+    /// Arc's Easels, to save each as the Easel of its number (arc_easels::write): the sidebar
+    /// shows them.
+    pub easels: Vec<(u64, arc_easels::ArcEasel)>,
 }
 
 /// Reads each chosen browser profile. Choices that name no known browser profile are skipped.
@@ -88,10 +99,15 @@ pub fn read(browsers: &[Browser], choices: &[Choice]) -> Vec<Source> {
 /// Adds the browser profiles read to `sidebar`: Arc's Spaces and favorites, other browsers'
 /// bookmarks into the profile's first Space. Every profile imported into has a Space, even when
 /// its browser's data cannot be read, so that it shows. Sources going into an Arbalete profile
-/// the sidebar no longer has are skipped. Quick: it only changes the sidebar in memory.
-pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
+/// the sidebar no longer has are skipped. Arc's Easels take the numbers from `first_easel` on,
+/// which no Easel has. Quick: it only changes the sidebar in memory.
+pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>, first_easel: u64) -> Imported {
     let mut imported = Imported::default();
     let mut routes = ArcRoutes::default();
+    let mut easels = arc_easels::Import {
+        next: first_easel,
+        ..Default::default()
+    };
     for source in sources {
         let profile = match source.choice.into {
             None => sidebar.add_profile(&source.name),
@@ -104,7 +120,14 @@ pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
             name: &source.name,
         };
         let added = source.data.and_then(|(data, history, favicons)| {
-            add(sidebar, data, target, source.choice.bar, &mut routes)?;
+            add(
+                sidebar,
+                data,
+                target,
+                source.choice.bar,
+                &mut routes,
+                &mut easels,
+            )?;
             Ok((history, show_favicons(sidebar, profile, favicons)))
         });
         match added {
@@ -119,6 +142,7 @@ pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>) -> Imported {
     if let Err(error) = routes.apply(sidebar) {
         imported.errors.push(format!("Arc's URL routing: {error}"));
     }
+    imported.easels = easels.added;
     imported
 }
 
@@ -194,6 +218,7 @@ fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>, Favico
                 directory.unwrap_or_default().to_string(),
                 archive,
                 routing,
+                arc_easels::read(dir),
             )
         }
         Family::Chromium => Data::Bookmarks(chromium::read_bookmarks(path).map_err(debug)?),
@@ -233,18 +258,22 @@ impl ArcRoutes {
     }
 }
 
-/// Adds a browser profile's sidebar or bookmarks to `target`; Arc's routes wait in `routes`.
+/// Adds a browser profile's sidebar or bookmarks to `target`; Arc's routes wait in `routes`, and
+/// its Easels go where its sidebar shows them.
 fn add(
     sidebar: &mut Sidebar,
     data: Data,
     target: Target,
     bar: Bar,
     routes: &mut ArcRoutes,
+    easels: &mut arc_easels::Import,
 ) -> Result<(), String> {
     match data {
         Data::Arc(None, ..) => Ok(()),
-        Data::Arc(Some(json), directory, archive, routing) => {
-            let spaces = arc::add(sidebar, &json, &directory, target.profile).map_err(debug)?;
+        Data::Arc(Some(json), directory, archive, routing, found) => {
+            easels.found = found;
+            let spaces = arc::add(sidebar, &json, &directory, target.profile, easels);
+            let spaces = spaces.map_err(debug)?;
             if let Some(archive) = archive {
                 arc::add_archive(sidebar, &archive, &spaces).map_err(debug)?;
             }
@@ -413,7 +442,7 @@ mod tests {
             choice(0, 1, None, Bar::Favorites),
             choice(1, 0, None, Bar::Favorites),
         ];
-        let imported = apply(&mut sidebar, read(&browsers, &choices));
+        let imported = apply(&mut sidebar, read(&browsers, &choices), 1);
         assert!(imported.errors.is_empty(), "{:?}", imported.errors);
         let names: Vec<_> = sidebar.profiles().iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Personal (Arc)", "Work (Arc)", "Chrome"]);
@@ -462,7 +491,7 @@ mod tests {
             choice(1, 0, Some(default), Bar::PinnedFolder),
             choice(0, 1, Some(default), Bar::Favorites),
         ];
-        let imported = apply(&mut sidebar, read(&browsers, &choices));
+        let imported = apply(&mut sidebar, read(&browsers, &choices), 1);
         assert_eq!(sidebar.profiles().len(), 1);
         let spaces: Vec<_> = sidebar.spaces().iter().map(|s| s.title.as_str()).collect();
         assert_eq!(spaces, ["Home", "Office"]);
@@ -488,7 +517,7 @@ mod tests {
         chrome.write("Bookmarks", "not json");
         let mut sidebar = Sidebar::empty();
         let sources = read(&browsers, &[choice(1, 0, None, Bar::Favorites)]);
-        let imported = apply(&mut sidebar, sources);
+        let imported = apply(&mut sidebar, sources, 1);
         assert_eq!(imported.errors.len(), 1);
         assert!(imported.errors[0].starts_with("Chrome Default: Invalid"));
         assert_eq!(sidebar.spaces()[0].title, "Chrome");
@@ -506,7 +535,7 @@ mod tests {
             choice(1, 1, None, Bar::Favorites),
             choice(1, 0, Some(unknown), Bar::Favorites),
         ];
-        let imported = apply(&mut sidebar, read(&browsers, &choices));
+        let imported = apply(&mut sidebar, read(&browsers, &choices), 1);
         assert_eq!(sidebar, Sidebar::default());
         assert!(imported.histories.is_empty() && imported.errors.is_empty());
     }
@@ -524,7 +553,7 @@ mod tests {
         sidebar
             .add_tab(today, "https://later.example.com/", "Later")
             .unwrap();
-        let imported = apply(&mut sidebar, sources);
+        let imported = apply(&mut sidebar, sources, 1);
         assert!(imported.errors.is_empty(), "{:?}", imported.errors);
         assert_eq!(urls(&sidebar, today), ["https://later.example.com/"]);
         let favorites = urls(&sidebar, sidebar.profiles()[0].favorites);
@@ -555,6 +584,82 @@ mod tests {
         let favicons = tabs.map(|tab| sidebar.tab_mut(tab).unwrap().favicon.clone());
         let a = Some("https://a.example/".to_string());
         assert_eq!(favicons, [a.clone(), a, None]);
+    }
+
+    #[test]
+    fn puts_arcs_easels_where_its_sidebar_shows_them() {
+        let dir = TestDir::new("import-arc-easels");
+        let item = |id: &str, parent: &str, children: &[&str], data: serde_json::Value| serde_json::json!([id, { "id": id, "parentID": parent, "childrenIds": children, "data": data }]);
+        let easel = |id: &str, title: &str| serde_json::json!({ "easel": { "easelID": id, "title": title } });
+        let items: Vec<_> = [
+            item(
+                "pinned",
+                "",
+                &["e1", "folder"],
+                serde_json::json!({ "itemContainer": {} }),
+            ),
+            item("today", "", &[], serde_json::json!({ "itemContainer": {} })),
+            item("e1", "pinned", &[], easel("easel-1", "Moodboard")),
+            item(
+                "folder",
+                "pinned",
+                &["e2", "e3"],
+                serde_json::json!({ "list": {} }),
+            ),
+            item("e2", "folder", &[], easel("easel-2", "Trip")),
+            // Not cached: left out.
+            item("e3", "folder", &[], easel("easel-gone", "Gone")),
+        ]
+        .into_iter()
+        .flat_map(|pair| pair.as_array().unwrap().clone())
+        .collect();
+        let sidebar = serde_json::json!({ "sidebar": { "containers": [{
+            "items": items,
+            "spaces": ["space", { "title": "Home", "profile": { "default": true },
+                                  "containerIDs": ["unpinned", "today", "pinned", "pinned"] }],
+            "topAppsContainerIDs": []
+        }] } });
+        dir.write("Arc/StorableSidebar.json", sidebar.to_string());
+        dir.dir("Arc/User Data/Default");
+        // Arc's Firestore copy holds Easels its sidebar does not show too: others' Easels.
+        let object = serde_json::json!({
+            "position": { "rect": { "x": 0.1, "y": 0.1, "width": 0.2, "height": 0.1 } },
+            "content": { "text": { "string": "Hi" } },
+        });
+        let name = |id: &str| {
+            format!("projects/bcny-arc-server/databases/(default)/documents/easels/{id}/objects/o")
+        };
+        let names = ["easel-1", "easel-2", "easel-3"].map(name);
+        let documents: Vec<_> = names.iter().map(|n| (n.as_str(), object.clone())).collect();
+        firestore::fixture::write(&dir.0, &documents);
+        let browsers = [Browser {
+            name: "Arc",
+            family: Family::Arc,
+            profiles: vec![profile("Personal", dir.0.join("Arc/User Data/Default"))],
+        }];
+        let choice = choice(0, 0, None, Bar::Favorites);
+        let mut sidebar = Sidebar::empty();
+        let imported = apply(&mut sidebar, read(&browsers, &[choice]), 7);
+        assert!(imported.errors.is_empty(), "{:?}", imported.errors);
+        let pinned = sidebar.spaces()[0].pinned;
+        assert_eq!(urls(&sidebar, pinned), ["arb://easel/7", "Folder"]);
+        let folder = sidebar.node(pinned).unwrap().children[1];
+        assert_eq!(urls(&sidebar, folder), ["arb://easel/8"]);
+        let mut titles: Vec<_> = sidebar
+            .tabs()
+            .map(|(_, tab)| (tab.url.as_str(), tab.title.as_str()))
+            .collect();
+        titles.sort();
+        assert_eq!(
+            titles,
+            [("arb://easel/7", "Moodboard"), ("arb://easel/8", "Trip")]
+        );
+        let numbers: Vec<_> = imported
+            .easels
+            .iter()
+            .map(|(n, e)| (*n, e.easel.objects.len()))
+            .collect();
+        assert_eq!(numbers, [(7, 1), (8, 1)]);
     }
 
     #[test]

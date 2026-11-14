@@ -7,7 +7,8 @@
 //! - **`StorableSidebar.json`**: in `sidebar.containers`, the entry with `items`, `spaces` and
 //!   `topAppsContainerIDs`, each a flat array alternating keys (ids) and values. Items are linked
 //!   by `parentID` / `childrenIds` and hold one kind in `data`: `tab` (`savedURL`, `savedTitle`;
-//!   the item's `title` when renamed), `list` (a folder), `splitView` (its tabs as children,
+//!   the item's `title` when renamed), `list` (a folder), `easel` (`easelID`, `title`; its content
+//!   is in Arc's cloud, read from its Firestore copy, arc_easels), `splitView` (its tabs as children,
 //!   `layoutOrientation`, `horizontal` or `vertical`, and `itemWidthFactors`, each tab's part of
 //!   the room) or `itemContainer` (a root). A Space's `containerIDs` alternates `pinned` / `unpinned` and their
 //!   root; its `profile` is `{"default": true}` or `{"custom": {"_0": {"directoryBasename": …}}}`,
@@ -31,7 +32,7 @@
 //! Items Arbalete has no equivalent for, or that are malformed, are skipped: one odd item must not
 //! stop the import of the others.
 
-use super::{Copy, chromium};
+use super::{Copy, arc_easels, chromium};
 use crate::sidebar::{
     Archived, MAX_THEME_COLORS, Mode, NodeId, ProfileId, Sidebar, SpaceId, Tab, Theme,
 };
@@ -197,13 +198,14 @@ pub fn favicons(dir: &Path, profile: &Path, storable_sidebar: &str) -> HashMap<S
 }
 
 /// Adds the Spaces and the favorites of one Arc profile, the one in `User Data/<directory>`, to
-/// `profile`, from the content of `StorableSidebar.json`. Returns the Spaces added by their Arc
-/// id, which the archive names them by (add_archive).
+/// `profile`, from the content of `StorableSidebar.json`, with the Easels of `easels` it shows.
+/// Returns the Spaces added by their Arc id, which the archive names them by (add_archive).
 pub fn add(
     sidebar: &mut Sidebar,
     storable_sidebar: &str,
     directory: &str,
     profile: ProfileId,
+    easels: &mut arc_easels::Import,
 ) -> Result<HashMap<String, SpaceId>, serde_json::Error> {
     let json: Value = serde_json::from_str(storable_sidebar)?;
     let containers = json["sidebar"]["containers"].as_array();
@@ -222,6 +224,7 @@ pub fn add(
         directory,
         profile,
         imported: HashSet::new(),
+        easels,
     };
     let mut spaces = HashMap::new();
     for (arc_id, space) in pairs(&container["spaces"]) {
@@ -243,6 +246,7 @@ struct Import<'a> {
     profile: ProfileId,
     /// Guards against an item listed twice, or inside itself.
     imported: HashSet<&'a str>,
+    easels: &'a mut arc_easels::Import,
 }
 
 impl<'a> Import<'a> {
@@ -315,6 +319,9 @@ impl<'a> Import<'a> {
             self.children(id, folder);
         } else if data.get("splitView").is_some() {
             self.split(item, &data["splitView"], parent);
+        } else if let Some(easel) = data["easel"]["easelID"].as_str() {
+            let title = text(&item["title"]).or(text(&data["easel"]["title"]));
+            self.easels.add(self.sidebar, parent, easel, title);
         }
     }
 
@@ -519,7 +526,14 @@ mod tests {
         let mut sidebar = Sidebar::empty();
         for (directory, name) in [("Default", "Personal"), ("Profile 1", "Work")] {
             let profile = sidebar.add_profile(name);
-            add(&mut sidebar, SIDEBAR, directory, profile).unwrap();
+            add(
+                &mut sidebar,
+                SIDEBAR,
+                directory,
+                profile,
+                &mut Default::default(),
+            )
+            .unwrap();
         }
         sidebar
     }
@@ -544,7 +558,14 @@ mod tests {
     fn imports_only_the_spaces_and_favorites_of_one_arc_profile_into_another() {
         let mut sidebar = Sidebar::default();
         let profile = sidebar.profiles()[0].id;
-        add(&mut sidebar, SIDEBAR, "Profile 1", profile).unwrap();
+        add(
+            &mut sidebar,
+            SIDEBAR,
+            "Profile 1",
+            profile,
+            &mut Default::default(),
+        )
+        .unwrap();
         let titles: Vec<_> = sidebar.spaces().iter().map(|s| s.title.as_str()).collect();
         assert_eq!(titles, ["Home", "Office"]);
         assert_eq!(sidebar.spaces()[1].profile, profile);
@@ -684,7 +705,14 @@ mod tests {
         }]}});
         let mut sidebar = Sidebar::empty();
         let profile = sidebar.add_profile("Default");
-        add(&mut sidebar, &json.to_string(), "Default", profile).unwrap();
+        add(
+            &mut sidebar,
+            &json.to_string(),
+            "Default",
+            profile,
+            &mut Default::default(),
+        )
+        .unwrap();
         let space = sidebar.spaces()[0].clone();
         assert_eq!(
             content(&sidebar, space.pinned),
@@ -729,7 +757,14 @@ mod tests {
         }]}});
         let mut sidebar = Sidebar::empty();
         let profile = sidebar.add_profile("Default");
-        add(&mut sidebar, &json.to_string(), "Default", profile).unwrap();
+        add(
+            &mut sidebar,
+            &json.to_string(),
+            "Default",
+            profile,
+            &mut Default::default(),
+        )
+        .unwrap();
         let space = &sidebar.spaces()[0];
         assert_eq!(content(&sidebar, space.pinned), ["Loop[]"]);
         assert!(content(&sidebar, space.today).is_empty());
@@ -787,7 +822,14 @@ mod tests {
     fn imports_the_tabs_archived_from_the_spaces_imported() {
         let mut sidebar = Sidebar::default();
         let profile = sidebar.profiles()[0].id;
-        let spaces = add(&mut sidebar, SIDEBAR, "Profile 1", profile).unwrap();
+        let spaces = add(
+            &mut sidebar,
+            SIDEBAR,
+            "Profile 1",
+            profile,
+            &mut Default::default(),
+        )
+        .unwrap();
         let office = spaces["space-office"];
         let archive = json!({ "version": 1, "items": [
             "a", { "archivedAt": 815_002_210.5, "source": { "space": { "_0": "space-office" } },
@@ -814,11 +856,24 @@ mod tests {
     fn imports_nothing_from_a_file_without_spaces() {
         let mut sidebar = Sidebar::default();
         let profile = sidebar.profiles()[0].id;
-        let invalid = add(&mut sidebar, "not json", "Default", profile);
+        let invalid = add(
+            &mut sidebar,
+            "not json",
+            "Default",
+            profile,
+            &mut Default::default(),
+        );
         assert!(invalid.is_err());
         let empty = json!({ "sidebar": { "containers": [{ "global": {} }, { "spaces": [] }] } });
         for json in ["{}".to_string(), empty.to_string()] {
-            add(&mut sidebar, &json, "Default", profile).unwrap();
+            add(
+                &mut sidebar,
+                &json,
+                "Default",
+                profile,
+                &mut Default::default(),
+            )
+            .unwrap();
         }
         assert_eq!(sidebar, Sidebar::default());
     }
