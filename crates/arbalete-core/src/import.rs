@@ -1,6 +1,7 @@
 //! Turns other browsers' data into Arbalete's.
 
 pub mod arc;
+pub mod arc_boosts;
 pub mod bookmarks;
 pub mod browsers;
 pub mod chromium;

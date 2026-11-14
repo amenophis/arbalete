@@ -40,7 +40,11 @@ Boosts like Arc's, every kind included, for the user only.
   site's active Boosts into one stylesheet and one script, so every rule is tested there.
 - **Storage**: `boosts.json` in the profile's directory, apart from `session.json`, which is saved on every tab
   change while Boosts change rarely and can be long. Incognito windows get no Boosts and cannot make one.
-  No sharing and no sync; importing Arc's Boosts is left for later (Arc keeps them on its servers).
+  No sharing and no sync. Arc keeps its Boosts on its servers (Firebase), but its Firestore client
+  keeps a copy of them on the Mac, a LevelDB database in `Application Support/firestore`: importing
+  from Arc reads a copy of it, and each Boost keeps its site, title, on/off state, zaps, color wheel
+  (hue, saturation, invert, original saturation), font, text case, text size, CSS and JavaScript.
+  Colors following the Space's theme, Arc's second hue and other advanced color settings are left out.
 - **Injection, in CEF Alloy**: through each page's DevTools session, which Arbalete already opens
   (extensions).
   `Page.addScriptToEvaluateOnNewDocument` installs, in every frame of every new document and before the page's
@@ -85,7 +89,7 @@ Boosts like Arc's, every kind included, for the user only.
 
 ## Consequences
 
-- Arc users find their Boost kinds, editor and places, but must make their Boosts again.
+- Arc users find their Boost kinds, editor and places, and the Boosts Arc last read from its servers.
 - Colors look close to Arc's, not the same: a two-color tone of the page, pictures included, with a share of its
   own colors; a filter on the whole page costs some drawing on long, busy pages.
 - Every page gets one more script before its own, carrying the profile's active Boosts: a few kilobytes, read

@@ -311,6 +311,29 @@ impl Boosts {
         self.boosts.retain(|boost| boost.id != id);
     }
 
+    /// Adds Boosts made elsewhere, with ids of their own, skipping those already here (an import
+    /// made again). One turned on turns off the other Boosts of its site.
+    pub fn import(&mut self, boosts: Vec<Boost>) {
+        let same = |boost: &Boost| Boost {
+            id: 0,
+            active: false,
+            ..boost.clone()
+        };
+        for boost in boosts {
+            if self.boosts.iter().any(|kept| same(kept) == same(&boost)) {
+                continue;
+            }
+            let id = self.boosts.iter().map(|boost| boost.id).max().unwrap_or(0) + 1;
+            let active = boost.active;
+            self.boosts.push(Boost {
+                id,
+                active: false,
+                ..boost
+            });
+            self.set_active(id, active);
+        }
+    }
+
     /// What a site's active Boosts give its pages: their stylesheet, and the tone of the last
     /// one with colors.
     fn styling(&self, site: &str) -> (String, Option<Tone>) {
@@ -665,6 +688,32 @@ mod tests {
         let script = &boosts.scripts()[0];
         assert!(script.starts_with(&format!("if ({SITE} === \"example.com\")")));
         assert!(script.contains("DOMContentLoaded"));
+    }
+
+    #[test]
+    fn imports_boosts_once_with_one_active_per_site() {
+        let mut boosts = Boosts::default();
+        let mine = boost(&mut boosts, "example.com");
+        let made = |site: &str, css: &str, active: bool| Boost {
+            id: 7,
+            site: site.to_string(),
+            title: site.to_string(),
+            active,
+            css: css.to_string(),
+            ..mine.clone()
+        };
+        let arc = vec![
+            made("example.com", "a {}", true),
+            made("other.com", "b {}", false),
+        ];
+        boosts.import(arc.clone());
+        let ids: Vec<_> = boosts.list().iter().map(|b| (b.id, b.active)).collect();
+        assert_eq!(ids, [(1, false), (2, true), (3, false)]);
+        // Imported again, nothing is added, and the user's choice of the active one stays.
+        boosts.set_active(1, true);
+        boosts.import(arc);
+        let ids: Vec<_> = boosts.list().iter().map(|b| (b.id, b.active)).collect();
+        assert_eq!(ids, [(1, true), (2, false), (3, false)]);
     }
 
     #[test]

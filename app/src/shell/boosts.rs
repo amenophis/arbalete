@@ -432,6 +432,20 @@ pub(super) fn delete_boost(id: BoostId) {
     boosts_changed();
 }
 
+/// Adds Boosts imported from another browser to a profile; its open pages get them from their next
+/// document.
+pub(super) fn import_boosts(profile: ProfileId, imported: Vec<Boost>) {
+    if imported.is_empty() {
+        return;
+    }
+    // An imported profile has no directory before its pages first load.
+    if let Err(error) = std::fs::create_dir_all(profile_dir(profile)) {
+        eprintln!("cannot save the Boosts: {error}");
+    }
+    apply_boosts(profile, "", false, |boosts| boosts.import(imported));
+    boosts_changed();
+}
+
 /// The panels listing Boosts show them again: the site controls, the library, and the tabs'
 /// site controls' buttons.
 fn boosts_changed() {
