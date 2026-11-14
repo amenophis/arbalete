@@ -31,7 +31,7 @@ use objc2_foundation::{
 };
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
-use std::ffi::c_void;
+use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
 
 /// The "get URL" Apple event's class and identifier ('GURL'), and the key of its url ('----').
@@ -2199,22 +2199,37 @@ pub fn mock_keychain() -> bool {
     is_development_bundle(bundle_identifier().as_deref())
 }
 
+/// The name Arbalete gives its key in the keychain, which amenophis/cef-codecs' CEF takes from
+/// its `--keychain-name` switch from build 10 (ArbaleteApp): the item "Arbalete Safe Storage",
+/// account "Arbalete", rather than Chromium's, which Chromium itself and other apps share.
+pub const KEYCHAIN_NAME: &str = "Arbalete";
+const KEY: (&CStr, &CStr) = (c"Arbalete Safe Storage", c"Arbalete");
+/// Where Arbalete kept its key up to 0.5.0, under Chromium's default name.
+const CHROMIUM_KEY: (&CStr, &CStr) = (c"Chromium Safe Storage", c"Chromium");
+
 /// Makes sure Chromium can read its key in the keychain before it opens the profiles: without it,
 /// Chromium erases every cookie it cannot decrypt, signing the user out of every site, and keeps
 /// no new one. macOS asks for access again after each update of a self-signed release; when the
-/// user does not allow it, the app asks again or quits rather than start without the key.
-pub fn ensure_keychain_access() {
+/// user does not allow it, the app asks again or quits rather than start without the key. Data
+/// from Arbalete 0.5 and earlier (Chromium's `Local State` in it) has its key in Chromium's item:
+/// it is copied to Arbalete's, and Chromium's left for whoever else uses it.
+pub fn ensure_keychain_access(data_dir: &std::path::Path) {
     if mock_keychain() {
         return;
     }
-    while !can_read_safe_storage_key() {
+    let previous = data_dir
+        .join("Local State")
+        .exists()
+        .then_some(CHROMIUM_KEY);
+    while !move_key(previous, KEY) {
         let mtm = MainThreadMarker::new().expect("main thread");
         let alert = NSAlert::new(mtm);
         alert.setMessageText(ns_string!("Arbalete needs its key in the keychain"));
         alert.setInformativeText(ns_string!(
             "Your cookies and sign-ins are encrypted with a key kept in the keychain item \
-             “Chromium Safe Storage”. Without access to it, Arbalete would sign you out of every \
-             site. Choose Always Allow when macOS asks."
+             “Arbalete Safe Storage”, or “Chromium Safe Storage” for Arbalete 0.5 and earlier. \
+             Without access to it, Arbalete would sign you out of every site. Choose Always Allow \
+             when macOS asks."
         ));
         alert.addButtonWithTitle(ns_string!("Try Again"));
         alert.addButtonWithTitle(ns_string!("Quit"));
@@ -2224,30 +2239,55 @@ pub fn ensure_keychain_access() {
     }
 }
 
-/// Reads Chromium's key, as Chromium does, which asks the user when the app may not yet: whether it
-/// could, or there is no key yet, which Chromium then creates.
-fn can_read_safe_storage_key() -> bool {
-    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
-    #[link(name = "Security", kind = "framework")]
-    unsafe extern "C" {
-        fn SecKeychainFindGenericPassword(
-            keychains: *const c_void,
-            service_length: u32,
-            service: *const std::ffi::c_char,
-            account_length: u32,
-            account: *const std::ffi::c_char,
-            password_length: *mut u32,
-            password: *mut *mut c_void,
-            item: *mut *mut c_void,
-        ) -> i32;
-        fn SecKeychainItemFreeContent(attributes: *mut c_void, data: *mut c_void) -> i32;
+/// Whether Chromium can read its key in `key`, as Chromium does, which asks the user when the app
+/// may not yet: it could, or there is none yet, which Chromium then creates. Without one, the key
+/// in `previous`, if any, is copied into it first.
+fn move_key(previous: Option<(&CStr, &CStr)>, key: (&CStr, &CStr)) -> bool {
+    match read_key(key) {
+        Ok(Some(_)) => true,
+        Ok(None) => match previous.map(read_key) {
+            None | Some(Ok(None)) => true,
+            Some(Ok(Some(password))) => add_key(key, &password),
+            Some(Err(())) => false,
+        },
+        Err(()) => false,
     }
-    let (service, account) = (c"Chromium Safe Storage", c"Chromium");
+}
+
+#[link(name = "Security", kind = "framework")]
+unsafe extern "C" {
+    fn SecKeychainFindGenericPassword(
+        keychains: *const c_void,
+        service_length: u32,
+        service: *const c_char,
+        account_length: u32,
+        account: *const c_char,
+        password_length: *mut u32,
+        password: *mut *mut c_void,
+        item: *mut *mut c_void,
+    ) -> i32;
+    fn SecKeychainItemFreeContent(attributes: *mut c_void, data: *mut c_void) -> i32;
+    fn SecKeychainAddGenericPassword(
+        keychain: *const c_void,
+        service_length: u32,
+        service: *const c_char,
+        account_length: u32,
+        account: *const c_char,
+        password_length: u32,
+        password: *const c_void,
+        item: *mut *mut c_void,
+    ) -> i32;
+}
+
+/// Reads a key in the user's keychains, asking the user when the app may not yet: `None` when
+/// there is none, an error when it could not.
+fn read_key((service, account): (&CStr, &CStr)) -> Result<Option<Vec<u8>>, ()> {
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
     let mut length = 0;
     let mut password = std::ptr::null_mut();
-    // SAFETY: the names are C strings of the lengths given, and the key, when read, is freed
-    // right away, unused.
-    let status = unsafe {
+    // SAFETY: the names are C strings of the lengths given, and the key, when read, is copied and
+    // freed right away.
+    unsafe {
         let status = SecKeychainFindGenericPassword(
             std::ptr::null(),
             service.count_bytes() as u32,
@@ -2258,12 +2298,35 @@ fn can_read_safe_storage_key() -> bool {
             &raw mut password,
             std::ptr::null_mut(),
         );
-        if !password.is_null() {
+        let key = (!password.is_null()).then(|| {
+            let key = std::slice::from_raw_parts(password as *const u8, length as usize).to_vec();
             SecKeychainItemFreeContent(std::ptr::null_mut(), password);
+            key
+        });
+        match status {
+            0 => Ok(key),
+            ERR_SEC_ITEM_NOT_FOUND => Ok(None),
+            _ => Err(()),
         }
-        status
+    }
+}
+
+/// Adds a key to the user's default keychain, which only this app may then read without asking.
+fn add_key((service, account): (&CStr, &CStr), password: &[u8]) -> bool {
+    // SAFETY: the names are C strings of the lengths given, and the key a slice of its length.
+    let status = unsafe {
+        SecKeychainAddGenericPassword(
+            std::ptr::null(),
+            service.count_bytes() as u32,
+            service.as_ptr(),
+            account.count_bytes() as u32,
+            account.as_ptr(),
+            password.len() as u32,
+            password.as_ptr().cast(),
+            std::ptr::null_mut(),
+        )
     };
-    status == 0 || status == ERR_SEC_ITEM_NOT_FOUND
+    status == 0
 }
 
 /// Whether the app runs as a release, under an identifier without a `dev` part: the one that
@@ -2328,6 +2391,43 @@ mod keychain_tests {
             "io.github.amenophis.arbalete.helper.renderer"
         )));
         assert!(!is_development_bundle(None));
+    }
+}
+
+/// Moves a throwaway key in the login keychain, as an update from 0.5.0 does: run by hand with
+/// `cargo test -p arbalete moves_the_key -- --ignored`, since it writes to the user's keychain.
+#[cfg(test)]
+mod key_move_tests {
+    use super::{add_key, move_key, read_key};
+
+    #[test]
+    #[ignore = "writes to the user's login keychain"]
+    fn moves_the_key_to_its_own_item() {
+        let old = (c"Arbalete Test Old Safe Storage", c"Arbalete Test Old");
+        let new = (c"Arbalete Test Safe Storage", c"Arbalete Test");
+        let delete = || {
+            for (service, _) in [old, new] {
+                let _ = std::process::Command::new("security")
+                    .args(["delete-generic-password", "-s", service.to_str().unwrap()])
+                    .output();
+            }
+        };
+        delete();
+        assert!(add_key(old, b"secret"));
+
+        assert!(move_key(Some(old), new));
+        let moved = read_key(new);
+        let kept = read_key(old);
+        // Without a previous item, nothing to move: Chromium creates its key.
+        delete();
+        let without_previous = move_key(Some(old), new);
+        let created = read_key(new);
+        delete();
+
+        assert_eq!(moved, Ok(Some(b"secret".to_vec())));
+        assert_eq!(kept, Ok(Some(b"secret".to_vec())));
+        assert!(without_previous);
+        assert_eq!(created, Ok(None));
     }
 }
 
