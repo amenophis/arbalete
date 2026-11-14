@@ -20,7 +20,11 @@
 //!   `windowTheme`. `topAppsContainerIDs` alternates a profile and its Favorites root. `spaces` is
 //!   read in its own order; `sidebarSyncState` and `firebaseSyncState` are sync copies.
 //! - **`StorableArchiveItems.json`**: the archived tabs, each with its Space and `archivedAt`.
-//! - **`StorableLinkRouting.json`**: the routes and the default destination.
+//! - **`StorableLinkRouting.json`**: `rules`, each with its `sourceComponents`, url conditions
+//!   that must all match (`componentType.urlMatch`: `_0` is `{"contains": {}}` or
+//!   `{"matches": {}}`, `_1` the text), and its `destination`, as is `defaultDestination`:
+//!   `littleArc` or `space`, each holding in `_0` `mostRecent`, `space` (`_0`, a Space's id) or
+//!   `profile` (`_0`, a profile as in the sidebar, for its Space shown last).
 //! - **`User Data/`**: a Chromium data directory, whose `Local State` names the profiles
 //!   (`profile.info_cache.<directory>.name`, no colors) and whose profiles hold the history.
 //!
@@ -67,21 +71,26 @@ pub fn read_url_routing(dir: &Path) -> io::Result<Option<String>> {
     }
 }
 
-/// Arc's routes and default destination, from the content of `StorableLinkRouting.json`: a route
-/// to a Space not imported, `spaces` holding those imported by their Arc id, goes to the Space
-/// shown last; a route without a url condition is left out.
+/// Arc's routes and default destination, from the content of `StorableLinkRouting.json`.
+/// `spaces` holds the Spaces imported by their Arc id, and `profiles` a Space of each Arc profile
+/// imported, by its directory. A route to a Space not imported goes to the Space shown last, and
+/// one to a profile, to its Space. A route without exactly one url condition is left out:
+/// Arbalete's have one, where Arc's must match all of theirs.
 pub fn url_routing(
     storable_link_routing: &str,
     spaces: &HashMap<String, SpaceId>,
+    profiles: &HashMap<String, SpaceId>,
 ) -> Result<UrlRouting, serde_json::Error> {
     let json: Value = serde_json::from_str(storable_link_routing)?;
     let destination = |value: &Value| {
         if value.get("littleArc").is_some() {
             return Destination::Little;
         }
-        value["space"]["_0"]["space"]["_0"]
-            .as_str()
-            .and_then(|arc_id| spaces.get(arc_id))
+        let place = &value["space"]["_0"];
+        let space = place["space"]["_0"].as_str().and_then(|id| spaces.get(id));
+        let profile = || profiles.get(&profile_directory(&place["profile"]["_0"])?);
+        space
+            .or_else(profile)
             .map_or(Destination::MostRecentSpace, |&space| {
                 Destination::Space(space)
             })
@@ -91,7 +100,10 @@ pub fn url_routing(
         .into_iter()
         .flatten()
         .filter_map(|rule| {
-            let condition = &rule["sourceComponents"][0]["componentType"]["urlMatch"];
+            let [component] = rule["sourceComponents"].as_array()?.as_slice() else {
+                return None;
+            };
+            let condition = &component["componentType"]["urlMatch"];
             let text = condition["_1"].as_str()?.to_string();
             let matching = if condition["_0"].get("matches").is_some() {
                 Match::IsEqualTo
@@ -451,23 +463,34 @@ mod tests {
 
     #[test]
     fn reads_arcs_routes_and_default_destination() {
-        let sidebar = Sidebar::default();
+        let mut sidebar = Sidebar::default();
         let home = sidebar.spaces()[0].id;
+        let work = sidebar.add_space("Work", sidebar.profiles()[0].id).unwrap();
         let spaces = HashMap::from([("space-home".to_string(), home)]);
+        let profiles = HashMap::from([("Profile 1".to_string(), work)]);
+        let url = |matching: &str, text: &str| {
+            let condition = json!({ "urlMatch": { "_0": { matching: {} }, "_1": text } });
+            json!({ "id": "c", "componentType": condition })
+        };
         let json = json!({
             "rules": [
-                { "sourceComponents": [{ "componentType": { "urlMatch": { "_0": { "contains": {} }, "_1": "meet.google.com" } } }],
+                { "id": "r1", "sourceComponents": [url("contains", "meet.google.com")],
                   "destination": { "space": { "_0": { "mostRecent": {} } } } },
-                { "sourceComponents": [{ "componentType": { "urlMatch": { "_0": { "matches": {} }, "_1": "test.com" } } }],
+                { "id": "r2", "sourceComponents": [url("matches", "test.com")],
                   "destination": { "littleArc": { "_0": { "mostRecent": {} } } } },
-                { "sourceComponents": [{ "componentType": { "urlMatch": { "_0": { "contains": {} }, "_1": "foo.bar" } } }],
+                { "id": "r3", "sourceComponents": [url("contains", "foo.bar")],
                   "destination": { "space": { "_0": { "space": { "_0": "space-other" } } } } },
-                { "sourceComponents": [], "destination": { "littleArc": {} } }
+                { "id": "r4", "sourceComponents": [url("contains", "github.com")],
+                  "destination": { "space": { "_0": { "profile": { "_0": {
+                      "custom": { "_0": { "directoryBasename": "Profile 1", "machineID": "m" } } } } } } } },
+                { "id": "r5", "sourceComponents": [url("contains", "docs"), url("contains", "google")],
+                  "destination": { "littleArc": { "_0": { "mostRecent": {} } } } },
+                { "id": "r6", "sourceComponents": [], "destination": { "littleArc": {} } }
             ],
             "version": 1,
             "defaultDestination": { "space": { "_0": { "space": { "_0": "space-home" } } } }
         });
-        let routing = url_routing(&json.to_string(), &spaces).unwrap();
+        let routing = url_routing(&json.to_string(), &spaces, &profiles).unwrap();
         let routes: Vec<_> = routing
             .routes
             .iter()
@@ -484,10 +507,13 @@ mod tests {
                 (Match::IsEqualTo, "test.com", Destination::Little),
                 // A Space not imported.
                 (Match::Contains, "foo.bar", Destination::MostRecentSpace),
+                // A profile, to its Space.
+                (Match::Contains, "github.com", Destination::Space(work)),
             ]
         );
         assert_eq!(routing.default, Destination::Space(home));
     }
+
     /// The fixture's two Arc profiles, each into a profile of its own.
     fn fixture() -> Sidebar {
         let mut sidebar = Sidebar::empty();

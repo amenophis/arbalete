@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "rule-meet",
+      "sourceComponents": [
+        { "id": "c-meet", "componentType": { "urlMatch": { "_0": { "contains": {} }, "_1": "meet.example.com" } } }
+      ],
+      "destination": { "space": { "_0": { "space": { "_0": "space-office" } } } }
+    },
+    {
+      "id": "rule-tracker",
+      "sourceComponents": [
+        { "id": "c-tracker", "componentType": { "urlMatch": { "_0": { "matches": {} }, "_1": "tracker.example.com" } } }
+      ],
+      "destination": { "space": { "_0": { "profile": { "_0": { "default": true } } } } }
+    },
+    {
+      "id": "rule-news",
+      "sourceComponents": [
+        { "id": "c-news", "componentType": { "urlMatch": { "_0": { "contains": {} }, "_1": "news" } } }
+      ],
+      "destination": { "littleArc": { "_0": { "mostRecent": {} } } }
+    }
+  ],
+  "defaultDestination": { "space": { "_0": { "space": { "_0": "space-home" } } } }
+}
