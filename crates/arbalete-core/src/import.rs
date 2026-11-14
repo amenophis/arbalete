@@ -207,12 +207,13 @@ fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>, Favico
     Ok((data, history?, favicons))
 }
 
-/// Arc's URL routing, which every Arc profile reads the same, and the Spaces imported from all of
-/// them, by their Arc id, which its routes name.
+/// Arc's URL routing, which every Arc profile reads the same, the Spaces imported from all of
+/// them, by their Arc id, and a Space of each, by its directory, which its routes name.
 #[derive(Default)]
 struct ArcRoutes {
     json: Option<String>,
     spaces: HashMap<String, SpaceId>,
+    profiles: HashMap<String, SpaceId>,
 }
 
 impl ArcRoutes {
@@ -220,7 +221,7 @@ impl ArcRoutes {
     /// destination takes over.
     fn apply(self, sidebar: &mut Sidebar) -> Result<(), String> {
         let Some(json) = self.json else { return Ok(()) };
-        let imported = arc::url_routing(&json, &self.spaces).map_err(debug)?;
+        let imported = arc::url_routing(&json, &self.spaces, &self.profiles).map_err(debug)?;
         let mut routes = sidebar.url_routing().routes.clone();
         routes.extend(imported.routes);
         sidebar.set_url_routing(UrlRouting {
@@ -248,6 +249,7 @@ fn add(
             }
             routes.json = routing.or(routes.json.take());
             routes.spaces.extend(spaces);
+            routes.profiles.insert(directory, target.space(sidebar));
             Ok(())
         }
         Data::Bookmarks(bookmarks) => {
@@ -334,6 +336,7 @@ impl Drop for TestDir {
 mod tests {
     use super::*;
     use crate::sidebar::NodeKind;
+    use crate::url_routing::Destination;
     use browsers::Profile;
     use rusqlite::Connection;
 
@@ -415,6 +418,23 @@ mod tests {
         assert_eq!(names, ["Personal (Arc)", "Work (Arc)", "Chrome"]);
         let spaces: Vec<_> = sidebar.spaces().iter().map(|s| s.title.as_str()).collect();
         assert_eq!(spaces, ["Home", "Space", "Office", "Chrome"]);
+        let space = |i: usize| Destination::Space(sidebar.spaces()[i].id);
+        let routing = sidebar.url_routing();
+        let routes: Vec<_> = routing
+            .routes
+            .iter()
+            .map(|r| (r.text.as_str(), r.destination))
+            .collect();
+        assert_eq!(
+            routes,
+            [
+                ("meet.example.com", space(2)),
+                // The Arc profile's Space.
+                ("tracker.example.com", space(0)),
+                ("news", Destination::Little),
+            ]
+        );
+        assert_eq!(routing.default, space(0));
         let favorites = |i: usize| urls(&sidebar, sidebar.profiles()[i].favorites);
         assert_eq!(favorites(1), ["https://tracker.example.com/"]);
         assert_eq!(favorites(2), ["https://mail.example.com/"]);
