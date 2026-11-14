@@ -556,6 +556,8 @@ pub enum Command {
     SetSpaceEmoji(SpaceId, String),
     /// Gives a Space the icon of the site at an address, typed or a tab's (set_space_site).
     SetSpaceSite(SpaceId, String),
+    /// Gives a Space an image picked from disk as its icon: a small PNG the UI made of it.
+    SetSpaceImage(SpaceId, Vec<u8>),
     /// Changes a Space's theme.
     SetSpaceTheme(SpaceId, Theme),
     /// Replaces the URL Routing rules and default.
@@ -752,6 +754,10 @@ mod tests {
         assert!(matches!(
             parse(r#"{"name":"set-space-site","args":[3,"example.com"]}"#),
             Some(Command::SetSpaceSite(_, address)) if address == "example.com"
+        ));
+        assert!(matches!(
+            parse(r#"{"name":"set-space-image","args":[3,[137,80,78,71]]}"#),
+            Some(Command::SetSpaceImage(_, png)) if png == b"\x89PNG"
         ));
         assert_eq!(
             parse(r#"{"name":"answer-auth","args":[3,["me@home","p/ss word"]]}"#),

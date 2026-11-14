@@ -452,8 +452,8 @@ fn move_to(sidebar: &Sidebar, id: NodeId) -> Entry {
 /// A Space as menus list it: its emoji, if any, then its title.
 pub fn space_title(space: &Space) -> String {
     match &space.emoji {
-        // A symbol or a site's icon shows only in the sidebar.
-        Some(emoji) if !emoji.starts_with("symbol:") && !emoji.starts_with("site:") => {
+        // A symbol, a site's icon or an image shows only in the sidebar.
+        Some(emoji) if !emoji.starts_with("symbol:") && space.cached_icon().is_none() => {
             format!("{emoji}  {}", space.title)
         }
         _ => space.title.clone(),

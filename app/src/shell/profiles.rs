@@ -173,6 +173,20 @@ pub(super) fn set_space_site(space: SpaceId, address: &str) {
     let _ = update_sidebar(|sidebar| sidebar.set_space_emoji(space, &format!("site:{source}")));
 }
 
+/// Gives a Space an image as its icon, cached in its profile. The file of the image it showed
+/// before goes at the next launch's sweep (favicon::sweep).
+pub(super) fn set_space_image(space: SpaceId, png: &[u8]) {
+    let Some(profile) = STATE.with_borrow(|state| state.sidebar.profile_of_space(space)) else {
+        return;
+    };
+    match favicon::write_image(&profile_dir(profile), png) {
+        Ok(source) => {
+            let _ = update_sidebar(|sidebar| sidebar.set_space_emoji(space, &source));
+        }
+        Err(error) => eprintln!("could not keep a Space's image: {error}"),
+    }
+}
+
 /// Changes the Spaces, then shows the displayed Space's selected tab if the change displays
 /// another Space or `space` itself, whose page may change. Like a selection, an unknown Space or
 /// profile from the UI or a menu is ignored.
