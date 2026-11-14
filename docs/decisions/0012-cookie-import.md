@@ -32,9 +32,12 @@ each cookie through the destination profile's cookie manager, leaving out cookie
   confirm on a machine with Arc, by the item's attributes: see below), Dia's likewise. Since database version
   24, the decrypted value starts with the SHA-256 of `host_key` (32 bytes), to drop and check. Windows' newer
   app-bound encryption (`v20`) does not exist on macOS.
-- **Arbalete's own key** is `Chromium Safe Storage` (`mac::ensure_keychain_access`), which CEF uses for the
-  profiles' cookies. Arbalete already makes sure it can read it before CEF starts: without it, Chromium deletes
-  every cookie it cannot decrypt.
+- **Arbalete's own key** is `Arbalete Safe Storage`, account `Arbalete`, which CEF uses for the profiles'
+  cookies under the name its `--keychain-name` switch gives (a patch of amenophis/cef-codecs' CEF, like
+  Electron's apps; issue #358). Up to 0.5.0 it was Chromium's default, `Chromium Safe Storage`, which Chromium
+  itself shares: `mac::ensure_keychain_access` copies it into Arbalete's item once, before CEF starts, and leaves
+  it in place. It also makes sure Arbalete can read its key: without it, Chromium deletes every cookie it
+  cannot decrypt.
 
 ### What reading another browser's key means for the user
 

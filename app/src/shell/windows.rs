@@ -289,6 +289,13 @@ wrap_app! {
             if crate::mac::mock_keychain() {
                 command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
             }
+            // Chromium keeps its key in Arbalete's own keychain item (mac::ensure_keychain_access).
+            // A switch of amenophis/cef-codecs' CEF, from build 10.
+            #[cfg(target_os = "macos")]
+            command_line.append_switch_with_value(
+                Some(&CefString::from("keychain-name")),
+                Some(&CefString::from(crate::mac::KEYCHAIN_NAME)),
+            );
             // Sites asking to sign in reach the sign-in prompt (auth_credentials): Chrome's own
             // prompt has no tab to show in.
             command_line.append_switch(Some(&CefString::from("disable-chrome-login-prompt")));
