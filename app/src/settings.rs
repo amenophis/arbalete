@@ -1,6 +1,7 @@
 //! The app's settings, the same for every profile, kept in a file of their own. A profile's own
 //! settings, like its search engine, are kept with it in the sidebar.
 
+use arbalete_core::search::Site;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io, path::Path};
 
@@ -47,6 +48,9 @@ pub struct Settings {
     pub media_sources: Vec<String>,
     /// The welcome flow ran to its end or was skipped: it no longer shows at launch.
     pub onboarded: bool,
+    /// The sites the Command Bar searches once Tab follows their name, besides the search
+    /// engines, like Arc's site search.
+    pub site_searches: Vec<Site>,
 }
 
 /// A shortcut changed from its default, like Arc's: other keys, none, or who takes them first.
@@ -104,6 +108,7 @@ impl Default for Settings {
             shortcuts: BTreeMap::new(),
             media_sources: vec!["captures".into(), "downloads".into()],
             onboarded: false,
+            site_searches: arbalete_core::search::default_sites(),
         }
     }
 }
@@ -155,6 +160,7 @@ mod tests {
             count_favorites: false,
             media_sources: vec!["desktop".into()],
             onboarded: true,
+            site_searches: Vec::new(),
             shortcuts: BTreeMap::from([(
                 "newTab".into(),
                 ShortcutOverride {

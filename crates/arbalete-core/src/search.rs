@@ -56,6 +56,20 @@ impl SearchEngine {
         }
     }
 
+    /// The color of its chip in the Command Bar, searching it as a site.
+    pub fn color(self) -> &'static str {
+        match self {
+            Self::Google => "#4285F4",
+            Self::DuckDuckGo => "#DE5833",
+            Self::Bing => "#0C8484",
+            Self::Ecosia => "#008009",
+            Self::Qwant => "#5C97FF",
+            Self::Brave => "#FB542B",
+            Self::Perplexity => "#20808D",
+            Self::Yahoo => "#6001D2",
+        }
+    }
+
     /// The address of its suggestions for typed text, before the percent-encoded text, if it
     /// offers any. Each answers in the OpenSearch format (suggestions).
     pub fn suggest_url(self) -> Option<&'static str> {
@@ -72,6 +86,165 @@ impl SearchEngine {
             Self::Yahoo => Some("https://ff.search.yahoo.com/gossip?output=fxjson&command="),
         }
     }
+}
+
+/// A site the Command Bar searches once Tab follows its name or shortcut, like Arc's site search:
+/// its name, its shortcut (usually its host), the address of a search with `%s` where the
+/// percent-encoded query goes, and the color of its chip.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Site {
+    pub name: String,
+    pub shortcut: String,
+    pub url: String,
+    pub color: String,
+}
+
+impl Site {
+    fn new(name: &str, shortcut: &str, url: &str, color: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            shortcut: shortcut.to_string(),
+            url: url.to_string(),
+            color: color.to_string(),
+        }
+    }
+
+    /// The address searching `query` on it; without `%s`, the query goes at the end.
+    pub fn search_url(&self, query: &str) -> String {
+        let query = encode(query);
+        if self.url.contains("%s") {
+            self.url.replace("%s", &query)
+        } else {
+            format!("{}{query}", self.url)
+        }
+    }
+}
+
+/// The sites searched until the settings change them, popular ones with a public search.
+pub fn default_sites() -> Vec<Site> {
+    [
+        (
+            "YouTube",
+            "youtube.com",
+            "https://www.youtube.com/results?search_query=%s",
+            "#FF0033",
+        ),
+        (
+            "Wikipedia",
+            "wikipedia.org",
+            "https://en.wikipedia.org/w/index.php?search=%s",
+            "#E8A33D",
+        ),
+        (
+            "Google Drive",
+            "drive.google.com",
+            "https://drive.google.com/drive/search?q=%s",
+            "#1FA463",
+        ),
+        (
+            "Gmail",
+            "mail.google.com",
+            "https://mail.google.com/mail/u/0/#search/%s",
+            "#EA4335",
+        ),
+        (
+            "Google Maps",
+            "maps.google.com",
+            "https://www.google.com/maps/search/%s",
+            "#34A853",
+        ),
+        (
+            "Google Docs",
+            "docs.google.com",
+            "https://docs.google.com/document/?q=%s",
+            "#4285F4",
+        ),
+        (
+            "Amazon",
+            "amazon.com",
+            "https://www.amazon.com/s?k=%s",
+            "#FF9900",
+        ),
+        (
+            "GitHub",
+            "github.com",
+            "https://github.com/search?q=%s",
+            "#6E40C9",
+        ),
+        (
+            "Reddit",
+            "reddit.com",
+            "https://www.reddit.com/search/?q=%s",
+            "#FF4500",
+        ),
+        ("X", "x.com", "https://x.com/search?q=%s", "#000000"),
+        (
+            "LinkedIn",
+            "linkedin.com",
+            "https://www.linkedin.com/search/results/all/?keywords=%s",
+            "#0A66C2",
+        ),
+        (
+            "Spotify",
+            "open.spotify.com",
+            "https://open.spotify.com/search/%s",
+            "#1DB954",
+        ),
+        (
+            "Stack Overflow",
+            "stackoverflow.com",
+            "https://stackoverflow.com/search?q=%s",
+            "#F48024",
+        ),
+        (
+            "Figma",
+            "figma.com",
+            "https://www.figma.com/files/search?q=%s",
+            "#A259FF",
+        ),
+        (
+            "Dropbox",
+            "dropbox.com",
+            "https://www.dropbox.com/search/personal?query=%s",
+            "#0061FF",
+        ),
+    ]
+    .into_iter()
+    .map(|(name, shortcut, url, color)| Site::new(name, shortcut, url, color))
+    .collect()
+}
+
+/// The search engines as sites, searched like the others.
+pub fn engine_sites() -> Vec<Site> {
+    SearchEngine::ALL
+        .iter()
+        .map(|engine| {
+            let host = engine.url().trim_start_matches("https://");
+            let host = host
+                .trim_start_matches("www.")
+                .split('/')
+                .next()
+                .unwrap_or("");
+            Site::new(engine.name(), host, engine.url(), engine.color())
+        })
+        .collect()
+}
+
+/// The site, among `sites`, whose name or shortcut starts with what is typed, from two letters
+/// on, or whose name it is, like "x".
+pub fn find<'a>(sites: &'a [Site], typed: &str) -> Option<&'a Site> {
+    let typed = typed.trim().to_lowercase();
+    if typed.is_empty() || typed.contains(char::is_whitespace) {
+        return None;
+    }
+    let long = typed.chars().count() >= 2;
+    sites.iter().find(|site| {
+        let name = site.name.to_lowercase().replace(' ', "");
+        let shortcut = site.shortcut.to_lowercase();
+        let shortcut = shortcut.trim_start_matches("www.");
+        !site.url.is_empty()
+            && (name == typed || long && (name.starts_with(&typed) || shortcut.starts_with(&typed)))
+    })
 }
 
 /// Text percent-encoded for a query, as `encodeURIComponent` does in the UI: what is not a letter,
@@ -119,6 +292,31 @@ mod tests {
             assert!(engine.url().starts_with("https://"));
         }
         assert_eq!(SearchEngine::default(), SearchEngine::Google);
+    }
+
+    #[test]
+    fn finds_the_site_named_or_shortcut_by_what_is_typed() {
+        let sites: Vec<_> = engine_sites().into_iter().chain(default_sites()).collect();
+        let name = |typed| find(&sites, typed).map(|site| site.name.as_str());
+        assert_eq!(name("you"), Some("YouTube"));
+        assert_eq!(name("YouTube.com"), Some("YouTube"));
+        assert_eq!(name("stackov"), Some("Stack Overflow"));
+        assert_eq!(name("go"), Some("Google"));
+        assert_eq!(name("gi"), Some("GitHub"));
+        assert_eq!(name("search.brave"), Some("Brave"));
+        assert_eq!(name("y"), None);
+        assert_eq!(name("x"), Some("X"));
+        assert_eq!(name("you tube"), None);
+        assert_eq!(name("youtube.com/watch"), None);
+        assert_eq!(name("zzz"), None);
+    }
+
+    #[test]
+    fn puts_the_query_where_the_site_says() {
+        let site = Site::new("Maps", "maps", "https://example.com/s/%s?x=1", "#000000");
+        assert_eq!(site.search_url("a b"), "https://example.com/s/a%20b?x=1");
+        let site = Site::new("Old", "old", "https://example.com/?q=", "#000000");
+        assert_eq!(site.search_url("a"), "https://example.com/?q=a");
     }
 
     #[test]

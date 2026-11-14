@@ -17,6 +17,7 @@ struct SettingsDetail: Decodable {
         var awakeSites: [String]
         var ninthSidebarItem: Bool
         var countFavorites: Bool
+        var siteSearches: [Site]
     }
     struct Choice: Decodable, Identifiable, Hashable {
         var id: String
@@ -128,6 +129,8 @@ enum Destination: Codable, Hashable {
 final class SettingsModel: ObservableObject {
     @Published var detail: SettingsDetail?
     @Published var pane = panes[0].title
+    /// The list of sites the Command Bar searches shows, over the General pane.
+    @Published var siteSearchShown = false
     let app: AppModel
     private var window: NSWindow?
 
@@ -399,7 +402,18 @@ private struct GeneralSettings: View {
                         Button("Profile Settings…") { settings.choose("Profiles") }
                     }
                 }
+                SettingsCard {
+                    SettingsRow(
+                        label: "Search a site from the Command Bar: type its name, then press Tab.",
+                        height: 44
+                    ) {
+                        Button("Site Search…") { settings.siteSearchShown = true }
+                    }
+                }
             }
+        }
+        .sheet(isPresented: $settings.siteSearchShown) {
+            SiteSearchSheet(settings: settings) { settings.siteSearchShown = false }
         }
     }
 
@@ -602,6 +616,128 @@ private struct AirTrafficControl: View {
     private func save(_ routing: UrlRouting) {
         settings.app.run("set-url-routing", jsonObject(routing))
     }
+}
+
+/// The sites the Command Bar searches, like Arc's list of site searches: each one's color, name,
+/// shortcut and search address, with `%s` where the query goes. Each change is saved at once.
+private struct SiteSearchSheet: View {
+    @ObservedObject var settings: SettingsModel
+    let close: () -> Void
+
+    var body: some View {
+        let sites = settings.detail?.settings.siteSearches ?? []
+        VStack(spacing: 0) {
+            HStack {
+                Text("Site Search").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button("Add Site") {
+                    save(sites + [Site(name: "", shortcut: "", url: "", color: "#6E6E73")])
+                }
+                Button(action: close) {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .padding(.leading, 20)
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 64)
+            Text(verbatim: "In the Command Bar, type a site’s name or shortcut, then press Tab to search it. Its address has %s where the search goes.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 12)
+            Divider().padding(.horizontal, 24)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(sites.indices, id: \.self) { index in
+                        SiteSearchRow(
+                            site: sites[index],
+                            change: { site in
+                                var changed = sites
+                                changed[index] = site
+                                save(changed)
+                            },
+                            remove: {
+                                var changed = sites
+                                changed.remove(at: index)
+                                save(changed)
+                            })
+                    }
+                    if sites.isEmpty {
+                        Text("No sites: Tab searches the search engines only.").foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(width: 640, height: 500)
+    }
+
+    private func save(_ sites: [Site]) {
+        settings.app.run("set-site-searches", jsonObject(sites))
+    }
+}
+
+/// A site of the list: its chip's color, its name, its shortcut and its search address.
+private struct SiteSearchRow: View {
+    let site: Site
+    let change: (Site) -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ColorPicker("", selection: Binding(
+                get: { color(site.color) },
+                set: { picked in
+                    var changed = site
+                    changed.color = hexColor(picked)
+                    change(changed)
+                }
+            ), supportsOpacity: false)
+            .labelsHidden()
+            TextField("Name", text: binding(\.name), prompt: Text("Name"))
+                .frame(width: 120)
+            TextField("Shortcut", text: binding(\.shortcut), prompt: Text("example.com"))
+                .frame(width: 130)
+            TextField("URL", text: binding(\.url), prompt: Text(verbatim: "https://example.com/search?q=%s"))
+            Button(action: remove) {
+                Image(systemName: "minus.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Remove the site")
+            .accessibilityLabel("Remove the site")
+        }
+        .textFieldStyle(.roundedBorder)
+        .labelsHidden()
+    }
+
+    private func binding(_ field: WritableKeyPath<Site, String>) -> Binding<String> {
+        Binding(
+            get: { site[keyPath: field] },
+            set: { value in
+                var changed = site
+                changed[keyPath: field] = value
+                change(changed)
+            })
+    }
+}
+
+/// A color as "#RRGGBB", in sRGB.
+private func hexColor(_ color: Color) -> String {
+    guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return "#000000" }
+    let channel = { (value: CGFloat) in Int((value * 255).rounded()) }
+    return String(
+        format: "#%02X%02X%02X", channel(rgb.redComponent), channel(rgb.greenComponent),
+        channel(rgb.blueComponent))
 }
 
 /// A route: how and what it matches in a url, and where those links open.

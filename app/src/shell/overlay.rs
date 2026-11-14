@@ -279,7 +279,8 @@ fn place_overlay_by(bounds: impl FnOnce(Size) -> Rect) {
 }
 
 /// Sends the Command Bar the open tabs, in every Space and the favorites, then the displayed
-/// Space's profile history pages, best first, whose address or title holds `text`.
+/// Space's profile history pages, best first, whose address or title holds `text`, and the site
+/// it names, which Tab searches.
 pub(super) fn search_overlay(text: &str, surface: &'static str) {
     let wanted = text.trim().to_lowercase();
     let (tabs, profile) = STATE.with_borrow(|state| {
@@ -345,7 +346,13 @@ pub(super) fn search_overlay(text: &str, surface: &'static str) {
             json!({ "id": id, "url": shown_url(&tab.url), "title": tab.label(), "favicon": favicon })
         })
         .collect();
-    let detail = json!({ "text": text, "tabs": tabs, "pages": pages });
+    // Like Arc's, the site it names, which Tab searches, and every site, which its chip's menu
+    // changes to: the sites first, then the search engines.
+    let sites = app_settings().site_searches;
+    let engines = arbalete_core::search::engine_sites();
+    let site = arbalete_core::search::find(&engines, text)
+        .or_else(|| arbalete_core::search::find(&sites, text));
+    let detail = json!({ "text": text, "tabs": tabs, "pages": pages, "site": site, "sites": sites, "engines": engines });
     send_surface(surface, "arbalete:results", &detail.to_string());
     suggest(profile, text, surface);
 }

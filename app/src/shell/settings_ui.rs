@@ -193,6 +193,13 @@ pub(super) fn keep_awake(site: String, on: bool) {
     }
 }
 
+/// Replaces the sites the Command Bar searches, and saves them.
+pub(super) fn set_site_searches(sites: Vec<arbalete_core::search::Site>) {
+    SETTINGS.with_borrow_mut(|settings| settings.site_searches = sites);
+    save_settings();
+    send_settings();
+}
+
 /// The app's settings, as they stand.
 pub(super) fn app_settings() -> Settings {
     SETTINGS.with_borrow(Clone::clone)

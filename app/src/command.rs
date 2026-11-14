@@ -5,7 +5,7 @@
 
 use arbalete_core::boosts::{Boost, BoostId};
 use arbalete_core::import::Choice;
-use arbalete_core::search::SearchEngine;
+use arbalete_core::search::{SearchEngine, Site};
 use arbalete_core::sidebar::{
     ArchiveAfter, Color, DownloadLocation, NodeId, ProfileId, SpaceId, Theme,
 };
@@ -515,6 +515,10 @@ pub enum Command {
     SettingsReady,
     /// Keeps a site's pages from being suspended, or no longer: its host, and whether.
     KeepAwake(String, bool),
+    /// Replaces the sites the Command Bar searches (Settings::site_searches).
+    SetSiteSearches(Vec<Site>),
+    /// Stops searching a site from the Command Bar: its shortcut.
+    RemoveSiteSearch(String),
     /// Lets a site's videos go on in Picture in Picture, or no longer: its host, and whether.
     SitePictureInPicture(String, bool),
     /// Turns a site's developer mode on or off: its host, and whether.
