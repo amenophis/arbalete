@@ -31,6 +31,22 @@ struct PageState: Decodable {
     var canGoForward: Bool
 }
 
+/// The page's earlier pages, the last one first, or its later ones, the next one first
+/// (show_history_menu in app/src/shell/menus.rs).
+struct PageHistory: Decodable {
+    var forward: Bool
+    var pages: [HistoryPage]
+}
+
+struct HistoryPage: Decodable, Identifiable {
+    /// How far it is from the current page, back if negative.
+    var offset: Int
+    var title: String
+    var favicon: String?
+
+    var id: Int { offset }
+}
+
 struct Space: Decodable, Identifiable {
     var id: Int
     var title: String
