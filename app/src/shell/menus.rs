@@ -221,9 +221,107 @@ pub fn menu_at(x: f64, y: f64) -> bool {
     true
 }
 
+/// The pages a history menu lists at most, the nearest first, like Chrome's.
+const HISTORY_MENU_PAGES: usize = 12;
+
+/// Shows the page's earlier pages, the last one first, or its later ones, the next one first,
+/// with their titles and icons, in a popover under the button right-clicked, like Arc's: picking
+/// one goes straight to it (Command::GoInHistory).
+pub(super) fn show_history_menu(browser: &Browser, forward: bool) {
+    let Some(host) = browser.host() else { return };
+    let pages = Rc::new(RefCell::new(Vec::new()));
+    // It visits every page in order, at once on the UI thread.
+    let mut visitor = HistoryVisitor::new(pages.clone());
+    host.navigation_entries(Some(&mut visitor), 0);
+    let pages = pages.take();
+    let Some(current) = pages.iter().position(|page: &HistoryPage| page.current) else {
+        return;
+    };
+    // Like the Command Bar's pages, each shows the icon Chromium found for it or its site.
+    let profile = displayed_profile();
+    let dir = profile_dir(profile);
+    let chromium = favicon::chromium(&dir);
+    let pages: Vec<_> = history_offsets(pages.len(), current, forward)
+        .into_iter()
+        .map(|offset| {
+            let page = &pages[(current as i32 + offset) as usize];
+            let favicon = chromium
+                .as_ref()
+                .and_then(|db| favicon::of_page(&dir, db, &page.url))
+                .map(|source| icon_url(profile, &source));
+            let title = if page.title.is_empty() {
+                &page.url
+            } else {
+                &page.title
+            };
+            json!({ "offset": offset, "title": title, "favicon": favicon })
+        })
+        .collect();
+    let detail = json!({ "forward": forward, "pages": pages });
+    send_surface("sidebar", "arbalete:history", &detail.to_string());
+}
+
+/// How far each page a history menu lists is from the current one, among `count` pages: the
+/// nearest first, at most `HISTORY_MENU_PAGES`.
+fn history_offsets(count: usize, current: usize, forward: bool) -> Vec<i32> {
+    let pages = if forward {
+        count - current - 1
+    } else {
+        current
+    };
+    let sign = if forward { 1 } else { -1 };
+    (1..=pages.min(HISTORY_MENU_PAGES) as i32)
+        .map(|offset| sign * offset)
+        .collect()
+}
+
+/// Goes `offset` pages back, if negative, or forward in the page's history, like the page's own
+/// `history.go`.
+pub(super) fn go_in_history(browser: &Browser, offset: i32) {
+    if let Some(frame) = browser.main_frame() {
+        let code = CefString::from(format!("history.go({offset})").as_str());
+        frame.execute_java_script(Some(&code), None, 0);
+    }
+}
+
+struct HistoryPage {
+    url: String,
+    title: String,
+    current: bool,
+}
+
+wrap_navigation_entry_visitor! {
+    struct HistoryVisitor {
+        pages: Rc<RefCell<Vec<HistoryPage>>>,
+    }
+
+    impl NavigationEntryVisitor {
+        fn visit(&self, entry: Option<&mut NavigationEntry>, current: i32, _index: i32, _total: i32) -> i32 {
+            if let Some(entry) = entry {
+                self.pages.borrow_mut().push(HistoryPage {
+                    url: CefString::from(&entry.url()).to_string(),
+                    title: CefString::from(&entry.title()).to_string(),
+                    current: current == 1,
+                });
+            }
+            1
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_offsets_list_the_nearest_pages_first() {
+        assert_eq!(history_offsets(4, 2, false), [-1, -2]);
+        assert_eq!(history_offsets(4, 2, true), [1]);
+        assert_eq!(history_offsets(1, 0, false), [] as [i32; 0]);
+        assert_eq!(history_offsets(1, 0, true), [] as [i32; 0]);
+        assert_eq!(history_offsets(30, 20, false).len(), HISTORY_MENU_PAGES);
+        assert_eq!(history_offsets(30, 20, false).last(), Some(&-12));
+    }
 
     /// A window, in points.
     const SIZE: Size = Size {

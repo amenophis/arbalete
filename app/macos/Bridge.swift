@@ -53,6 +53,8 @@ final class AppModel: ObservableObject {
     @Published var siteControlsShown = false
     /// The folder or the tab whose name is being edited.
     @Published var renaming: Int?
+    /// The page's earlier or later pages, which a right click on Back or Forward asks for.
+    @Published var history: PageHistory?
     /// The Space whose name or icon ("name" or "emoji") is edited in its header.
     @Published var editingSpace: SpaceEdit?
     /// The new Space whose form the sidebar shows (SpaceDraft.swift).
@@ -273,6 +275,8 @@ final class AppModel: ObservableObject {
             if let picture = try? JSONDecoder().decode(TabPicture.self, from: detail) {
                 OutsideDrop.shared.picture(picture.tab, jpeg: picture.jpeg)
             }
+        case "arbalete:history":
+            history = try? JSONDecoder().decode(PageHistory.self, from: detail)
         case "arbalete:rename":
             renaming = try? JSONDecoder().decode(Int.self, from: detail)
         case "arbalete:new-space":

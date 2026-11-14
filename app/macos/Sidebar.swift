@@ -142,6 +142,7 @@ struct NavButtons: View {
             ) {
                 model.run("back")
             }
+                .historyMenu(model, forward: false)
                 .disabled(!(page?.canGoBack ?? false))
             IconButton(
                 symbol: "arrow.right", label: "Forward", size: compact ? 28 : 34,
@@ -149,6 +150,7 @@ struct NavButtons: View {
             ) {
                 model.run("forward")
             }
+                .historyMenu(model, forward: true)
                 .disabled(!(page?.canGoForward ?? false))
             if compact {
                 MoreButton(model: model)
@@ -268,6 +270,72 @@ private struct MoreRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { _hovered.wrappedValue = $0 }
+    }
+}
+
+extension View {
+    /// On a right click, the page's earlier pages, or its later ones, in a popover under it, like
+    /// Arc's: picking one goes straight to it.
+    func historyMenu(_ model: AppModel, forward: Bool) -> some View {
+        modifier(HistoryMenu(model: model, forward: forward))
+    }
+}
+
+private struct HistoryMenu: ViewModifier {
+    @ObservedObject var model: AppModel
+    let forward: Bool
+    /// This button asked for the pages, which the app sends at once (arbalete:history).
+    private let _asked = State<Bool>(initialValue: false)
+
+    func body(content: Content) -> some View {
+        let pages = model.history?.forward == forward ? model.history?.pages ?? [] : []
+        let shown = Binding(
+            get: { _asked.wrappedValue && !pages.isEmpty },
+            set: { if !$0 { _asked.wrappedValue = false } })
+        content
+            .rightClick {
+                model.history = nil
+                model.run("history-menu", ["forward": forward])
+                _asked.wrappedValue = true
+            }
+            .popover(isPresented: shown, arrowEdge: .bottom) {
+                VStack(spacing: 0) {
+                    ForEach(pages) { page in
+                        HistoryRow(page: page, accent: model.accent) {
+                            _asked.wrappedValue = false
+                            model.run("go-in-history", page.offset)
+                        }
+                    }
+                }
+                .padding(8)
+                .frame(width: 280)
+            }
+    }
+}
+
+/// A page of the history popover, its icon then its title, like the "⋯" popover's rows.
+private struct HistoryRow: View {
+    let page: HistoryPage
+    let accent: Color
+    let action: () -> Void
+    private let _hovered = State<Bool>(initialValue: false)
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Favicon(url: page.favicon, size: 16).frame(width: 22)
+                Text(page.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .background(
+                RoundedRectangle(cornerRadius: 10).fill(accent.opacity(_hovered.wrappedValue ? 0.18 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(page.title)
         .onHover { _hovered.wrappedValue = $0 }
     }
 }

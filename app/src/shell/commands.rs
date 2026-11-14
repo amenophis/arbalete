@@ -444,6 +444,8 @@ fn run_command(command: Command) {
         ) => set_window_colors(card, grain, &colors),
         (Command::Back, Some(browser)) => browser.go_back(),
         (Command::Forward, Some(browser)) => browser.go_forward(),
+        (Command::HistoryMenu { forward }, Some(browser)) => show_history_menu(&browser, forward),
+        (Command::GoInHistory(offset), Some(browser)) => go_in_history(&browser, offset),
         (Command::Reload, Some(browser)) => browser.reload(),
         (Command::ForceReload, Some(browser)) => browser.reload_ignore_cache(),
         (Command::ViewSource, Some(browser)) => {

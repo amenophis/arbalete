@@ -143,6 +143,13 @@ pub enum Command {
     Ready,
     Back,
     Forward,
+    /// Shows the page's earlier pages, or its later ones, at the pointer, from a right click on
+    /// Back or Forward, like Arc's.
+    HistoryMenu {
+        forward: bool,
+    },
+    /// Goes this many pages back, if negative, or forward in the page's history.
+    GoInHistory(i32),
     Reload,
     /// Reloads the page without its cache, from the menu or the sidebar's "⋯".
     ForceReload,
@@ -692,6 +699,14 @@ mod tests {
     #[test]
     fn parses_commands_without_arguments() {
         assert_eq!(parse(r#"{"name":"back"}"#), Some(Command::Back));
+        assert_eq!(
+            parse(r#"{"name":"history-menu","args":{"forward":true}}"#),
+            Some(Command::HistoryMenu { forward: true })
+        );
+        assert_eq!(
+            parse(r#"{"name":"go-in-history","args":-3}"#),
+            Some(Command::GoInHistory(-3))
+        );
         assert_eq!(
             parse(r#"{"name":"show-settings"}"#),
             Some(Command::ShowSettings(None))

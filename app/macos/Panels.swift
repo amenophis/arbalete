@@ -293,8 +293,10 @@ struct BarStart: View {
                 barTool("sidebar.left", "Toggle sidebar") { model.run("toggle-sidebar") }
             }
             barTool("arrow.left", "Back") { model.run("back") }
+                .historyMenu(model, forward: false)
                 .disabled(!(page?.canGoBack ?? false))
             barTool("arrow.right", "Forward") { model.run("forward") }
+                .historyMenu(model, forward: true)
                 .disabled(!(page?.canGoForward ?? false))
             // Like Arc's, it stops the page while it loads.
             if page?.loading == true {
