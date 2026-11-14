@@ -1,12 +1,13 @@
 // A Space's icon picker, like Arc's: above the Space's icon in the footer, an emoji or a symbol,
 // with a search field and categories for the emoji, and a button that removes the icon; or, our
-// own, a site's icon.
+// own, a site's icon or an image from disk.
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// A Space's icon as a view: an emoji, a symbol stored as "symbol:<name>", or a site's icon the
-/// app sends as "site:<url>", a globe while its file is missing.
+/// A Space's icon as a view: an emoji, a symbol stored as "symbol:<name>", or a site's icon or an
+/// image the app sends as "site:<url>" or "image:<url>", a globe while its file is missing.
 struct SpaceGlyph: View {
     let icon: String
     let size: CGFloat
@@ -21,10 +22,13 @@ struct SpaceGlyph: View {
             } else {
                 Image(systemName: name).font(.system(size: size * 0.85, weight: .semibold))
             }
-        } else if let url = siteIcon(icon) {
+        } else if let url = siteIcon(icon) ?? imageIcon(icon) {
             if let image = uiImage(url) {
+                let side = picture ?? size
                 Image(nsImage: image).resizable().interpolation(.high)
-                    .frame(width: picture ?? size, height: picture ?? size)
+                    .frame(width: side, height: side)
+                    // An image, often a photo, gets the rounded corners of an app's icon.
+                    .clipShape(RoundedRectangle(cornerRadius: imageIcon(icon) != nil ? side / 4 : 0))
             } else {
                 Image(systemName: "globe").font(.system(size: size * 0.85, weight: .semibold))
             }
@@ -44,11 +48,43 @@ func siteIcon(_ icon: String) -> String? {
     icon.hasPrefix("site:") ? String(icon.dropFirst("site:".count)) : nil
 }
 
-/// A Space's icon as text, for a menu: only an emoji; a symbol or a site's icon shows only in the
-/// sidebar.
+/// Where the image a Space shows loads from, if it shows one.
+func imageIcon(_ icon: String) -> String? {
+    icon.hasPrefix("image:") ? String(icon.dropFirst("image:".count)) : nil
+}
+
+/// A Space's icon as text, for a menu: only an emoji; a symbol, a site's icon or an image shows
+/// only in the sidebar.
 func emojiText(_ icon: String?) -> String? {
-    guard let icon, symbolName(icon) == nil, siteIcon(icon) == nil else { return nil }
+    guard let icon, symbolName(icon) == nil, siteIcon(icon) == nil, imageIcon(icon) == nil else {
+        return nil
+    }
     return icon
+}
+
+/// The side, in pixels, of the square PNG an image is kept as: sharp up to 32 points on a Retina
+/// screen.
+private let imageSide = 64
+
+/// An image file as a Space's icon: its middle square, filled like a photo, sized down to a PNG.
+@MainActor func spaceImagePNG(_ url: URL) -> Data? {
+    guard let image = NSImage(contentsOf: url), image.size.width > 0, image.size.height > 0,
+        let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: imageSide, pixelsHigh: imageSide,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+    else { return nil }
+    let side = min(image.size.width, image.size.height)
+    let middle = NSRect(
+        x: (image.size.width - side) / 2, y: (image.size.height - side) / 2,
+        width: side, height: side)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSGraphicsContext.current?.imageInterpolation = .high
+    image.draw(in: NSRect(x: 0, y: 0, width: imageSide, height: imageSide), from: middle,
+        operation: .copy, fraction: 1)
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.representation(using: .png, properties: [:])
 }
 
 /// The kinds of icon the picker offers, by their tab's title.
@@ -56,9 +92,11 @@ private enum IconKind: String, CaseIterable {
     case emoji = "Emoji"
     case symbol = "Icon"
     case site = "Site"
+    case image = "Image"
 
     init(_ icon: String) {
-        self = symbolName(icon) != nil ? .symbol : siteIcon(icon) != nil ? .site : .emoji
+        self = symbolName(icon) != nil ? .symbol : siteIcon(icon) != nil ? .site
+            : imageIcon(icon) != nil ? .image : .emoji
     }
 }
 
@@ -177,6 +215,7 @@ struct EmojiPicker: View {
             case .emoji: emojiGrid
             case .symbol: symbolGrid
             case .site: siteGrid
+            case .image: imageWell
             }
         }
         .padding(12)
@@ -189,7 +228,7 @@ struct EmojiPicker: View {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 24)
+                .frame(width: 48, height: 24)
                 .background(
                     RoundedRectangle(cornerRadius: 6).fill(selected ? Color.accentColor : .clear))
                 .contentShape(Rectangle())
@@ -322,6 +361,44 @@ struct EmojiPicker: View {
             }
         }
         .onAppear { DispatchQueue.main.async { searching = true } }
+    }
+
+    /// The Space's image, if it has one, and a button to choose one; an image file dropped on it
+    /// does as well.
+    private var imageWell: some View {
+        VStack(spacing: 10) {
+            if let icon = current, imageIcon(icon) != nil {
+                SpaceGlyph(icon: icon, size: 48)
+            } else {
+                Image(systemName: "photo").font(.system(size: 32)).foregroundStyle(.secondary)
+            }
+            Button("Choose Image…") {
+                dismiss()
+                chooseImage()
+            }
+            Text("or drop one here").font(.system(size: 12)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 150)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color.black.opacity(0.3)))
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first, let png = spaceImagePNG(url) else { return false }
+            dismiss()
+            model.run("set-space-image", space, png.map { Int($0) })
+            return true
+        }
+    }
+
+    /// Asks for an image file, once the picker is closed, and gives it to the Space.
+    private func chooseImage() {
+        let (model, space) = (model, space)
+        DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.image]
+            panel.prompt = "Choose"
+            guard panel.runModal() == .OK, let url = panel.url, let png = spaceImagePNG(url)
+            else { return }
+            model.run("set-space-image", space, png.map { Int($0) })
+        }
     }
 
     /// The Space's tabs with an icon, one per icon, as the app sends them: for the displayed Space

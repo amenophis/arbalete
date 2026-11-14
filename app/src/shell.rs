@@ -884,10 +884,18 @@ fn favicon_url(profile: ProfileId, tab: &Tab) -> Option<String> {
     Some(icon_url(profile, tab.favicon.as_deref()?))
 }
 
-/// A Space's icon for the UI: a site's as "site:" and where the UI loads it from (icon_url).
+/// A Space's icon for the UI: a site's as "site:", an image as "image:", and where the UI loads
+/// it from (icon_url).
 fn space_icon(space: &Space) -> Option<String> {
-    match space.site_icon() {
-        Some(source) => Some(format!("site:{}", icon_url(space.profile, source))),
+    match space.cached_icon() {
+        Some(source) => {
+            let kind = if source.starts_with("image:") {
+                "image"
+            } else {
+                "site"
+            };
+            Some(format!("{kind}:{}", icon_url(space.profile, source)))
+        }
         None => space.emoji.clone(),
     }
 }
@@ -1232,7 +1240,7 @@ mod tests {
     }
 
     #[test]
-    fn sends_a_space_site_icon_where_the_ui_loads_it_from() {
+    fn sends_a_space_site_icon_or_image_where_the_ui_loads_it_from() {
         let mut sidebar = arbalete_core::sidebar::Sidebar::default();
         let space = sidebar.spaces()[0].id;
         sidebar.set_space_emoji(space, "💼").unwrap();
@@ -1247,6 +1255,15 @@ mod tests {
             Some(format!(
                 "site:arb://ui/favicon/{profile}/{}",
                 arbalete_core::favicon::file_name(source)
+            ))
+        );
+        let image = "image:d41d8cd98f00b204e9800998ecf8427e";
+        sidebar.set_space_emoji(space, image).unwrap();
+        assert_eq!(
+            space_icon(&sidebar.spaces()[0]),
+            Some(format!(
+                "image:arb://ui/favicon/{profile}/{}",
+                arbalete_core::favicon::file_name(image)
             ))
         );
     }

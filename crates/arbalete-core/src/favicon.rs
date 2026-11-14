@@ -35,6 +35,14 @@ pub fn write(profile_dir: &Path, source: &str, png: &[u8]) -> io::Result<()> {
     fs::write(path(profile_dir, source), png)
 }
 
+/// Caches an image picked from disk as a Space's icon: its source, "image:<md5 of the PNG>", so
+/// that another image has another file (Space::cached_icon).
+pub fn write_image(profile_dir: &Path, png: &[u8]) -> io::Result<String> {
+    let source = format!("image:{:x}", md5::compute(png));
+    write(profile_dir, &source, png)?;
+    Ok(source)
+}
+
 /// Chromium's own database of the icons of the pages a profile visited, in its directory, read
 /// only. Chromium keeps it locked while it runs: it is opened as immutable, which takes no lock.
 pub fn chromium(profile_dir: &Path) -> Option<Connection> {
@@ -98,7 +106,7 @@ pub fn sweep(sidebar: &mut Sidebar, profile_dir: impl Fn(ProfileId) -> PathBuf) 
             .spaces()
             .iter()
             .filter(|space| space.profile == profile)
-            .filter_map(|space| Some(file_name(space.site_icon()?)))
+            .filter_map(|space| Some(file_name(space.cached_icon()?)))
             .collect();
         for (id, name) in tabs {
             if files.contains(&name) {
@@ -150,6 +158,11 @@ mod tests {
         let site = "site:https://space.example/favicon.ico";
         sidebar.set_space_emoji(space, site).unwrap();
         write(&profile_dir, "https://space.example/favicon.ico", b"png").unwrap();
+        // Another Space's image too, but not the image it showed before.
+        let other = sidebar.create_space("Other", profile).unwrap();
+        let before = write_image(&profile_dir, b"old").unwrap();
+        let image = write_image(&profile_dir, b"new").unwrap();
+        sidebar.set_space_emoji(other, &image).unwrap();
         sweep(&mut sidebar, |p| {
             assert_eq!(p, profile);
             profile_dir.clone()
@@ -163,6 +176,8 @@ mod tests {
         assert!(path(&profile_dir, "https://a.example/favicon.ico").exists());
         assert!(!path(&profile_dir, "https://gone.example/favicon.ico").exists());
         assert!(path(&profile_dir, "https://space.example/favicon.ico").exists());
+        assert!(path(&profile_dir, &image).exists());
+        assert!(!path(&profile_dir, &before).exists());
     }
 
     #[test]
