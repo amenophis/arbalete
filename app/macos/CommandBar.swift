@@ -4,7 +4,10 @@
 // engine's suggestions, then the open tabs and the history pages matching it; the arrows pick one,
 // Enter or a click opens it, Escape closes the bar. Typing forward completes the field with the
 // best result's address, selected: typing on replaces it, deleting drops it, → or End keeps it.
-// While ⌃⇥ is held, it shows the tabs selected last instead, side by side (TabSwitcher).
+// While ⌃⇥ is held, it shows the tabs selected last instead, side by side (TabSwitcher). Typing a
+// site's name offers to search it, like Arc's site search: Tab puts the site in a chip of its
+// color before the field, whose menu changes or removes it, Enter searches it, Backspace at the
+// field's start takes it away.
 
 import AppKit
 import ImageIO
@@ -69,6 +72,21 @@ struct SearchEngine: Decodable {
     var url: String
 }
 
+/// A site Tab searches (Site in crates/arbalete-core/src/search.rs): its name, its shortcut, the
+/// address of a search with `%s` where the percent-encoded query goes, and its chip's color.
+struct Site: Codable, Hashable {
+    var name: String
+    var shortcut: String
+    var url: String
+    var color: String
+
+    /// The address searching `query` on it; without `%s`, the query goes at the end.
+    func searchURL(_ query: String) -> String {
+        let query = percentEncoded(query)
+        return url.contains("%s") ? url.replacingOccurrences(of: "%s", with: query) : url + query
+    }
+}
+
 struct Results: Decodable {
     struct Page: Decodable {
         var url: String
@@ -79,6 +97,11 @@ struct Results: Decodable {
     var tabs: [Tab]
     var pages: [Page]
     var suggestions: [String]?
+    /// The site what is typed names.
+    var site: Site?
+    /// Every site, then the search engines, which the chip's menu changes to.
+    var sites: [Site]?
+    var engines: [Site]?
 }
 
 struct Switching: Decodable {
@@ -181,6 +204,14 @@ final class CommandBar: ObservableObject {
     /// The row under the pointer, which Arc tints without picking it.
     @Published var hovered: Int?
     @Published var completing = false
+    /// The site searched since Tab followed its name, like Arc's, and what was typed before.
+    @Published var site: Site?
+    private var typedBefore = ""
+    /// Every site, then the search engines, as the app sent them last.
+    @Published var sites: [Site] = []
+    @Published var engines: [Site] = []
+    /// Up as a site is picked, then down: the bar glows in its color a moment, like Arc's.
+    @Published var glow = 0.0
     @Published var switching: Switching?
     /// The pictures of the switcher's tabs, by tab, with the JPEG each was made from.
     private(set) var snapshots: [Int: (jpeg: String, image: NSImage)] = [:]
@@ -239,6 +270,7 @@ final class CommandBar: ObservableObject {
             results = nil
             picked = 0
             completing = false
+            site = nil
             switching = nil
             informing = false
             // The app placed it again, one row tall: it is told its height anew.
@@ -254,6 +286,10 @@ final class CommandBar: ObservableObject {
             // shrinking then growing back at each key typed.
             detail.suggestions = results?.suggestions
             results = detail
+            if let sites = detail.sites, let engines = detail.engines {
+                self.sites = sites
+                self.engines = engines
+            }
             showCompletion()
         case "arbalete:suggestions":
             struct Suggestions: Decodable {
@@ -293,6 +329,10 @@ final class CommandBar: ObservableObject {
     /// pages.
     var rows: [CommandRow] {
         let typed = text.trimmingCharacters(in: .whitespaces)
+        if let site {
+            return typed.isEmpty
+                ? [] : [.go(url: site.searchURL(typed), title: typed, search: true)]
+        }
         // Nothing typed, like Arc's: the sites visited most.
         guard !typed.isEmpty else {
             return (results?.pages ?? []).map(CommandRow.init)
@@ -339,12 +379,66 @@ final class CommandBar: ObservableObject {
     }
 
     func type(_ typed: String, deleting: Bool) {
-        completing = !deleting && typed.count > text.count
+        completing = site == nil && !deleting && typed.count > text.count
         text = typed
         picked = 0
-        app.run(little == nil ? "search-overlay" : "search-little", typed)
+        // Searching a site, nothing else is looked for, nor sent to the search engine.
+        if site == nil { app.run(little == nil ? "search-overlay" : "search-little", typed) }
         showCompletion()
         sendHeight()
+    }
+
+    /// The site what is typed names, which Tab searches.
+    var offered: Site? {
+        site == nil && results?.text == text ? results?.site : nil
+    }
+
+    /// Searches the site what is typed names, from an empty field, as Tab does.
+    func searchSite() -> Bool {
+        guard let offered else { return false }
+        typedBefore = text
+        field?.stringValue = ""
+        type("", deleting: true)
+        change(to: offered)
+        return true
+    }
+
+    /// Searches another site, from the chip's menu, glowing in its color like Arc's.
+    func change(to site: Site) {
+        self.site = site
+        glow = 1
+        withAnimation(.easeOut(duration: 0.8)) { glow = 0 }
+        if little == nil, let surface = nativeWindows[app.window]?.surfaces["overlay"] {
+            surface.glow(NSColor(color(site.color)))
+        }
+        sendHeight()
+    }
+
+    /// Stops searching a site and removes it from the list, from the chip's menu.
+    func removeSite(_ site: Site) {
+        app.run("remove-site-search", site.shortcut)
+        self.site = nil
+        type(text, deleting: true)
+    }
+
+    /// Opens the settings' list of sites, from the chip's menu.
+    func manageSites() {
+        hide()
+        settingsModel?.choose("General")
+        settingsModel?.siteSearchShown = true
+        app.run("show-settings")
+    }
+
+    /// Stops searching the site, as Backspace does at the field's start: the field gets back what
+    /// was typed before, when it is empty.
+    func leaveSite(_ selection: NSRange) -> Bool {
+        guard site != nil, selection == NSRange(location: 0, length: 0) else { return false }
+        site = nil
+        let typed = text.isEmpty ? typedBefore : text
+        field?.stringValue = typed
+        field?.currentEditor()?.selectedRange = NSRange(location: typed.utf16.count, length: 0)
+        type(typed, deleting: true)
+        return true
     }
 
     /// Shows the completion after what is typed, selected.
@@ -443,17 +537,33 @@ struct CommandBarView: View {
                         }
                     }
                     .frame(width: 24, height: 24)
+                    if let site = bar.site { SiteChip(bar: bar, site: site) }
                     CommandField(bar: bar)
-                    // Like Arc's, it tells where suggestions come from as the pointer reaches it.
-                    Button { bar.informing = true } label: {
-                        Image(systemName: "info").font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Color.ink((0x000000, 0.5), (0xFFFFFF, 0.6)))
-                            .frame(width: 22, height: 22)
-                            .background(Circle().fill(Color.ink((0x000000, 0.06), (0xFFFFFF, 0.1))))
-                            .contentShape(Circle())
+                        // The field's own placeholder cannot change while it is edited: AppKit
+                        // ends the editing, which closes the bar.
+                        .overlay(alignment: .leading) {
+                            if bar.text.isEmpty {
+                                Text(bar.site.map { "Search \($0.name)…" } ?? "Search or Enter URL…")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(Color(nsColor: .placeholderTextColor))
+                                    .padding(.leading, 2)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    if let site = bar.offered {
+                        SiteHint(site: site) { _ = bar.searchSite() }
+                    } else {
+                        // Like Arc's, it tells where suggestions come from as the pointer reaches it.
+                        Button { bar.informing = true } label: {
+                            Image(systemName: "info").font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Color.ink((0x000000, 0.5), (0xFFFFFF, 0.6)))
+                                .frame(width: 22, height: 22)
+                                .background(Circle().fill(Color.ink((0x000000, 0.06), (0xFFFFFF, 0.1))))
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { if $0 { bar.informing = true } }
                     }
-                    .buttonStyle(.plain)
-                    .onHover { if $0 { bar.informing = true } }
                 }
                 .padding(.horizontal, 20)
                 .frame(height: searchRow)
@@ -468,7 +578,8 @@ struct CommandBarView: View {
                                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                                     ResultRow(
                                         row: row, picked: index == bar.picked,
-                                        hovered: index == bar.hovered, label: label(row)
+                                        hovered: index == bar.hovered, label: label(row),
+                                        tint: bar.site.map { color($0.color) }
                                     )
                                     .id(index)
                                     // Like Arc's, the pointer tints a row without picking it.
@@ -493,6 +604,8 @@ struct CommandBarView: View {
                 if bar.informing { SuggestionsBanner(bar: bar) }
             }
             .frame(maxHeight: .infinity, alignment: .top)
+            // Like Arc's, the site's color washes over the bar as it is picked, then stays faint.
+            .background(bar.site.map { color($0.color).opacity(0.08 + 0.25 * bar.glow) } ?? .clear)
             .background(lightVeil)
         }
     }
@@ -507,6 +620,67 @@ struct CommandBarView: View {
         case .action: "Action"
         default: nil
         }
+    }
+}
+
+/// The site searched, in a capsule of its color before the field, like Arc's: a right click opens
+/// its menu, which removes it, changes it to another site or a search engine, or manages the sites.
+struct SiteChip: View {
+    @ObservedObject var bar: CommandBar
+    let site: Site
+
+    var body: some View {
+        Text(site.name)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(Capsule().fill(color(site.color)))
+            .fixedSize()
+            .contextMenu {
+                if bar.sites.contains(site) {
+                    Button("Remove “\(site.name)” Site Search") { bar.removeSite(site) }
+                }
+                Menu("Change Site Search") {
+                    ForEach(bar.sites, id: \.self) { other in
+                        Button(other.name) { bar.change(to: other) }
+                    }
+                    Divider()
+                    ForEach(bar.engines, id: \.self) { other in
+                        Button(other.name) { bar.change(to: other) }
+                    }
+                }
+                Divider()
+                Button("Manage…") { bar.manageSites() }
+            }
+    }
+}
+
+/// The site what is typed names, offered after the field with the key that searches it, like
+/// Arc's: a click searches it too.
+struct SiteHint: View {
+    let site: Site
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text("Search \(site.name)")
+                    .foregroundStyle(Color.ink((0x000000, 0.5), (0xFFFFFF, 0.6)))
+                Text("Tab")
+                    .foregroundStyle(Color.ink((0x000000, 0.6), (0xFFFFFF, 0.7)))
+                    .padding(.horizontal, 6)
+                    .frame(height: 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4).fill(Color.ink((0x000000, 0.06), (0xFFFFFF, 0.1))))
+            }
+            .font(.system(size: 12, weight: .medium))
+            .lineLimit(1)
+            .fixedSize()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -688,6 +862,8 @@ struct ResultRow: View {
     let picked: Bool
     let hovered: Bool
     let label: String?
+    /// The site searched's color, which fills the picked row instead of Arc's indigo.
+    var tint: Color? = nil
 
     /// A page's site, as Arc shows it after its title: its address without scheme nor "www.".
     private var site: String? {
@@ -729,7 +905,7 @@ struct ResultRow: View {
         .background(
             RoundedRectangle(cornerRadius: 6)
                 // Measured on Arc's light theme too: periwinkle while picked, 6% black hovered.
-                .fill(picked ? Color.ink((0x858AFF, 1), (0x373DD0, 1)) : Color.ink((0x000000, 0.06), (0xFFFFFF, 0.035)).opacity(hovered ? 1 : 0))
+                .fill(picked ? tint ?? Color.ink((0x858AFF, 1), (0x373DD0, 1)) : Color.ink((0x000000, 0.06), (0xFFFFFF, 0.035)).opacity(hovered ? 1 : 0))
                 .padding(2))
         .contentShape(Rectangle())
     }
@@ -762,7 +938,6 @@ struct CommandField: NSViewRepresentable {
         field.drawsBackground = false
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 18, weight: .medium)
-        field.placeholderString = "Search or Enter URL…"
         field.delegate = context.coordinator
         field.cell?.isScrollable = true
         field.cell?.wraps = false
@@ -825,7 +1000,15 @@ struct CommandField: NSViewRepresentable {
             case #selector(NSResponder.moveRight(_:)), #selector(NSResponder.moveToEndOfLine(_:)),
                 #selector(NSResponder.moveToEndOfDocument(_:)):
                 return bar.acceptCompletion()
-            case #selector(NSResponder.deleteBackward(_:)), #selector(NSResponder.deleteForward(_:)):
+            case #selector(NSResponder.insertTab(_:)):
+                // Without a site to search, Tab does nothing, rather than closing the bar as the
+                // keyboard leaves the field.
+                _ = bar.searchSite()
+            case #selector(NSResponder.deleteBackward(_:)):
+                if bar.leaveSite(textView.selectedRange()) { return true }
+                deleting = true
+                return false
+            case #selector(NSResponder.deleteForward(_:)):
                 deleting = true
                 return false
             default:

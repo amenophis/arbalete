@@ -372,6 +372,12 @@ fn run_command(command: Command) {
         (Command::SettingsReady, _) => send_settings(),
         (Command::SetSetting(setting, on), _) => set_setting(setting, on),
         (Command::KeepAwake(site, on), _) => keep_awake(site, on),
+        (Command::SetSiteSearches(sites), _) => set_site_searches(sites),
+        (Command::RemoveSiteSearch(shortcut), _) => {
+            let mut sites = app_settings().site_searches;
+            sites.retain(|site| site.shortcut != shortcut);
+            set_site_searches(sites);
+        }
         (Command::SitePictureInPicture(site, on), _) => allow_picture(site, on),
         (Command::DeveloperMode(site, on), _) => set_developer_mode(site, on),
         (Command::NewBoost, _) => boosts::new_boost(),

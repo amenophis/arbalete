@@ -179,6 +179,24 @@ final class Surface {
         holder.layer?.shadowOffset = CGSize(width: 0, height: -drop)
     }
 
+    /// Glows in `color` a moment, all around it, its shadow then coming back, like Arc's Command
+    /// Bar as a site is picked.
+    func glow(_ color: NSColor) {
+        guard let layer = holder.layer else { return }
+        let glow = CAAnimationGroup()
+        glow.animations = [
+            ("shadowColor", color.cgColor as Any), ("shadowOpacity", 1 as Any),
+            ("shadowRadius", 24 as Any), ("shadowOffset", CGSize.zero as Any),
+        ].map { key, value in
+            let animation = CABasicAnimation(keyPath: key)
+            animation.fromValue = value
+            return animation
+        }
+        glow.duration = 0.8
+        glow.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(glow, forKey: "glow")
+    }
+
     /// Whether `event` is a click in it.
     func contains(_ event: NSEvent) -> Bool {
         isShown && event.window === parent
