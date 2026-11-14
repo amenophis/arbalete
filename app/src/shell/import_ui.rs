@@ -2,7 +2,7 @@
 
 use super::*;
 use arbalete_core::boosts::Boost;
-use arbalete_core::import::arc_boosts;
+use arbalete_core::import::{arc_boosts, safe_storage};
 
 /// The import assistant's size, at most (app/macos/Import.swift).
 const IMPORT_SIZE: Size = Size {
@@ -80,6 +80,7 @@ pub(super) fn sources() -> serde_json::Value {
             json!({
                 "name": browser.name,
                 "arc": browser.family == Family::Arc,
+                "cookies": safe_storage::service(browser.name).is_some(),
                 "profiles": profiles.collect::<Vec<_>>(),
             })
         });
@@ -135,7 +136,8 @@ pub(super) fn run_import(choices: Vec<Choice>) {
         let sources = import::read(&browsers, &choices);
         let found = importable_extensions(&browsers, &choices);
         let arc = arc_boosts(&browsers, &choices);
-        let read = Arc::new(Mutex::new(Some((sources, found, arc))));
+        let cookies = import_cookies::read(&browsers, &choices);
+        let read = Arc::new(Mutex::new(Some((sources, found, arc, cookies))));
         post_task(ThreadId::UI, Some(&mut ApplyImport::new(read)));
     });
 }
@@ -176,8 +178,9 @@ fn arc_boosts(browsers: &[browsers::Browser], choices: &[Choice]) -> ArcBoosts {
     found.collect()
 }
 
-/// The chosen profiles read, their extensions and Arc's Boosts, handed to the UI thread.
-type Read = Arc<Mutex<Option<(Vec<import::Source>, Found, ArcBoosts)>>>;
+/// The chosen profiles read, their extensions, Arc's Boosts and their cookies, handed to the UI
+/// thread.
+type Read = Arc<Mutex<Option<(Vec<import::Source>, Found, ArcBoosts, import_cookies::Found)>>>;
 
 wrap_task! {
     struct ApplyImport {
@@ -187,8 +190,8 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             let read = self.read.lock().ok().and_then(|mut read| read.take());
-            let (sources, found, arc) = read.unwrap_or_default();
-            apply_import(sources, &found, arc);
+            let (sources, found, arc, cookies) = read.unwrap_or_default();
+            apply_import(sources, &found, arc, cookies);
         }
     }
 }
@@ -222,7 +225,12 @@ fn offered_extensions(targets: &[(Choice, ProfileId)], found: &Found) -> Vec<ser
 /// Adds the browser profiles read to the sidebar as it is now, then shows the first Space
 /// imported with its first tab, or a blank page when it has none. Their histories are merged on
 /// a thread of their own.
-fn apply_import(sources: Vec<import::Source>, found: &Found, mut arc: ArcBoosts) {
+fn apply_import(
+    sources: Vec<import::Source>,
+    found: &Found,
+    mut arc: ArcBoosts,
+    cookies: import_cookies::Found,
+) {
     IMPORTING.set(false);
     // Before the sidebar changes: no tab, closed tab or archived one shows these numbers.
     let first_easel = easels::new_number();
@@ -274,6 +282,7 @@ fn apply_import(sources: Vec<import::Source>, found: &Found, mut arc: ArcBoosts)
         }
     }
     let offered = offered_extensions(&imported.targets, found);
+    let (cookies, cookie_errors) = import_cookies::write(&imported.targets, cookies);
     let histories = imported.histories.into_iter();
     let histories: Vec<_> = histories
         .map(|(profile, entries)| (profile_dir(profile), entries))
@@ -297,9 +306,13 @@ fn apply_import(sources: Vec<import::Source>, found: &Found, mut arc: ArcBoosts)
     if shown.is_some() {
         show_selected();
     }
+    // The welcome flow tells them in its own step.
+    if assistant {
+        import_cookies::tell(cookies, &cookie_errors);
+    }
     // Last: opening the first Space imported holds the main thread for a moment, which would
     // freeze the welcome flow midway to its next step.
-    send_imported(&spaces, pages, &offered);
+    send_imported(&spaces, pages, &offered, cookies, &cookie_errors);
 }
 
 /// Merges entries into the history of the profile in `dir`, with a connection of its own: the

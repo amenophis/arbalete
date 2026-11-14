@@ -2302,8 +2302,16 @@ unsafe extern "C" {
     ) -> i32;
 }
 
+/// Reads another Chromium browser's key, in the keychain item `service` whatever its account, to
+/// import its cookies (decision 0012): macOS asks the user each time, as the item is that
+/// browser's. `None` when there is none, an error when the user did not allow it.
+pub fn read_browser_key(service: &str) -> Result<Option<Vec<u8>>, ()> {
+    let service = std::ffi::CString::new(service).map_err(|_| ())?;
+    read_key((&service, c""))
+}
+
 /// Reads a key in the user's keychains, asking the user when the app may not yet: `None` when
-/// there is none, an error when it could not.
+/// there is none, an error when it could not. An empty account matches any.
 fn read_key((service, account): (&CStr, &CStr)) -> Result<Option<Vec<u8>>, ()> {
     const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
     let mut length = 0;
@@ -2316,7 +2324,11 @@ fn read_key((service, account): (&CStr, &CStr)) -> Result<Option<Vec<u8>>, ()> {
             service.count_bytes() as u32,
             service.as_ptr(),
             account.count_bytes() as u32,
-            account.as_ptr(),
+            if account.is_empty() {
+                std::ptr::null()
+            } else {
+                account.as_ptr()
+            },
             &raw mut length,
             &raw mut password,
             std::ptr::null_mut(),
@@ -2451,6 +2463,29 @@ mod key_move_tests {
         assert_eq!(kept, Ok(Some(b"secret".to_vec())));
         assert!(without_previous);
         assert_eq!(created, Ok(None));
+    }
+
+    /// Reads a throwaway browser's key whatever its account, as the cookie import does.
+    #[test]
+    #[ignore = "writes to the user's login keychain"]
+    fn reads_another_browser_s_key() {
+        let key = (
+            c"Arbalete Test Browser Safe Storage",
+            c"Arbalete Test Browser",
+        );
+        let delete = || {
+            let _ = std::process::Command::new("security")
+                .args(["delete-generic-password", "-s", key.0.to_str().unwrap()])
+                .output();
+        };
+        delete();
+        let missing = super::read_browser_key("Arbalete Test Browser Safe Storage");
+        assert!(add_key(key, b"secret"));
+        let read = super::read_browser_key("Arbalete Test Browser Safe Storage");
+        delete();
+
+        assert_eq!(missing, Ok(None));
+        assert_eq!(read, Ok(Some(b"secret".to_vec())));
     }
 }
 
