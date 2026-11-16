@@ -648,6 +648,13 @@ public func pageClosed(_ view: UnsafeMutableRawPointer?) {
         guard let view else { return }
         guard let (tab, container) = pageContainers.first(where: { $0.value.holds(view) })
         else { return }
+        // The tab's page made again meanwhile, in another profile as the tab moved to its Space,
+        // is in the same container: only the closing page's view goes.
+        let pages = container.host.subviews.filter { !($0 is StatusPill) }
+        if pages.count > 1 {
+            pages.first { Unmanaged.passUnretained($0).toOpaque() == view }?.removeFromSuperview()
+            return
+        }
         pageContainers.removeValue(forKey: tab)
         container.removeFromSuperview()
     }
