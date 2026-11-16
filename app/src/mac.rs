@@ -1408,7 +1408,8 @@ pub fn toolbar_shown(shown: bool) {
 }
 
 /// Updates the menu once the sidebar is shown or hidden, and hides the window buttons with it,
-/// as they sit in its toolbar. `view` is the window's content view.
+/// as they sit in its toolbar: their titlebar's view, as AppKit lays out again buttons hidden one
+/// by one, in its own places, out of the sidebar's row. `view` is the window's content view.
 pub fn sidebar_shown(view: *mut c_void, shown: bool) {
     if let Some(item) = SIDEBAR_ITEM.with_borrow(Clone::clone) {
         item.setTitle(if shown {
@@ -1420,14 +1421,12 @@ pub fn sidebar_shown(view: *mut c_void, shown: bool) {
     let Some(window) = ns_window(view) else {
         return;
     };
-    for button in [
-        NSWindowButton::CloseButton,
-        NSWindowButton::MiniaturizeButton,
-        NSWindowButton::ZoomButton,
-    ] {
-        if let Some(button) = window.standardWindowButton(button) {
-            button.setHidden(!shown);
-        }
+    if let Some(bar) = window
+        .standardWindowButton(NSWindowButton::CloseButton)
+        // SAFETY: the button's superview, read on the main thread like the window.
+        .and_then(|close| unsafe { close.superview() })
+    {
+        bar.setHidden(!shown);
     }
 }
 

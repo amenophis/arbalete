@@ -113,9 +113,10 @@ struct SidebarToolbar: View {
         // Past the window's buttons as far as they stand apart, like Arc's, the toggle's symbol 5
         // points into its button; in full screen, without them, 20 points from the sidebar's edge.
         .padding(.leading, (model.fullScreen ? 20 : togglePlace) - Measure.inset - 5)
-        // Like Arc's, floating, it shows the window's buttons, which it covers, where they stand.
+        // Like Arc's, floating, it shows the window's buttons, which it covers, where they stand;
+        // not in full screen, without them.
         .overlay(alignment: .leading) {
-            if model.sidebarFloating {
+            if model.sidebarFloating && !model.fullScreen {
                 WindowLights()
                     .frame(width: windowLightsSize.width, height: windowLightsSize.height)
                     .padding(.leading, windowButtonsLeading - Measure.inset)
