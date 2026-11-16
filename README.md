@@ -85,7 +85,8 @@ mise run run     # bundle the app and run it
 
 Development builds are "Arbalete Dev": their own bundle identifier (`io.github.amenophis.arbalete.dev`) and data
 folder (`~/Library/Application Support/Arbalete Dev`), so an installed Arbalete keeps its own data, preferences and
-permissions. `ARBALETE_DATA_DIR` points either to another folder.
+permissions. `ARBALETE_DATA_DIR` points either to another folder, with a mock keychain so that a test run never
+touches the real keychain items.
 
 In Visual Studio Code, install the recommended extensions and open the repository from a shell where mise is
 active (`code .`), so that rust-analyzer builds with the same toolchain and `CEF_PATH`. The mise tasks are VS Code
