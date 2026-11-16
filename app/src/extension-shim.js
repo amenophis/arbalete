@@ -49,19 +49,27 @@
   // What changed since the previous state: the window focused, none (-1) while the profile is not
   // in front, and the active tab, compared with the last one known, as a new page's tab id is
   // known only after it shows. As in Chrome, a tab made active is not updated, and what a tab
-  // lost, like its icon, is no change. A worker's first state, as it starts, announces nothing.
+  // lost, like its icon, is no change. A worker's first state, as it starts, announces nothing:
+  // tabs.query lists its tab. A tab the extension has not seen yet is created for it, as tabs.query
+  // never listed it: extensions that act only on the tabs they know, like Bitwarden filling a page,
+  // learn of it.
   let focused;
   let known;
+  const seen = new Set();
   const announce = (state) => {
+    const first = focused === undefined;
     const windowId = state.focused ? window_.id : -1;
-    if (focused !== undefined && windowId !== focused) events.onFocusChanged?.(windowId);
+    if (!first && windowId !== focused) events.onFocusChanged?.(windowId);
     focused = windowId;
     const [tab] = state.tabs;
     if (!tab) return;
     const was = known;
     known = tab;
-    if (!was) return;
-    if (tab.id !== was.id) {
+    const created = !seen.has(tab.id);
+    seen.add(tab.id);
+    if (first) return;
+    if (tab.id !== was?.id) {
+      if (created) events.onCreated?.(tab);
       events.onActivated?.({ tabId: tab.id, windowId: tab.windowId });
       return;
     }
@@ -150,6 +158,7 @@
         return reply(args.slice(typeof args[0] === "number" ? 2 : 1), tabs[0]);
       },
     });
+    dispatcher("tabs", "onCreated");
     dispatcher("tabs", "onActivated");
     dispatcher("tabs", "onUpdated");
   });
