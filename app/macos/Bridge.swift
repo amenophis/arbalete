@@ -685,19 +685,22 @@ let windowLightsSize = NSSize(
 
 /// Places the window's buttons like Arc's: centered `windowButtonsCenter` below its top, their
 /// titlebar grown to twice that, or centered in a titlebar `height` tall; the first circle
-/// `windowButtonsLeading` from the left edge, or `leading`.
+/// `windowButtonsLeading` from the left edge, or `leading`. In full screen, AppKit's own: they
+/// show with the menu bar, above the window.
 @MainActor
 func centerWindowButtons(
     _ window: NSWindow, height: CGFloat = windowButtonsCenter * 2,
     leading: CGFloat = windowButtonsLeading
 ) {
-    guard let close = window.standardWindowButton(.closeButton), let bar = close.superview,
+    guard !window.styleMask.contains(.fullScreen),
+        let close = window.standardWindowButton(.closeButton), let bar = close.superview,
         let container = bar.superview
     else { return }
-    container.frame = NSRect(
+    let frame = NSRect(
         x: container.frame.minX, y: window.frame.height - height, width: container.frame.width,
         height: height)
-    bar.frame = container.bounds
+    if container.frame != frame { container.frame = frame }
+    if bar.frame != container.bounds { bar.frame = container.bounds }
     for (index, kind) in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
         .enumerated()
     {
@@ -709,7 +712,8 @@ func centerWindowButtons(
             button.setBoundsSize(natural)
         }
         let x = leading + CGFloat(index) * windowButtonsSpacing
-        button.setFrameOrigin(NSPoint(x: x, y: (height - windowButtonsCircle) / 2))
+        let origin = NSPoint(x: x, y: (height - windowButtonsCircle) / 2)
+        if button.frame.origin != origin { button.setFrameOrigin(origin) }
     }
 }
 
@@ -762,20 +766,20 @@ final class NativeWindow {
                 MainActor.assumeIsolated { window.map { centerWindowButtons($0) } }
             }
         }
-        // It gives their titlebar its own height back too as the appearance changes, a Space's
-        // theme or the system's: the buttons went up, away from the sidebar's toggle.
-        if let titlebar = window.standardWindowButton(.closeButton)?.superview?.superview {
-            observers.append(
-                NotificationCenter.default.addObserver(
-                    forName: NSView.frameDidChangeNotification, object: titlebar, queue: .main
-                ) { [weak window, weak titlebar] _ in
-                    MainActor.assumeIsolated {
-                        guard let window, titlebar?.frame.height != windowButtonsCenter * 2,
-                            !window.styleMask.contains(.fullScreen)
-                        else { return }
-                        centerWindowButtons(window)
-                    }
-                })
+        // It puts them back in its own places too, out of the sidebar's row: as the appearance
+        // changes, a Space's theme or the system's, which gives their titlebar its own height
+        // back, and as it leaves full screen. At once, before they are drawn there.
+        if let close = window.standardWindowButton(.closeButton),
+            let titlebar = close.superview?.superview
+        {
+            for view in [close, titlebar] {
+                observers.append(
+                    NotificationCenter.default.addObserver(
+                        forName: NSView.frameDidChangeNotification, object: view, queue: nil
+                    ) { [weak window] _ in
+                        MainActor.assumeIsolated { window.map { centerWindowButtons($0) } }
+                    })
+            }
         }
         // As it starts going into full screen or out of it, the sidebar's toggle moving with it.
         for (name, full) in [
