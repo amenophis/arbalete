@@ -27,24 +27,12 @@
   let tabs = self.__arbaleteInitial?.tabs ?? [];
   // Chrome's tab and window events never fire for Arbalete's pages either: the shim dispatches
   // them as the active tab changes, to the listeners the worker added before it was shimmed too.
-  // Were Chromium to fire one itself, the shim would leave that event to it.
+  // Chromium fires them only for its own windows, like an extension's window Bitwarden opens to
+  // unlock: those events are about other tabs and windows, and leave the shim's alone.
   const events = {};
   const dispatcher = (api, name) => {
     const event = chrome[api][name];
-    let dispatching = false;
-    let native = false;
-    event.addListener(() => {
-      native ||= !dispatching;
-    });
-    events[name] = (...args) => {
-      if (native) return;
-      dispatching = true;
-      try {
-        event.dispatch(...args);
-      } finally {
-        dispatching = false;
-      }
-    };
+    events[name] = (...args) => event.dispatch(...args);
   };
   // What changed since the previous state: the window focused, none (-1) while the profile is not
   // in front, and the active tab, compared with the last one known, as a new page's tab id is
@@ -57,10 +45,10 @@
   let known;
   const seen = new Set();
   const announce = (state) => {
-    const first = focused === undefined;
-    const windowId = state.focused ? window_.id : -1;
-    if (!first && windowId !== focused) events.onFocusChanged?.(windowId);
-    focused = windowId;
+    const before = focused;
+    const first = before === undefined;
+    focused = state.focused ? window_.id : -1;
+    if (!first && focused !== before) events.onFocusChanged?.(focused);
     const [tab] = state.tabs;
     if (!tab) return;
     const was = known;
@@ -170,6 +158,18 @@
       getAll: (...args) => reply(args, [withTabs(args[0])]),
     });
     dispatcher("windows", "onFocusChanged");
+    // Once one of Chromium's windows leaves the focus, or closes, while Arbalete is in front,
+    // Arbalete's window has it again: extensions that heed only the focused window's tabs, like
+    // Bitwarden, would otherwise keep that window.
+    // After every listener heard Chromium's event.
+    const refocus = () =>
+      setTimeout(() => {
+        if (focused === window_.id) events.onFocusChanged(window_.id);
+      });
+    chrome.windows.onFocusChanged.addListener((windowId) => {
+      if (windowId === -1) refocus();
+    });
+    chrome.windows.onRemoved.addListener(refocus);
   });
   const run = (tries) => {
     for (const [api, apply] of patches) {
