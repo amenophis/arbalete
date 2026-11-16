@@ -2214,11 +2214,16 @@ fn chromium_locale_of(tag: &str) -> String {
 }
 
 /// Whether Chromium keeps its keys in a mock keychain rather than the real one: for a development
-/// bundle only (`mise run app`'s identifier ends with `.dev`), signed ad hoc, so each build would
-/// ask for keychain access. Decided by what runs, not how it was compiled, so that a release, under
-/// its own identifier, always encrypts cookies and passwords with a real keychain key.
+/// bundle (`mise run app`'s identifier ends with `.dev`), signed ad hoc, so each build would ask
+/// for keychain access, and for any app run on another data folder (`ARBALETE_DATA_DIR`, tests and
+/// benchmarks). A release run on a test folder would otherwise make "Arbalete Safe Storage" with a
+/// key of its own, which the installed Arbalete then takes for its own when it moves its key there
+/// (ensure_keychain_access): it would no longer decrypt the user's cookies and would erase them.
+/// Decided by what runs, not how it was compiled, so that a release, under its own identifier and
+/// on its own data, always encrypts cookies and passwords with a real keychain key.
 pub fn mock_keychain() -> bool {
     is_development_bundle(bundle_identifier().as_deref())
+        || std::env::var_os("ARBALETE_DATA_DIR").is_some()
 }
 
 /// The name Arbalete gives its key in the keychain, which amenophis/cef-codecs' CEF takes from
