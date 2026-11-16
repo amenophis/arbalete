@@ -762,6 +762,21 @@ final class NativeWindow {
                 MainActor.assumeIsolated { window.map { centerWindowButtons($0) } }
             }
         }
+        // It gives their titlebar its own height back too as the appearance changes, a Space's
+        // theme or the system's: the buttons went up, away from the sidebar's toggle.
+        if let titlebar = window.standardWindowButton(.closeButton)?.superview?.superview {
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: NSView.frameDidChangeNotification, object: titlebar, queue: .main
+                ) { [weak window, weak titlebar] _ in
+                    MainActor.assumeIsolated {
+                        guard let window, titlebar?.frame.height != windowButtonsCenter * 2,
+                            !window.styleMask.contains(.fullScreen)
+                        else { return }
+                        centerWindowButtons(window)
+                    }
+                })
+        }
         // As it starts going into full screen or out of it, the sidebar's toggle moving with it.
         for (name, full) in [
             (NSWindow.willEnterFullScreenNotification, true),
