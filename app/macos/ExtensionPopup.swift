@@ -12,9 +12,12 @@ private let buttonGap: CGFloat = 6
 /// app/src/shell.rs).
 private let windowMargin: CGFloat = 10
 
-/// The window an extension's popup shows in: closing it closes the popup.
+/// The window an extension's popup shows in: closing it closes the popup, as its losing the
+/// focus does for a popup under its button, like Chrome's; an options page stays, like Chrome's
+/// dialog.
 private final class ExtensionPopupWindow: NSWindow, NSWindowDelegate {
     let page = PageHost()
+    var closesOnBlur = false
     private let closed: () -> Void
 
     init(closed: @escaping () -> Void) {
@@ -30,6 +33,10 @@ private final class ExtensionPopupWindow: NSWindow, NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         closed()
         return false
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        if closesOnBlur { closed() }
     }
 }
 
@@ -79,6 +86,7 @@ public func showExtensionPopup(
                 x: parent.frame.midX - size.width / 2,
                 y: parent.frame.maxY - (parent.frame.height - size.height) / 3 - size.height)
         }
+        popup.closesOnBlur = button
         popup.setFrameOrigin(onScreen(origin, size, parent.screen?.visibleFrame))
         popup.makeKeyAndOrderFront(nil)
     }

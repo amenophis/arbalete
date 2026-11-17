@@ -426,6 +426,9 @@ struct Win {
     /// and must not show it again.
     site_closed: Cell<Option<Instant>>,
     extension_popup: RefCell<Option<ExtensionPopup>>,
+    /// Which extension's popup last closed, and when: a click on its button closes it, as the
+    /// popup loses the focus, and must not open it again.
+    extension_popup_closed: RefCell<Option<(String, Instant)>>,
     sidebar_mode: Cell<SidebarMode>,
     /// The shown page fills the window, as it went full screen, like a video; and whether the
     /// window went full screen with it, to leave it with it (fill_with_page).
@@ -503,6 +506,7 @@ impl Win {
             site_targets: RefCell::new(Vec::new()),
             site_closed: Cell::new(None),
             extension_popup: RefCell::new(None),
+            extension_popup_closed: RefCell::new(None),
             sidebar_mode: Cell::new(SidebarMode::Shown),
             page_full_screen: Cell::new(None),
             over_url_bar: Cell::new(false),
