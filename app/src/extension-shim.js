@@ -27,6 +27,7 @@
   let tabs = self.__arbaleteInitial?.tabs ?? [];
   // Chrome's tab and window events never fire for Arbalete's pages either: the shim dispatches
   // them as the active tab changes, to the listeners the worker added before it was shimmed too.
+  // How they compare with Chrome's: docs/extension-events.md.
   // Chromium fires them only for its own windows, like an extension's window Bitwarden opens to
   // unlock: those events are about other tabs and windows, and leave the shim's alone.
   const events = {};
