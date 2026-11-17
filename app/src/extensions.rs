@@ -503,6 +503,11 @@ fn reconcile(profile: ProfileId, live: &[Value]) {
         update_icons(profile);
         crate::shell::extensions_changed();
     }
+    // An extension just read may see the active tab's address now (state): its worker would wait
+    // for the next change to learn it. The shim ignores a state that changes nothing.
+    if let Some(context) = context_of(profile) {
+        push_state(&context);
+    }
     reread_later(profile, unread);
 }
 
