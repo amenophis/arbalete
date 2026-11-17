@@ -27,6 +27,7 @@
   let tabs = self.__arbaleteInitial?.tabs ?? [];
   // Chrome's tab and window events never fire for Arbalete's pages either: the shim dispatches
   // them as the active tab changes, to the listeners the worker added before it was shimmed too.
+  // How they compare with Chrome's: docs/extension-events.md.
   // Chromium fires them only for its own windows, like an extension's window Bitwarden opens to
   // unlock: those events are about other tabs and windows, and leave the shim's alone.
   const events = {};
@@ -37,25 +38,23 @@
   // What changed since the previous state: the window focused, none (-1) while the profile is not
   // in front, and the active tab, compared with the last one known, as a new page's tab id is
   // known only after it shows. As in Chrome, a tab made active is not updated, and what a tab
-  // lost, like its icon, is no change. A worker's first state, as it starts, announces nothing:
-  // tabs.query lists its tab. A tab the extension has not seen yet is created for it, as tabs.query
-  // never listed it: extensions that act only on the tabs they know, like Bitwarden filling a page,
-  // learn of it.
+  // lost, like its icon, is no change. A tab the extension has not seen yet is created for it, as
+  // tabs.query never listed it: extensions that act only on the tabs they know, like Bitwarden
+  // filling a page, learn of it. A worker's first state is announced too: the shim comes in once
+  // the worker's script has run, which has asked Chromium, finding none of Arbalete's tabs.
   let focused;
   let known;
   const seen = new Set();
   const announce = (state) => {
     const before = focused;
-    const first = before === undefined;
     focused = state.focused ? window_.id : -1;
-    if (!first && focused !== before) events.onFocusChanged?.(focused);
+    if (focused !== before) events.onFocusChanged?.(focused);
     const [tab] = state.tabs;
     if (!tab) return;
     const was = known;
     known = tab;
     const created = !seen.has(tab.id);
     seen.add(tab.id);
-    if (first) return;
     if (tab.id !== was?.id) {
       if (created) events.onCreated?.(tab);
       events.onActivated?.({ tabId: tab.id, windowId: tab.windowId });
