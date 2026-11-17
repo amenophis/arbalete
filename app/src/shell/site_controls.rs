@@ -229,15 +229,20 @@ pub(super) fn hide_site_controls() {
 /// Opens an extension's popup in a small window of its own under the site controls' button, like
 /// Arc's, with a title bar to move or close it, in the displayed Space's profile, instead of the
 /// site controls; or closes it, when it is the one open. The window takes the size its page asks
-/// for. Unlike Chrome's popups, it stays open while the user is elsewhere, like in another app
-/// for a sign-in code: its close button, Escape, the extension's button, or the extension close it.
+/// for. Like Chrome's popups, it closes as it loses the focus, a click on the extension's button
+/// too: extensions open windows of their own for longer tasks, like Bitwarden's sign-in codes.
 pub(super) fn open_extension_popup(id: &str) {
     hide_site_controls();
     let open = win()
         .extension_popup
         .with_borrow(|popup| popup.as_ref().map(|popup| popup.id.clone()));
     close_extension_popup();
-    if open.as_deref() == Some(id) {
+    let just_closed = win().extension_popup_closed.with_borrow(|closed| {
+        closed
+            .as_ref()
+            .is_some_and(|(closed, at)| closed == id && at.elapsed() < Duration::from_millis(300))
+    });
+    if open.as_deref() == Some(id) || just_closed {
         return;
     }
     let profile = extension_profile();
@@ -330,6 +335,9 @@ pub fn close_extension_popup() {
     let Some(popup) = win().extension_popup.take() else {
         return;
     };
+    win()
+        .extension_popup_closed
+        .set(Some((popup.id.clone(), Instant::now())));
     extensions::popup_closed();
     if let Some(host) = popup.browser.host() {
         host.close_browser(1);
