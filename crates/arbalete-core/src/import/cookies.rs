@@ -43,6 +43,12 @@ pub enum Error {
     Key,
 }
 
+impl From<rusqlite::Error> for Error {
+    fn from(error: rusqlite::Error) -> Self {
+        Error::Sqlite(error)
+    }
+}
+
 /// The cookies of the profile that have not expired at `now`, but partitioned ones, which CEF
 /// cannot set as such. A profile that has never been opened has none.
 pub fn read(profile: &Path, key: &Key, now: i64) -> Result<Vec<Cookie>, Error> {

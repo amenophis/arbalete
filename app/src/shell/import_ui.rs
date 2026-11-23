@@ -136,8 +136,13 @@ pub(super) fn run_import(choices: Vec<Choice>) {
         let sources = import::read(&browsers, &choices);
         let found = importable_extensions(&browsers, &choices);
         let arc = arc_boosts(&browsers, &choices);
-        let cookies = import_cookies::read(&browsers, &choices);
-        let read = Arc::new(Mutex::new(Some((sources, found, arc, cookies))));
+        let keys = import_cookies::read_keys(&browsers, &choices);
+        let cookies = import_cookies::read(&browsers, &choices, &keys);
+        let passwords = import_passwords::read(&browsers, &choices, &keys);
+        // The browsers' keys go: what they decrypted is all the import needs.
+        drop(keys);
+        let secrets = (cookies, passwords);
+        let read = Arc::new(Mutex::new(Some((sources, found, arc, secrets))));
         post_task(ThreadId::UI, Some(&mut ApplyImport::new(read)));
     });
 }
@@ -178,9 +183,12 @@ fn arc_boosts(browsers: &[browsers::Browser], choices: &[Choice]) -> ArcBoosts {
     found.collect()
 }
 
-/// The chosen profiles read, their extensions, Arc's Boosts and their cookies, handed to the UI
-/// thread.
-type Read = Arc<Mutex<Option<(Vec<import::Source>, Found, ArcBoosts, import_cookies::Found)>>>;
+/// The cookies and passwords of the chosen profiles.
+type Secrets = (import_cookies::Found, import_passwords::Found);
+
+/// The chosen profiles read, their extensions, Arc's Boosts and their cookies and passwords,
+/// handed to the UI thread.
+type Read = Arc<Mutex<Option<(Vec<import::Source>, Found, ArcBoosts, Secrets)>>>;
 
 wrap_task! {
     struct ApplyImport {
@@ -190,8 +198,8 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             let read = self.read.lock().ok().and_then(|mut read| read.take());
-            let (sources, found, arc, cookies) = read.unwrap_or_default();
-            apply_import(sources, &found, arc, cookies);
+            let (sources, found, arc, secrets) = read.unwrap_or_default();
+            apply_import(sources, &found, arc, secrets);
         }
     }
 }
@@ -229,7 +237,7 @@ fn apply_import(
     sources: Vec<import::Source>,
     found: &Found,
     mut arc: ArcBoosts,
-    cookies: import_cookies::Found,
+    (cookies, passwords): Secrets,
 ) {
     IMPORTING.set(false);
     // Before the sidebar changes: no tab, closed tab or archived one shows these numbers.
@@ -282,7 +290,9 @@ fn apply_import(
         }
     }
     let offered = offered_extensions(&imported.targets, found);
-    let (cookies, cookie_errors) = import_cookies::write(&imported.targets, cookies);
+    let (cookies, mut errors) = import_cookies::write(&imported.targets, cookies);
+    let (passwords, password_errors) = import_passwords::write(&imported.targets, passwords);
+    errors.extend(password_errors);
     let histories = imported.histories.into_iter();
     let histories: Vec<_> = histories
         .map(|(profile, entries)| (profile_dir(profile), entries))
@@ -308,11 +318,11 @@ fn apply_import(
     }
     // The welcome flow tells them in its own step.
     if assistant {
-        import_cookies::tell(cookies, &cookie_errors);
+        import_cookies::tell(cookies, passwords, &errors);
     }
     // Last: opening the first Space imported holds the main thread for a moment, which would
     // freeze the welcome flow midway to its next step.
-    send_imported(&spaces, pages, &offered, cookies, &cookie_errors);
+    send_imported(&spaces, pages, &offered, (cookies, passwords), &errors);
 }
 
 /// Merges entries into the history of the profile in `dir`, with a connection of its own: the

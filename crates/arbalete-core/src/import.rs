@@ -9,6 +9,7 @@ pub mod chromium;
 pub mod cookies;
 pub mod firefox;
 pub mod firestore;
+pub mod passwords;
 pub mod safari;
 pub mod safe_storage;
 
@@ -37,6 +38,9 @@ pub struct Choice {
     /// Whether to import its cookies too, for a Chromium browser (decision 0012).
     #[serde(default)]
     pub cookies: bool,
+    /// Whether to import its saved passwords too, for a Chromium browser (decision 0015).
+    #[serde(default)]
+    pub passwords: bool,
 }
 
 /// A chosen browser profile, read: what it adds to the sidebar and its history, or why it could
@@ -423,6 +427,7 @@ mod tests {
             into,
             bar,
             cookies: false,
+            passwords: false,
         }
     }
 

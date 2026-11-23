@@ -49,6 +49,7 @@ mod easels;
 mod find;
 mod history_ui;
 mod import_cookies;
+mod import_passwords;
 mod import_ui;
 mod inspector;
 mod layout;
