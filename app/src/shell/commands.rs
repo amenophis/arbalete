@@ -582,7 +582,13 @@ fn run_command(command: Command) {
                 show_extensions_menu();
             }
         }
-        (Command::CloseExtensionPopup, _) => close_extension_popup(),
+        // Not while Chromium asks for the popup's request: its prompt took the focus, and the
+        // popup waits for the answer.
+        (Command::CloseExtensionPopup, _) => {
+            if !extensions::popup_asking() {
+                close_extension_popup();
+            }
+        }
         (Command::Print, Some(browser)) => {
             if let Some(host) = browser.host() {
                 host.print();
