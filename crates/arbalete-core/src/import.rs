@@ -108,7 +108,7 @@ pub fn read(browsers: &[Browser], choices: &[Choice]) -> Vec<Source> {
 /// which no Easel has. Quick: it only changes the sidebar in memory.
 pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>, first_easel: u64) -> Imported {
     let mut imported = Imported::default();
-    let mut routes = ArcRoutes::default();
+    let mut arcs = Arcs::default();
     let mut easels = arc_easels::Import {
         next: first_easel,
         ..Default::default()
@@ -130,7 +130,7 @@ pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>, first_easel: u64) -> I
                 data,
                 target,
                 source.choice.bar,
-                &mut routes,
+                &mut arcs,
                 &mut easels,
             )?;
             Ok((history, show_favicons(sidebar, profile, favicons)))
@@ -144,7 +144,8 @@ pub fn apply(sidebar: &mut Sidebar, sources: Vec<Source>, first_easel: u64) -> I
         }
         target.space(sidebar);
     }
-    if let Err(error) = routes.apply(sidebar) {
+    arcs.order_spaces(sidebar);
+    if let Err(error) = arcs.apply(sidebar) {
         imported.errors.push(format!("Arc's URL routing: {error}"));
     }
     imported.easels = easels.added;
@@ -238,21 +239,48 @@ fn read_profile(family: Family, path: &Path) -> Result<(Data, Vec<Entry>, Favico
     Ok((data, history?, favicons))
 }
 
-/// Arc's URL routing, which every Arc profile reads the same, the Spaces imported from all of
-/// them, by their Arc id, and a Space of each, by its directory, which its routes name.
+/// What every Arc profile reads the same: Arc's sidebar and its URL routing; with the Spaces
+/// imported from all of them, by their Arc id, and a Space of each, by its directory, which its
+/// routes name.
 #[derive(Default)]
-struct ArcRoutes {
-    json: Option<String>,
+struct Arcs {
+    sidebar: Option<String>,
+    routing: Option<String>,
     spaces: HashMap<String, SpaceId>,
     profiles: HashMap<String, SpaceId>,
 }
 
-impl ArcRoutes {
+impl Arcs {
+    /// Orders the Spaces imported from every Arc profile as Arc's sidebar does, which mixes
+    /// profiles, from the place of the first one; Spaces of other browsers among them go after.
+    fn order_spaces(&self, sidebar: &mut Sidebar) {
+        let Some(order) = self
+            .sidebar
+            .as_deref()
+            .and_then(|j| arc::space_order(j).ok())
+        else {
+            return;
+        };
+        let ids: Vec<_> = order
+            .iter()
+            .filter_map(|id| self.spaces.get(id))
+            .copied()
+            .collect();
+        let Some(first) = sidebar.spaces().iter().position(|s| ids.contains(&s.id)) else {
+            return;
+        };
+        for (index, id) in ids.into_iter().enumerate() {
+            let _ = sidebar.move_space(id, first + index);
+        }
+    }
+
     /// Adds Arc's routes to the sidebar's, once every Arc profile is imported; Arc's default
     /// destination takes over.
     fn apply(self, sidebar: &mut Sidebar) -> Result<(), String> {
-        let Some(json) = self.json else { return Ok(()) };
-        let imported = arc::url_routing(&json, &self.spaces, &self.profiles).map_err(debug)?;
+        let Some(json) = &self.routing else {
+            return Ok(());
+        };
+        let imported = arc::url_routing(json, &self.spaces, &self.profiles).map_err(debug)?;
         let mut routes = sidebar.url_routing().routes.clone();
         routes.extend(imported.routes);
         sidebar.set_url_routing(UrlRouting {
@@ -263,14 +291,14 @@ impl ArcRoutes {
     }
 }
 
-/// Adds a browser profile's sidebar or bookmarks to `target`; Arc's routes wait in `routes`, and
-/// its Easels go where its sidebar shows them.
+/// Adds a browser profile's sidebar or bookmarks to `target`; what Arc's profiles share waits in
+/// `arcs`, and its Easels go where its sidebar shows them.
 fn add(
     sidebar: &mut Sidebar,
     data: Data,
     target: Target,
     bar: Bar,
-    routes: &mut ArcRoutes,
+    arcs: &mut Arcs,
     easels: &mut arc_easels::Import,
 ) -> Result<(), String> {
     match data {
@@ -282,9 +310,10 @@ fn add(
             if let Some(archive) = archive {
                 arc::add_archive(sidebar, &archive, &spaces).map_err(debug)?;
             }
-            routes.json = routing.or(routes.json.take());
-            routes.spaces.extend(spaces);
-            routes.profiles.insert(directory, target.space(sidebar));
+            arcs.routing = routing.or(arcs.routing.take());
+            arcs.sidebar = Some(json);
+            arcs.spaces.extend(spaces);
+            arcs.profiles.insert(directory, target.space(sidebar));
             Ok(())
         }
         Data::Bookmarks(bookmarks) => {
@@ -453,7 +482,8 @@ mod tests {
         let names: Vec<_> = sidebar.profiles().iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Personal (Arc)", "Work (Arc)", "Chrome"]);
         let spaces: Vec<_> = sidebar.spaces().iter().map(|s| s.title.as_str()).collect();
-        assert_eq!(spaces, ["Home", "Space", "Office", "Chrome"]);
+        // In Arc's order, which mixes profiles.
+        assert_eq!(spaces, ["Home", "Office", "Space", "Chrome"]);
         let space = |i: usize| Destination::Space(sidebar.spaces()[i].id);
         let routing = sidebar.url_routing();
         let routes: Vec<_> = routing
@@ -464,7 +494,7 @@ mod tests {
         assert_eq!(
             routes,
             [
-                ("meet.example.com", space(2)),
+                ("meet.example.com", space(1)),
                 // The Arc profile's Space.
                 ("tracker.example.com", space(0)),
                 ("news", Destination::Little),
