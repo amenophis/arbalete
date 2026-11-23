@@ -331,12 +331,22 @@ pub(super) fn take_page(tab: NodeId) -> bool {
                 (latest, own) => own.map(|(_, jpeg)| jpeg).or(latest),
             };
             if let Some(jpeg) = jpeg {
-                crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)));
+                crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)), bar_height(other.id));
                 other.picture.replace(Some((shown, jpeg)));
             }
         }
     }
     taken
+}
+
+/// The height of the bar above the page alone in the window `id`, in toolbar or developer mode.
+#[cfg(target_os = "macos")]
+fn bar_height(id: u32) -> f64 {
+    let was = FOCUSED.get();
+    focus(id);
+    let bar = shown_toolbar_height();
+    focus(was);
+    f64::from(bar)
 }
 
 /// Keeps a picture of a tab's page for the windows it was taken at the size of, which show the
@@ -357,7 +367,7 @@ pub(super) fn keep_picture(tab: NodeId, jpeg: &str) {
             && crate::mac::covered(card);
         if (shows || covered) && crate::mac::fits(card, jpeg) {
             if covered {
-                crate::mac::cover_page(card, jpeg, Some(space_tint(tab)));
+                crate::mac::cover_page(card, jpeg, Some(space_tint(tab)), bar_height(window.id));
             }
             window.picture.replace(Some((tab, jpeg.to_owned())));
         }
