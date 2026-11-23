@@ -372,7 +372,8 @@ struct Win {
     /// the page covers while another window shows it.
     card_view: Cell<Option<*mut std::ffi::c_void>>,
     /// A picture of a tab's page at the card's size, taken while the window showed it, which
-    /// covers the card once another window takes the page (take_page).
+    /// covers the card once another window takes the page (take_page); empty, while the window
+    /// waits for one to cover it.
     #[cfg(target_os = "macos")]
     picture: RefCell<Option<(NodeId, String)>>,
     window: RefCell<Option<MainWindow>>,
