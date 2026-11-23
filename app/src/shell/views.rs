@@ -331,10 +331,13 @@ pub(super) fn take_page(tab: NodeId) -> bool {
                 (Some(latest), _) if crate::mac::fits(card, &latest, bar) => Some(latest),
                 (latest, own) => own.map(|(_, jpeg)| jpeg).or(latest),
             };
-            if let Some(jpeg) = jpeg {
-                crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)), bar);
-                other.picture.replace(Some((shown, jpeg)));
+            if let Some(jpeg) = &jpeg {
+                crate::mac::cover_page(card, jpeg, Some(space_tint(shown)), bar);
             }
+            // Without one yet, as windows open on the same tab, the next to come covers it.
+            other
+                .picture
+                .replace(Some((shown, jpeg.unwrap_or_default())));
         }
     }
     taken
@@ -351,7 +354,8 @@ fn bar_height(id: u32) -> f64 {
 }
 
 /// Keeps a picture of a tab's page for the windows it was taken at the size of, which show the
-/// page or a picture of it. Taken as another window took the page, it covers the card at once.
+/// page. Taken as another window took the page, it covers that window's card at once, unless the
+/// picture there already fits it.
 #[cfg(target_os = "macos")]
 pub(super) fn keep_picture(tab: NodeId, jpeg: &str) {
     for window in WINDOWS.with_borrow(Clone::clone) {
@@ -359,23 +363,27 @@ pub(super) fn keep_picture(tab: NodeId, jpeg: &str) {
             continue;
         };
         let shows = window.shown.get() == Some(tab);
+        let held = window
+            .picture
+            .borrow()
+            .clone()
+            .and_then(|(of, held)| (of == tab).then_some(held));
+        // Empty, a picture waited for (take_page).
         let covered = !shows
-            && window
-                .picture
-                .borrow()
+            && held
                 .as_ref()
-                .is_some_and(|(of, _)| *of == tab)
-            && crate::mac::covered(card);
+                .is_some_and(|held| held.is_empty() || crate::mac::covered(card));
         if !(shows || covered) {
             continue;
         }
         let bar = bar_height(window.id);
-        if crate::mac::fits(card, jpeg, bar) {
-            if covered {
-                crate::mac::cover_page(card, jpeg, Some(space_tint(tab)), bar);
-            }
-            window.picture.replace(Some((tab, jpeg.to_owned())));
+        let fits = crate::mac::fits(card, jpeg, bar);
+        if covered && (fits || !held.is_some_and(|held| crate::mac::fits(card, &held, bar))) {
+            crate::mac::cover_page(card, jpeg, Some(space_tint(tab)), bar);
+        } else if !fits {
+            continue;
         }
+        window.picture.replace(Some((tab, jpeg.to_owned())));
     }
 }
 
@@ -467,6 +475,10 @@ pub(super) fn hide_content() {
     #[cfg(target_os = "macos")]
     if let Some(card) = win().card_view.get() {
         crate::mac::uncover_page(card);
+        win()
+            .picture
+            .borrow_mut()
+            .take_if(|(_, jpeg)| jpeg.is_empty());
     }
     if let Some(tab) = win().shown.take() {
         PAGES.with_borrow_mut(|pages| {
