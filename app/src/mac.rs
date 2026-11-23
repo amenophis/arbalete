@@ -1884,16 +1884,17 @@ fn picture(jpeg: &str) -> Option<Retained<NSImage>> {
     NSImage::initWithData(NSImage::alloc(), &data)
 }
 
-/// Whether a picture of a page, a JPEG in base64, has the shape of a view CEF gives: taken at
-/// that view's size, it covers it as the page showed there.
-pub fn fits(view: *mut c_void, jpeg: &str) -> bool {
+/// Whether a picture of a page, a JPEG in base64, has the shape of a view CEF gives, but the
+/// `bar` points at its top (cover_page): taken at that size, it covers it as the page showed there.
+pub fn fits(view: *mut c_void, jpeg: &str, bar: f64) -> bool {
     // SAFETY: CEF gives the page's NSView, which its window keeps alive.
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return false;
     };
-    let (Some(image), bounds) = (picture(jpeg), view.bounds().size) else {
+    let (Some(image), mut bounds) = (picture(jpeg), view.bounds().size) else {
         return false;
     };
+    bounds.height -= bar;
     let size = image.size();
     // Pixels against points: the shapes only, within a pixel or so of rounding.
     size.height > 0.0

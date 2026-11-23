@@ -324,14 +324,15 @@ pub(super) fn take_page(tab: NodeId) -> bool {
         if let (Some(card), Some(shown)) = (other.card_view.get(), shown) {
             // The latest picture, unless it was taken at another window's size: the one taken
             // there.
+            let bar = bar_height(other.id);
             let latest = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&shown).cloned());
             let own = other.picture.take().filter(|(tab, _)| *tab == shown);
             let jpeg = match (latest, own) {
-                (Some(latest), _) if crate::mac::fits(card, &latest) => Some(latest),
+                (Some(latest), _) if crate::mac::fits(card, &latest, bar) => Some(latest),
                 (latest, own) => own.map(|(_, jpeg)| jpeg).or(latest),
             };
             if let Some(jpeg) = jpeg {
-                crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)), bar_height(other.id));
+                crate::mac::cover_page(card, &jpeg, Some(space_tint(shown)), bar);
                 other.picture.replace(Some((shown, jpeg)));
             }
         }
@@ -365,9 +366,13 @@ pub(super) fn keep_picture(tab: NodeId, jpeg: &str) {
                 .as_ref()
                 .is_some_and(|(of, _)| *of == tab)
             && crate::mac::covered(card);
-        if (shows || covered) && crate::mac::fits(card, jpeg) {
+        if !(shows || covered) {
+            continue;
+        }
+        let bar = bar_height(window.id);
+        if crate::mac::fits(card, jpeg, bar) {
             if covered {
-                crate::mac::cover_page(card, jpeg, Some(space_tint(tab)), bar_height(window.id));
+                crate::mac::cover_page(card, jpeg, Some(space_tint(tab)), bar);
             }
             window.picture.replace(Some((tab, jpeg.to_owned())));
         }
