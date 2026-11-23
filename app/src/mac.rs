@@ -1904,8 +1904,7 @@ pub fn fits(view: *mut c_void, jpeg: &str, bar: f64) -> bool {
 
 /// Covers a view, which CEF gives, with a picture of its page, a JPEG in base64, until
 /// uncover_page; dimmed by an RGB `tint` when the page shows in another window, like Arc's.
-/// The `bar` points at its top, the bar above the page, stay uncovered. A picture taken at
-/// another size fills the rest without being stretched.
+/// The `bar` points at its top, the bar above the page, stay uncovered.
 pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>, bar: f64) {
     // SAFETY: CEF gives the page's NSView, which its window keeps alive.
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
@@ -1933,16 +1932,41 @@ pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>, bar: f64) {
         let layer: Retained<AnyObject> = msg_send![class, layer];
         let _: () = msg_send![&*cover, setLayer: &*layer];
         cover.setWantsLayer(true);
+        let ratio = image.size().height / image.size().width;
         let image: *const CGImage = msg_send![
             &*image,
             CGImageForProposedRect: std::ptr::null_mut::<NSRect>(),
             context: std::ptr::null::<AnyObject>(),
             hints: std::ptr::null::<AnyObject>()
         ];
+        // As wide as the page's room from its top, like the page lays out: a window of another
+        // width scales it without distorting it, its bottom cut or left bare. Constraints keep
+        // it so as the window is resized.
+        let (Some(manager), Some(constraint)) = (
+            AnyClass::get(c"CAConstraintLayoutManager"),
+            AnyClass::get(c"CAConstraint"),
+        ) else {
+            return;
+        };
+        let manager: Retained<AnyObject> = msg_send![manager, layoutManager];
+        let _: () = msg_send![&*layer, setLayoutManager: &*manager];
+        let picture: Retained<AnyObject> = msg_send![class, layer];
         // A layer's contents is a CGImage, an object it keeps.
-        let _: () = msg_send![&*layer, setContents: image.cast::<AnyObject>()];
-        let gravity = NSString::from_str("resizeAspectFill");
-        let _: () = msg_send![&*layer, setContentsGravity: &*gravity];
+        let _: () = msg_send![&*picture, setContents: image.cast::<AnyObject>()];
+        let superlayer = NSString::from_str("superlayer");
+        // CAConstraintAttribute: minX, width, maxY (the top) and height.
+        for (attribute, of, scale) in [(0i32, 0i32, 1.0), (3, 3, 1.0), (6, 6, 1.0), (7, 3, ratio)] {
+            let made: Retained<AnyObject> = msg_send![
+                constraint,
+                constraintWithAttribute: attribute,
+                relativeTo: &*superlayer,
+                attribute: of,
+                scale: scale,
+                offset: 0.0f64
+            ];
+            let _: () = msg_send![&*picture, addConstraint: &*made];
+        }
+        let _: () = msg_send![&*layer, addSublayer: &*picture];
         let _: () = msg_send![&*layer, setMasksToBounds: true];
         // Above the picture: a view drawing over the one holding it.
         if let Some(rgb) = tint {
