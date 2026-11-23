@@ -445,8 +445,6 @@ pub(super) fn hide_content() {
                 }
             }
         });
-        place_card();
-        send_panes();
     }
     // A picture of a page another window took no longer stands in for it.
     #[cfg(target_os = "macos")]
@@ -460,7 +458,9 @@ pub(super) fn hide_content() {
             }
         });
     }
-    send_empty_card();
+    // The empty card, without the split's panes; like Arc's, the hidden sidebar floats beside an
+    // empty Space's panel, as its last tab closes.
+    place_card();
 }
 
 /// Closes the pages of the tabs closed, archived or moved to another profile's Space, whose web
