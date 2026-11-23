@@ -2,6 +2,11 @@
 
 use super::*;
 
+thread_local! {
+    /// What the last command run was, of which kind, for the commands that undo as one.
+    static LAST_COMMAND: Cell<Option<std::mem::Discriminant<Command>>> = const { Cell::new(None) };
+}
+
 /// Runs a command later on the UI thread, out of the callback that asks for it.
 pub fn post(command: Command) {
     post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
@@ -16,7 +21,22 @@ pub fn run_in(window: u32, command: Command) {
 }
 
 pub fn run(command: Command) {
+    // Like Arc's, the user's sidebar edits may be undone, one by one, but each drag as one.
+    let undoing = matches!(command, Command::Undo | Command::Redo);
+    let before = (!undoing).then(|| STATE.with_borrow(|state| state.sidebar.clone()));
+    let kind = std::mem::discriminant(&command);
+    let continued = matches!(
+        command,
+        Command::ResizePane(..) | Command::SetSpaceTheme(..)
+    ) && LAST_COMMAND.get() == Some(kind);
+    LAST_COMMAND.set(Some(kind));
+    let at = now().try_into().unwrap_or_default();
     run_command(command);
+    if let Some(before) = before {
+        STATE.with_borrow_mut(|state| {
+            state.edits.record(before, &state.sidebar, at, continued);
+        });
+    }
     #[cfg(target_os = "macos")]
     sync_native_surfaces();
 }
@@ -151,7 +171,8 @@ fn run_command(command: Command) {
         }
         (Command::EvenPanes(index), _) => even_panes(index),
         (Command::Reopen(rank), _) => reopen_tab(rank),
-        (Command::UndoClose, _) => undo_close(),
+        (Command::Undo, _) => undo(),
+        (Command::Redo, _) => redo(),
         (Command::Pin(tab), _) => toggle_pin(tab),
         (Command::NewFolder(parent), _) => new_folder(parent),
         (Command::FolderWith(tabs), _) => folder_with(&tabs),

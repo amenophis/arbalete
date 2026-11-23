@@ -216,6 +216,38 @@ pub(super) fn tell_closed(what: &str, count: usize) {
     }));
 }
 
+/// Undoes the last sidebar edit, like Arc's ⌘Z, and shows the sidebar as it was then: a tab
+/// closed comes back selected, its page with it. The tabs and Spaces that edit closed may then
+/// no longer be reopened, being back. With no edit left to undo, reopens what closed last.
+pub(super) fn undo() {
+    let undone = STATE.with_borrow_mut(|state| {
+        let at = state.edits.undo(&mut state.sidebar)?;
+        let at = UNIX_EPOCH + Duration::from_millis(at);
+        state.closed.retain(|closed| closed.at < at);
+        state.deleted.retain(|(deleted, _)| *deleted < at);
+        Some(())
+    });
+    match undone {
+        Some(()) => show_edited(),
+        None => undo_close(),
+    }
+}
+
+/// Makes the last sidebar edit undone again, like Arc's ⇧⌘Z.
+pub(super) fn redo() {
+    if STATE.with_borrow_mut(|state| state.edits.redo(&mut state.sidebar)) {
+        show_edited();
+    }
+}
+
+/// Shows the sidebar after an undo or a redo, and the tab it selects.
+fn show_edited() {
+    save_session();
+    send_state();
+    send_archive();
+    show_selected();
+}
+
 /// Reopens what closed last, like Arc's ⌘Z: the Space deleted, the tabs closed together, as
 /// clearing "Today" closes them, or the tab closed last.
 pub(super) fn undo_close() {
