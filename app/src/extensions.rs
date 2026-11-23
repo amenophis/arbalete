@@ -1393,8 +1393,9 @@ pub fn popup_asking() -> bool {
 
 /// Asks the user for the optional permissions an extension requests. Chromium only prompts for
 /// them from a Chrome-style page: the app opens one on the extension's manifest, a page of the
-/// extension that runs none of its code, and asks there (chrome_task_page_loaded). One task at a
-/// time: a request meanwhile is refused.
+/// extension that runs none of its code, and asks there (chrome_task_page_loaded), in an invisible
+/// window: only Chromium's prompt, a sheet of it, shows, as in Chrome. One task at a time: a
+/// request meanwhile is refused.
 fn request_permissions(caller: Caller, call: &Value) {
     let (Some(request), Some(extension)) = (call["request"].as_i64(), caller.extension()) else {
         return;
@@ -1411,7 +1412,7 @@ fn request_permissions(caller: Caller, call: &Value) {
         permissions,
     }));
     let url = format!("chrome-extension://{extension}/manifest.json");
-    crate::shell::open_chrome_task_window(profile, &url, "Extension Permissions", false);
+    crate::shell::open_chrome_task_window(profile, &url, "Extension Permissions", true);
 }
 
 /// Removes an extension from a profile, without Chromium's prompt: the app asks the user itself.
