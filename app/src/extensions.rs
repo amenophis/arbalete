@@ -1378,6 +1378,14 @@ thread_local! {
     static CHROME_TASK_OBSERVER: RefCell<Option<Registration>> = const { RefCell::new(None) };
 }
 
+/// Whether Chromium asks the user for a request of the extension popup's.
+pub fn popup_asking() -> bool {
+    CHROME_TASK.with_borrow(|task| {
+        task.as_ref()
+            .is_some_and(|task| matches!(task.caller, Caller::Popup(..)))
+    })
+}
+
 /// Asks the user for the optional permissions an extension requests. Chromium only prompts for
 /// them from a Chrome-style page: the app opens one on the extension's manifest, a page of the
 /// extension that runs none of its code, and asks there (chrome_task_page_loaded). One task at a
