@@ -3,7 +3,7 @@ rust = { version = "1.99.1", components = "rustfmt,clippy" }
 # Needed by the cef crate to build CEF's C++ wrapper.
 cmake = "4.4.5"
 ninja = "1.13.2"
-cargo-deny = "0.20.2"
+cargo-deny = "0.22.0"
 # Lists the licenses of the crates the app is built from (mise run app).
 "github:EmbarkStudios/cargo-about" = "0.9.3"
 # Lays out the disk image's window (mise run release).
