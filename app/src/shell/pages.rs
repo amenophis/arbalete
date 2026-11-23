@@ -120,7 +120,7 @@ pub(super) fn cover_revived(browser: Option<&Browser>, loading: bool) {
     } else if REVIVED.with_borrow_mut(|revived| revived.remove(&tab))
         && let Some(jpeg) = SNAPSHOTS.with_borrow(|snapshots| snapshots.get(&tab).cloned())
     {
-        crate::mac::cover_page(host.window_handle(), &jpeg, None);
+        crate::mac::cover_page(host.window_handle(), &jpeg, None, 0.0);
     }
 }
 

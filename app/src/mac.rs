@@ -1903,8 +1903,9 @@ pub fn fits(view: *mut c_void, jpeg: &str) -> bool {
 
 /// Covers a view, which CEF gives, with a picture of its page, a JPEG in base64, until
 /// uncover_page; dimmed by an RGB `tint` when the page shows in another window, like Arc's.
-/// A picture taken at another size fills the view without being stretched.
-pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>) {
+/// The `bar` points at its top, the bar above the page, stay uncovered. A picture taken at
+/// another size fills the rest without being stretched.
+pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>, bar: f64) {
     // SAFETY: CEF gives the page's NSView, which its window keeps alive.
     let Some(view) = (unsafe { view.cast::<NSView>().as_ref() }) else {
         return;
@@ -1913,7 +1914,12 @@ pub fn cover_page(view: *mut c_void, jpeg: &str, tint: Option<u32>) {
     let Some(image) = picture(jpeg) else { return };
     // SAFETY: on the main thread, which CEF calls the app on.
     let mtm = unsafe { MainThreadMarker::new_unchecked() };
-    let cover = NSView::initWithFrame(NSView::alloc(mtm), view.bounds());
+    let mut frame = view.bounds();
+    frame.size.height -= bar;
+    if view.isFlipped() {
+        frame.origin.y += bar;
+    }
+    let cover = NSView::initWithFrame(NSView::alloc(mtm), frame);
     cover.setIdentifier(Some(&NSString::from_str(COVER)));
     cover.setAutoresizingMask(
         NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
