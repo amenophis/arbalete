@@ -221,7 +221,8 @@ struct PageToolbar: View {
     }
 
     /// Like Arc's, measured: buttons 37 points apart from each end, the sidebar's toggle first
-    /// while it is not docked, the pinned extensions, the site controls and Split View last.
+    /// while it is not beside the page, the pinned extensions, the site controls and Split View
+    /// last.
     private var plain: some View {
         let tab = model.activeTab
         return ZStack {
@@ -282,14 +283,14 @@ private func barTool(_ symbol: String, _ label: String, action: @escaping () -> 
 
 /// The start of the bar above the page in toolbar mode, the plain one's and the developer one's,
 /// so that nothing moves as developer mode turns on or off: the sidebar's toggle while it is not
-/// docked, back, forward, and reload.
+/// beside the page, back, forward, and reload.
 struct BarStart: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         let page = model.state?.page
         HStack(spacing: 0) {
-            if !model.sidebarDocked {
+            if !model.sidebarBeside {
                 barTool("sidebar.left", "Toggle sidebar") { model.run("toggle-sidebar") }
             }
             barTool("arrow.left", "Back") { model.run("back") }
@@ -348,8 +349,8 @@ struct DeveloperBar: View {
     /// In toolbar mode, over a page alone, its end is the plain bar's.
     private var asToolbar: Bool { model.state?.toolbar == true && close == nil }
     /// Its start is the plain bar's: in toolbar mode, like Arc's, the navigation buttons go to the
-    /// sidebar's top while it is docked (SidebarToolbar).
-    private var navigates: Bool { asToolbar && !model.sidebarDocked }
+    /// sidebar's top while it is beside the page (SidebarToolbar).
+    private var navigates: Bool { asToolbar && !model.sidebarBeside }
 
     var body: some View {
         HStack(spacing: 2) {
