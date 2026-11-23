@@ -350,8 +350,11 @@ pub enum Command {
     CloseInspector(NodeId),
     /// Reopens a closed tab, by its rank from the last closed one, 0.
     Reopen(usize),
-    /// Reopens what closed last, like ⌘Z: a deleted Space, the tabs closed together, or a tab.
-    UndoClose,
+    /// Undoes the last sidebar edit, like Arc's ⌘Z, or reopens what closed last when there is
+    /// none left: a deleted Space, the tabs closed together, or a tab.
+    Undo,
+    /// Makes the last sidebar edit undone again, like Arc's ⇧⌘Z.
+    Redo,
     /// Pins or unpins a tab, or the selected one.
     Pin(Option<NodeId>),
     /// Creates a folder for the UI to rename, at the end of the displayed Space's pinned tabs,

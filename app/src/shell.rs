@@ -22,6 +22,7 @@ use arbalete_core::sidebar::{
     Sidebar, Space, SpaceId, SplitLayout, Tab, View as WindowView,
 };
 use arbalete_core::store::Place;
+use arbalete_core::undo::Edits;
 use arbalete_core::url_routing::Destination;
 use arbalete_core::{favicon, store};
 use cef::*;
@@ -689,6 +690,8 @@ struct UiState {
     /// Deleted Spaces, with when, which ⌘Z puts back, the last one at the end, the
     /// [`MAX_CLOSED`] last ones until the app quits.
     deleted: Vec<(SystemTime, DeletedSpace)>,
+    /// The user's sidebar edits, which ⌘Z undoes and ⇧⌘Z redoes.
+    edits: Edits,
 }
 
 /// A closed tab, which may be reopened.

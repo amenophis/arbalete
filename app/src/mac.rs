@@ -146,15 +146,27 @@ define_class!(
         }
 
         // Like Arc's, ⌘Z is the undo of the text field being typed in, page or interface, and
-        // else reopens what closed last. Not a changeable shortcut: no "arbalete" prefix.
-        #[unsafe(method(undoTypingOrClose:))]
-        fn undo_typing_or_close(&self, sender: Option<&AnyObject>) {
+        // else undoes the last sidebar edit. Not a changeable shortcut: no "arbalete" prefix.
+        #[unsafe(method(undoTypingOrEdit:))]
+        fn undo_typing_or_edit(&self, sender: Option<&AnyObject>) {
             let mtm = MainThreadMarker::new().expect("main thread");
-            if typing(mtm) {
+            if typing(mtm, false) {
                 // SAFETY: undo: takes its sender, the menu item.
                 unsafe { NSApp(mtm).sendAction_to_from(sel!(undo:), None, sender) };
             } else {
-                crate::shell::run(Command::UndoClose);
+                crate::shell::run(Command::Undo);
+            }
+        }
+
+        // ⇧⌘Z likewise redoes the typing, or the sidebar edit undone last.
+        #[unsafe(method(redoTypingOrEdit:))]
+        fn redo_typing_or_edit(&self, sender: Option<&AnyObject>) {
+            let mtm = MainThreadMarker::new().expect("main thread");
+            if typing(mtm, true) {
+                // SAFETY: redo: takes its sender, the menu item.
+                unsafe { NSApp(mtm).sendAction_to_from(sel!(redo:), None, sender) };
+            } else {
+                crate::shell::run(Command::Redo);
             }
         }
 
@@ -1225,10 +1237,11 @@ pub fn default_shortcuts() -> BTreeMap<String, Keys> {
     DEFAULT_SHORTCUTS.with_borrow(Clone::clone)
 }
 
-/// Whether ⌘Z goes to the key window's focused text field, an interface's or a page's: like
-/// Arc's, an interface's only once it has typing to undo. Chromium's view of a page tells the
-/// type of its focused field, none when it is not one, but not whether it has typing to undo.
-fn typing(mtm: MainThreadMarker) -> bool {
+/// Whether ⌘Z, or ⇧⌘Z with `redo`, goes to the key window's focused text field, an interface's
+/// or a page's: like Arc's, an interface's only once it has typing to undo, or to redo.
+/// Chromium's view of a page tells the type of its focused field, none when it is not one, but
+/// not whether it has typing to undo.
+fn typing(mtm: MainThreadMarker, redo: bool) -> bool {
     let Some(responder) = NSApp(mtm)
         .keyWindow()
         .and_then(|window| window.firstResponder())
@@ -1236,7 +1249,9 @@ fn typing(mtm: MainThreadMarker) -> bool {
         return false;
     };
     if responder.isKindOfClass(NSText::class()) {
-        return responder.undoManager().is_some_and(|undo| undo.canUndo());
+        return responder
+            .undoManager()
+            .is_some_and(|undo| if redo { undo.canRedo() } else { undo.canUndo() });
     }
     let text_input_type = sel!(textInputType);
     // SAFETY: RenderWidgetHostViewCocoa's textInputType returns Chromium's ui::TextInputType, an
@@ -1263,10 +1278,15 @@ fn edit_menu(mtm: MainThreadMarker) -> Vec<Retained<NSMenuItem>> {
         item(
             mtm,
             ns_string!("Undo"),
-            sel!(undoTypingOrClose:),
+            sel!(undoTypingOrEdit:),
             ns_string!("z"),
         ),
-        item(mtm, ns_string!("Redo"), sel!(redo:), ns_string!("Z")),
+        item(
+            mtm,
+            ns_string!("Redo"),
+            sel!(redoTypingOrEdit:),
+            ns_string!("Z"),
+        ),
         NSMenuItem::separatorItem(mtm),
         item(mtm, ns_string!("Cut"), sel!(cut:), ns_string!("x")),
         item(mtm, ns_string!("Copy"), sel!(copy:), ns_string!("c")),
