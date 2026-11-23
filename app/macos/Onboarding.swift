@@ -35,8 +35,9 @@ final class OnboardingModel: ObservableObject {
         /// The Chrome Web Store extensions found, to add.
         var extensions: [FoundExtension]
         var cookies: Int
-        /// A line for each browser whose cookies did not come.
-        var cookieErrors: [String]
+        var passwords: Int
+        /// A line for each browser whose cookies or passwords did not come.
+        var errors: [String]
     }
 
     @Published var step = Step.welcome
@@ -47,6 +48,8 @@ final class OnboardingModel: ObservableObject {
     @Published var importing = false
     /// Whether the Chromium browsers' cookies come too.
     @Published var cookies = true
+    /// Whether the Chromium browsers' saved passwords come too.
+    @Published var passwords = true
     @Published var imported: Imported?
     /// The extensions found to add.
     @Published var adding: Set<FoundExtension> = []
@@ -220,7 +223,7 @@ final class OnboardingModel: ObservableObject {
     func runImport() {
         let picked = choices.filter(\.checked).map { choice in
             var choice = choice
-            choice.cookies = cookies
+            (choice.cookies, choice.passwords) = (cookies, passwords)
             return choice
         }
         // The step still shows as it slides away after a quick import: a click then is not another.
@@ -641,9 +644,16 @@ private struct ImportStep: View {
                 // Chromium browsers ticked.
                 if let sources = model.sources, sources.browsers.contains(where: \.cookies) {
                     let applies = model.choices.contains { $0.checked && sources.browsers[$0.browser].cookies }
-                    CookiesRow(ticked: $model.cookies)
-                        .opacity(applies ? 1 : 0.5)
-                        .disabled(!applies)
+                    Group {
+                        SecretsRow(
+                            ticked: $model.cookies, title: "Stay signed in",
+                            text: "Brings cookies too. macOS asks for each browser’s key: choose Allow.")
+                        SecretsRow(
+                            ticked: $model.passwords, title: "Saved passwords",
+                            text: "Arbalete fills them in, as the other browser did.")
+                    }
+                    .opacity(applies ? 1 : 0.5)
+                    .disabled(!applies)
                 }
                 HStack(spacing: 12) {
                     OnboardingButton(title: ticked > 1 ? "Import \(ticked)" : "Import", enabled: ticked > 0) {
@@ -733,16 +743,18 @@ private struct BrowserProfileRow: View {
     }
 }
 
-/// Whether the Chromium browsers' cookies come too, to stay signed in.
-private struct CookiesRow: View {
+/// Whether the Chromium browsers' cookies, or their saved passwords, come too.
+private struct SecretsRow: View {
     @Binding var ticked: Bool
+    let title: String
+    let text: String
 
     var body: some View {
         HStack(spacing: 12) {
             TickBox(ticked: ticked)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Stay signed in").font(.system(size: 14))
-                Text("Brings cookies too. macOS asks for each browser’s key: choose Allow.")
+                Text(title).font(.system(size: 14))
+                Text(text)
                     .font(.system(size: 12))
                     .opacity(0.8)
             }
@@ -804,8 +816,11 @@ private struct ImportedStep: View {
                 if let cookies = model.imported?.cookies, cookies > 0 {
                     fact(cookies, "cookies")
                 }
+                if let passwords = model.imported?.passwords, passwords > 0 {
+                    fact(passwords, "passwords")
+                }
             }
-            ForEach(model.imported?.cookieErrors ?? [], id: \.self) { error in
+            ForEach(model.imported?.errors ?? [], id: \.self) { error in
                 Text(error).font(.system(size: 12)).opacity(0.8)
             }
             OnboardingButton(title: "Continue") { model.next() }

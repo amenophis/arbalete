@@ -11,33 +11,52 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// could not be read, as the user reads it.
 pub(super) type Found = HashMap<(usize, usize), Result<Vec<Imported>, String>>;
 
-/// Reads the cookies of the chosen profiles that asked for them, asking for each browser's key
-/// once: macOS shows its own dialog for it. Slow: on the import's thread.
-pub(super) fn read(browsers: &[browsers::Browser], choices: &[Choice]) -> Found {
+/// Each chosen browser's key, by its index, or why it could not be had, for the profiles that
+/// asked for their cookies or passwords: asked once per browser, as macOS shows its own dialog
+/// for it. Slow: on the import's thread.
+pub(super) type Keys = HashMap<usize, Result<Key, &'static str>>;
+
+pub(super) fn read_keys(browsers: &[browsers::Browser], choices: &[Choice]) -> Keys {
+    let mut keys = Keys::new();
+    for choice in choices.iter().filter(|c| c.cookies || c.passwords) {
+        let service = browsers
+            .get(choice.browser)
+            .and_then(|b| safe_storage::service(b.name));
+        if let Some(service) = service {
+            keys.entry(choice.browser)
+                .or_insert_with(|| browser_key(service));
+        }
+    }
+    keys
+}
+
+/// The browser profile, as the user reads it: its browser's name alone when it has one profile.
+pub(super) fn label(browser: &browsers::Browser, profile: usize) -> String {
+    match browser.profiles.as_slice() {
+        [_] => browser.name.to_string(),
+        profiles => format!("{} {}", browser.name, profiles[profile].name),
+    }
+}
+
+/// Reads the cookies of the chosen profiles that asked for them, with their browser's key.
+pub(super) fn read(browsers: &[browsers::Browser], choices: &[Choice], keys: &Keys) -> Found {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     // Microseconds since 1601, as Chromium keeps them.
     let now = now.as_micros() as i64 + 11_644_473_600_000_000;
-    let mut keys = HashMap::new();
     let found = choices.iter().filter(|choice| choice.cookies);
     let found = found.filter_map(|choice| {
         let browser = browsers.get(choice.browser)?;
         let profile = browser.profiles.get(choice.profile)?;
-        let service = safe_storage::service(browser.name)?;
-        let key = keys
-            .entry(choice.browser)
-            .or_insert_with(|| browser_key(service));
+        let key = keys.get(&choice.browser)?;
         let read = key.as_ref().map_err(|error| *error).and_then(|key| {
             cookies::read(&profile.path, key, now).map_err(|error| match error {
                 cookies::Error::Key => "they could not be decrypted",
                 cookies::Error::Io(_) | cookies::Error::Sqlite(_) => "they could not be read",
             })
         });
-        let label = match browser.profiles.as_slice() {
-            [_] => browser.name.to_string(),
-            profiles => format!("{} {}", browser.name, profiles[choice.profile].name),
-        };
+        let label = label(browser, choice.profile);
         let read = read.map_err(|why| format!("{label}’s cookies were not imported: {why}"));
         Some(((choice.browser, choice.profile), read))
     });
@@ -225,13 +244,17 @@ fn cef_cookie(cookie: &Imported) -> (String, Cookie) {
     (url, cef)
 }
 
-/// Tells how the cookies went once the import assistant closes: the first browser whose cookies
-/// were not imported, or how many were.
-pub(super) fn tell(count: usize, errors: &[String]) {
-    let text = match errors.first() {
-        Some(error) => error.clone(),
-        None if count > 0 => format!("{count} cookies imported: you stay signed in"),
-        None => return,
+/// Tells how the cookies and passwords went once the import assistant closes: the first browser
+/// whose cookies or passwords were not imported, or how many were.
+pub(super) fn tell(cookies: usize, passwords: usize, errors: &[String]) {
+    let text = match (errors.first(), cookies, passwords) {
+        (Some(error), _, _) => error.clone(),
+        (None, 0, 0) => return,
+        (None, cookies, 0) => format!("{cookies} cookies imported: you stay signed in"),
+        (None, 0, passwords) => format!("{passwords} passwords imported"),
+        (None, cookies, passwords) => {
+            format!("{cookies} cookies and {passwords} passwords imported: you stay signed in")
+        }
     };
     toast(json!({ "text": text, "icon": "key" }));
 }

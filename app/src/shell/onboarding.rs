@@ -22,14 +22,14 @@ pub(super) fn send_onboarding() {
     event("arbalete:onboarding", &sources());
 }
 
-/// Tells the welcome flow what an import made: its Spaces, how many pages of history and cookies
-/// came, and which browsers' cookies did not.
+/// Tells the welcome flow what an import made: its Spaces, how many pages of history, cookies and
+/// passwords came, and which browsers' cookies or passwords did not.
 pub(super) fn send_imported(
     spaces: &[SpaceId],
     pages: usize,
     extensions: &[serde_json::Value],
-    cookies: usize,
-    cookie_errors: &[String],
+    (cookies, passwords): (usize, usize),
+    errors: &[String],
 ) {
     event(
         "arbalete:imported",
@@ -38,7 +38,8 @@ pub(super) fn send_imported(
             "pages": pages,
             "extensions": extensions,
             "cookies": cookies,
-            "cookieErrors": cookie_errors,
+            "passwords": passwords,
+            "errors": errors,
         }),
     );
 }
