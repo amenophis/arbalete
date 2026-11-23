@@ -164,8 +164,9 @@ final class AppModel: ObservableObject {
     @Published var sidebarFloating = false
     /// Whether the window shows in full screen, without its buttons.
     @Published var fullScreen = false
-    /// Whether the sidebar is docked, which keeps its toggle from the bar above the page.
-    @Published var sidebarDocked = true
+    /// Whether the sidebar shows beside the page, docked or floating beside an empty Space's panel,
+    /// which keeps its toggle from the bar above the page.
+    @Published var sidebarBeside = true
     /// The split's pages shown, from the card's top left corner, each loading above its own.
     @Published var panes: [Pane] = []
     let send: Send

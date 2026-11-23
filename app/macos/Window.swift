@@ -371,8 +371,10 @@ final class SidebarHost {
         let floats = floating && frame != nil
         let floated = model.sidebarFloating
         if floated != floats { model.sidebarFloating = floats }
-        let docked = frame != nil && !floating
-        if model.sidebarDocked != docked { model.sidebarDocked = docked }
+        // Revealed, it passes over the bar above the page, and its toggle: beside an empty Space's
+        // panel, it floats beside the bar, whose toggle would show twice.
+        let beside = frame != nil && !revealed
+        if model.sidebarBeside != beside { model.sidebarBeside = beside }
         // Over the card, added after it: like Arc's, the floating sidebar passes over the page
         // and its bar.
         guard let frame, let parent = parent() else {
