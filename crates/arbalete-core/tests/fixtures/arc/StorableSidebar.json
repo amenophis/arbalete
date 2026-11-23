@@ -55,13 +55,6 @@
               { "unpinned": { "_0": { "shared": {} } } }, "today-home"
             ]
           },
-          "space-reading",
-          {
-            "id": "space-reading",
-            "customInfo": { "iconType": { "icon": "book" } },
-            "profile": { "default": true },
-            "containerIDs": ["unpinned", "today-reading", "pinned", "pinned-reading"]
-          },
           "space-office",
           {
             "id": "space-office",
@@ -105,6 +98,13 @@
             },
             "profile": { "custom": { "_0": { "directoryBasename": "Profile 1" } } },
             "containerIDs": ["unpinned", "today-office", "pinned", "pinned-office"]
+          },
+          "space-reading",
+          {
+            "id": "space-reading",
+            "customInfo": { "iconType": { "icon": "book" } },
+            "profile": { "default": true },
+            "containerIDs": ["unpinned", "today-reading", "pinned", "pinned-reading"]
           },
           "space-broken",
           { "id": "space-broken", "title": "Broken", "profile": { "default": true } }

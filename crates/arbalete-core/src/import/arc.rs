@@ -19,7 +19,8 @@
 //!   `auto`) and `modifiers` (`intensityFactor`, `noiseFactor`, `overlay`); colors are
 //!   `extendedSRGB` components, a little beyond 0 to 1. A Space without colors has no
 //!   `windowTheme`. `topAppsContainerIDs` alternates a profile and its Favorites root. `spaces` is
-//!   read in its own order; `sidebarSyncState` and `firebaseSyncState` are sync copies.
+//!   in the order the sidebar shows them, every profile's together; `sidebarSyncState` and
+//!   `firebaseSyncState` are sync copies.
 //! - **`StorableArchiveItems.json`**: the archived tabs, each with its Space and `archivedAt`.
 //! - **`StorableLinkRouting.json`**: `rules`, each with its `sourceComponents`, url conditions
 //!   that must all match (`componentType.urlMatch`: `_0` is `{"contains": {}}` or
@@ -208,12 +209,7 @@ pub fn add(
     easels: &mut arc_easels::Import,
 ) -> Result<HashMap<String, SpaceId>, serde_json::Error> {
     let json: Value = serde_json::from_str(storable_sidebar)?;
-    let containers = json["sidebar"]["containers"].as_array();
-    let Some(container) = containers
-        .into_iter()
-        .flatten()
-        .find(|c| c.get("spaces").is_some())
-    else {
+    let Some(container) = container(&json) else {
         return Ok(HashMap::new());
     };
     let mut import = Import {
@@ -236,6 +232,27 @@ pub fn add(
         import.favorites(arc_profile, favorites);
     }
     Ok(spaces)
+}
+
+/// The ids of Arc's Spaces in the order its sidebar shows them, those of every profile together,
+/// from the content of `StorableSidebar.json`.
+pub fn space_order(storable_sidebar: &str) -> Result<Vec<String>, serde_json::Error> {
+    let json: Value = serde_json::from_str(storable_sidebar)?;
+    let spaces = container(&json).map(|c| pairs(&c["spaces"]));
+    let ids = spaces
+        .into_iter()
+        .flatten()
+        .filter_map(|(id, _)| id.as_str());
+    Ok(ids.map(str::to_string).collect())
+}
+
+/// The container of `StorableSidebar.json` that holds the Spaces.
+fn container(json: &Value) -> Option<&Value> {
+    let containers = json["sidebar"]["containers"].as_array();
+    containers
+        .into_iter()
+        .flatten()
+        .find(|c| c.get("spaces").is_some())
 }
 
 struct Import<'a> {
