@@ -372,6 +372,15 @@ impl Tab {
         }
     }
 
+    /// Keeps only what the user gave the tab, its saved url and name, not what its page did.
+    fn forget_page(&mut self) {
+        *self = Self {
+            saved_url: self.saved_url.take(),
+            name: self.name.take(),
+            ..Self::new("", "", false)
+        };
+    }
+
     /// What the sidebar calls the tab: its name, or its page's title.
     pub fn label(&self) -> &str {
         self.name.as_deref().unwrap_or(&self.title)
@@ -2303,6 +2312,76 @@ impl Sidebar {
         if let Some(profile) = self.profiles.iter_mut().find(|p| p.favorites == parent) {
             profile.favorites_hint_hidden = false;
         }
+    }
+
+    /// Whether the user's edits tell `self` and `other` apart (crate::undo): the same profiles,
+    /// Spaces, rows, splits and archive, whatever each shows (`view`), a tab's page did since,
+    /// and the links routing, which Settings changes.
+    pub(crate) fn same_edits(&self, other: &Self) -> bool {
+        self.lasting() == other.lasting() && self.edits_only() == other.edits_only()
+    }
+
+    /// What no undo takes back (crate::undo): its profiles, whose web data goes with them, and
+    /// the Spaces of blank windows, which go with their window.
+    pub(crate) fn lasting(&self) -> (Vec<ProfileId>, Vec<SpaceId>) {
+        let profiles = self.profiles.iter().map(|p| p.id).collect();
+        let standalone = self.spaces.iter().filter(|s| s.standalone);
+        (profiles, standalone.map(|s| s.id).collect())
+    }
+
+    /// Whether a Space's form is open (`create_draft_space`).
+    pub(crate) fn has_draft(&self) -> bool {
+        self.draft.is_some()
+    }
+
+    /// Itself without what `same_edits` leaves out.
+    fn edits_only(&self) -> Self {
+        let mut sidebar = self.clone();
+        sidebar.profiles.clear();
+        sidebar.displayed = None;
+        sidebar.next_id = 0;
+        sidebar.url_routing = UrlRouting::default();
+        for space in &mut sidebar.spaces {
+            (space.selected, space.collapsed) = (None, false);
+        }
+        for node in sidebar.nodes.values_mut() {
+            match &mut node.kind {
+                NodeKind::Folder { expanded, .. } => *expanded = true,
+                NodeKind::Tab(tab) => tab.forget_page(),
+                NodeKind::Container | NodeKind::Split => {}
+            }
+        }
+        sidebar
+    }
+
+    /// Itself, an earlier or later state of `current`, back over `current` (crate::undo): showing
+    /// what it showed, but keeping from `current` what `same_edits` leaves out, the links routing
+    /// too unless it changed since `from`, the state `current` replaces.
+    pub(crate) fn back_over(&self, from: &Self, current: &Self) -> Self {
+        let mut sidebar = self.clone();
+        sidebar.profiles = current.profiles.clone();
+        sidebar.next_id = self.next_id.max(current.next_id);
+        if current.url_routing != from.url_routing {
+            sidebar.url_routing = current.url_routing.clone();
+        }
+        for space in &mut sidebar.spaces {
+            if let Ok(now) = current.space(space.id) {
+                space.collapsed = now.collapsed;
+            }
+        }
+        for (id, node) in &mut sidebar.nodes {
+            if let (NodeKind::Tab(tab), Some(NodeKind::Tab(now))) =
+                (&mut node.kind, current.nodes.get(id).map(|n| &n.kind))
+            {
+                let name = (tab.saved_url.take(), tab.name.take());
+                *tab = now.clone();
+                (tab.saved_url, tab.name) = name;
+            }
+        }
+        let mut view = self.view();
+        view.collapsed = current.view().collapsed;
+        sidebar.set_view(&view);
+        sidebar
     }
 
     fn is_split(&self, id: NodeId) -> bool {

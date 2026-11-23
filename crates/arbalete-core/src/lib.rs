@@ -10,4 +10,5 @@ pub mod import;
 pub mod search;
 pub mod sidebar;
 pub mod store;
+pub mod undo;
 pub mod url_routing;
