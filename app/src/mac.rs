@@ -415,6 +415,15 @@ define_class!(
                 item.setState(if on_top { NSControlStateValueOn } else { NSControlStateValueOff });
                 return Bool::new(window.is_some());
             }
+            // Like Arc's and Chrome's, greyed when the shown page cannot act on them.
+            let page = [
+                (sel!(arbaleteBack:), Command::Back),
+                (sel!(arbaleteForward:), Command::Forward),
+                (sel!(arbaleteStop:), Command::Stop),
+            ];
+            if let Some((_, command)) = page.iter().find(|(sel, _)| action == Some(*sel)) {
+                return Bool::new(crate::shell::can_run(command));
+            }
             if action == Some(sel!(arbaleteCheckForUpdates:)) {
                 return Bool::new(crate::native::can_check_for_updates());
             }
