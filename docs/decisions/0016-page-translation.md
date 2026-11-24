@@ -37,11 +37,14 @@ Pages are translated by macOS, on the device, from macOS 26.
 - Like Arc's, a button by the address shows on a page in another language; it opens a popover: Translate, or
   Show Original once translated, always translating the language, never translating the language or the site.
   It does not open on its own: the button is the offer.
-- Translating, the script hands the app the page's text nodes, in batches, skipping code, editable text and
-  what the page marks `translate="no"`; macOS translates them to the user's first preferred language, and the
-  script puts them in place, keeping the originals to show again. macOS takes seconds a batch: the text near
-  the viewport is handed first, the rest as it scrolls near. Text the page adds later is translated too.
-  A language not downloaded yet is downloaded through the system's sheet, from the popover.
+- Translating, the script hands the app the page's text, in batches, skipping code, editable text and what
+  the page marks `translate="no"`; macOS translates it to the user's first preferred language, and the script
+  puts it in place, keeping the originals to show again. Text the page adds later is translated too. A language not
+  downloaded yet is downloaded through the system's sheet, from the popover.
+- macOS takes a moment for each sentence it translates, one after the other, whatever the batches, sessions
+  or texts joined (measured: a third of a second a sentence, a sixth for a menu item): the work is cut to the
+  text read. The text near the viewport is handed first, the rest as it scrolls near, in batches of 5 so the
+  first show at once; a text translated once in the page, like a repeated "Edit", is not handed again.
 - The choices are the app's settings: a language always or never translated, a site never translated. A site
   never translated offers nothing; a language always translated is translated as its pages load. The settings'
   Advanced pane lists them, to forget them.
@@ -50,9 +53,10 @@ Pages are translated by macOS, on the device, from macOS 26.
 
 - No CEF patch and no text leaves the device. Translation is macOS's: its languages, and its quality.
 - Before macOS 26 no page offers translation.
-- A long page takes a while: macOS translates a batch of 20 texts in seconds, one batch after the other.
+- A long page takes a while to translate whole: about a third of a second a sentence.
 - Text is translated node by node: a sentence split by markup, like a word in bold or a link, is translated in
-  pieces.
+  pieces. macOS keeps marks like `<g0>…</g0>` around them only some of the time (2 to 4 sentences out of 5,
+  measured), dropping words with them, so sentences are not joined.
 - Only the main frame is translated, its text nodes only: frames, attributes like `placeholder` or `alt`, and
   the title stay as they are.
 - A page that rewrites its text nodes may undo a translation, or be confused by one, as with any page
