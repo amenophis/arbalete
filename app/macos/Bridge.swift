@@ -823,7 +823,6 @@ final class NativeWindow {
         // leaves it open.
         let findSurface = Surface(in: window, radius: 5) { FindView(bar: find) }
         findSurface.edgeless()
-        find.takesKeyboard = { [weak findSurface] in findSurface?.takesKeyboard = $0 }
         surfaces["find"] = findSurface
         let site = SiteControls(app: app)
         siteControls = site
