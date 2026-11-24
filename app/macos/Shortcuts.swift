@@ -130,6 +130,8 @@ private let shortcutDescriptions: [String: String] = [
     "zoomOut": "Shrinks the page.",
     "viewSource": "Opens the page's source in a new tab.",
     "devTools": "Opens the developer tools for the page shown.",
+    "javaScriptConsole": "Opens the developer tools on their console.",
+    "inspectElements": "Picks an element of the page to inspect in the developer tools.",
     "back": "Goes back to the page visited before in this tab.",
     "forward": "Goes forward to the page visited after in this tab.",
     "history": "Shows the pages visited.",
