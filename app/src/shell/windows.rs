@@ -244,6 +244,7 @@ pub fn close() {
     if let Some((window, _, _)) = CHROME_PAGE.with_borrow(Clone::clone) {
         window.close();
     }
+    expire_closed_pages(true);
     for host in STRAYS
         .with_borrow(Clone::clone)
         .iter()

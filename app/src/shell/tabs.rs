@@ -541,6 +541,10 @@ pub(super) fn reopen_tab(rank: usize) {
         }
         tab
     });
+    // Its page, with its history, if it is kept still.
+    if let Some(closed) = closed.id {
+        reopen_page(closed, tab);
+    }
     // The tabs closed beside it go back beside it again.
     STATE.with_borrow_mut(|state| {
         for other in &mut state.closed {
