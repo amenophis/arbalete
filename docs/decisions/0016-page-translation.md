@@ -39,7 +39,8 @@ Pages are translated by macOS, on the device, from macOS 26.
   It does not open on its own: the button is the offer.
 - Translating, the script hands the app the page's text nodes, in batches, skipping code, editable text and
   what the page marks `translate="no"`; macOS translates them to the user's first preferred language, and the
-  script puts them in place, keeping the originals to show again. Text the page adds later is translated too.
+  script puts them in place, keeping the originals to show again. macOS takes seconds a batch: the text near
+  the viewport is handed first, the rest as it scrolls near. Text the page adds later is translated too.
   A language not downloaded yet is downloaded through the system's sheet, from the popover.
 - The choices are the app's settings: a language always or never translated, a site never translated. A site
   never translated offers nothing; a language always translated is translated as its pages load. The settings'
@@ -49,6 +50,7 @@ Pages are translated by macOS, on the device, from macOS 26.
 
 - No CEF patch and no text leaves the device. Translation is macOS's: its languages, and its quality.
 - Before macOS 26 no page offers translation.
+- A long page takes a while: macOS translates a batch of 20 texts in seconds, one batch after the other.
 - Text is translated node by node: a sentence split by markup, like a word in bold or a link, is translated in
   pieces.
 - Only the main frame is translated, its text nodes only: frames, attributes like `placeholder` or `alt`, and
