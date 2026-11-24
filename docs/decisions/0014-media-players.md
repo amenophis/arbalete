@@ -28,8 +28,9 @@ The players work through the page's own APIs, from the DevTools session the app 
 
 - The sound's watch, in its isolated world, also tells the frame's Media Session `metadata`: title, artist and
   its largest artwork. A frame says nothing until it first plays sound. A script in the page's world hands it
-  each media element the page plays without adding it to its document, like Spotify's player, whose events
-  reach neither the document nor the window.
+  each media element the page plays without adding it to its document, like Spotify's player or a call's voices,
+  whose events reach neither the document nor the window, and tells it whether a running audio context plays to
+  the speakers, like a call's mix.
 - A script in the page's world keeps the handlers the page gives its Media Session's actions, and tells the app,
   through a binding, which track and call actions it offers and whether its microphone and camera are on.
 - Playing and pausing run the page's handler, or without one its media elements, in each frame that played;
@@ -44,7 +45,8 @@ The players work through the page's own APIs, from the DevTools session the app 
 
 - No CEF patch: the players work with any site that plays through media elements, and a call's buttons show only
   for a page that offers the Media Session's call actions, like Google Meet.
-- A page playing only through Web Audio, without media elements, shows no player, like it shows no speaker.
+- A page whose running audio context plays to the speakers counts as playing sound even while silent, unlike
+  Chromium's audible state, which listens to the sound itself.
 - The page's world sees the binding and the kept actions, as it saw the kept `enterpictureinpicture` handler
   before (Picture in Picture now reads the same kept actions).
 - A page frozen after being left paused runs again as its player plays it.

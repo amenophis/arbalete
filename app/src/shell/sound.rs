@@ -3,7 +3,8 @@
 //!
 //! CEF tells nothing of it (Chromium's audible state stays inside), so each frame of a page
 //! watches its media elements, in a world of its own, and tells whether one plays with sound:
-//! those of its document, and those it plays without adding them to it, like Spotify's.
+//! those of its document, and those it plays without adding them to it, like Spotify's player
+//! or a call's voices, and whether its Web Audio plays to the speakers, like a call's mix.
 
 use super::*;
 
@@ -17,8 +18,10 @@ const WORLD: &str = "arbalete-sound";
 const WATCH_SOUND: &str = r#"(() => {
     const frame = Math.random().toString(36).slice(2);
     let told = null;
-    // Media the page plays without adding it to its document, handed by HAND_DETACHED.
+    // Media the page plays without adding it to its document, handed by HAND_DETACHED, and
+    // whether its Web Audio plays to the speakers.
     const detached = new Set();
+    let webAudio = false;
     const tell = (audible) => {
         if ((!audible && told === null) || typeof __arbaleteSound !== "function") return;
         const metadata = navigator.mediaSession?.metadata;
@@ -28,13 +31,16 @@ const WATCH_SOUND: &str = r#"(() => {
         told = said;
         __arbaleteSound(said);
     };
-    const check = () => tell([...document.querySelectorAll("video, audio"), ...detached].some(
-        (media) => !media.paused && !media.ended && !media.muted && media.volume > 0));
+    const check = () => tell(webAudio || [...document.querySelectorAll("video, audio"), ...detached]
+        .some((media) => !media.paused && !media.ended && !media.muted && media.volume > 0));
     // Playing media's time updating also catches its Media Session's metadata changing, like a
     // player going to its next track in the same media element.
     const types = ["playing", "pause", "ended", "emptied", "volumechange", "loadedmetadata",
         "timeupdate"];
     for (const type of types) addEventListener(type, check, true);
+    for (const [type, on] of [["arbalete-audio-on", true], ["arbalete-audio-off", false]]) {
+        document.addEventListener(type, () => { webAudio = on; check(); });
+    }
     // A detached media element's events reach neither its document nor its window.
     document.addEventListener("arbalete-media", (event) => {
         const media = event.relatedTarget;
@@ -48,15 +54,45 @@ const WATCH_SOUND: &str = r#"(() => {
 })()"#;
 
 /// Hands the sound's watch, in its world, each media element the page plays without adding it to
-/// its document, as the related target of an event on the document: only the page's world sees
-/// it played.
+/// its document, as the related target of an event on the document, and tells it whether a
+/// running audio context of the page plays to the speakers: only the page's world sees them.
 const HAND_DETACHED: &str = r#"(() => {
+    const hand = (media) => {
+        if (!media.isConnected) {
+            document.dispatchEvent(new FocusEvent("arbalete-media", { relatedTarget: media }));
+        }
+    };
     const play = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
-        if (!this.isConnected) {
-            document.dispatchEvent(new FocusEvent("arbalete-media", { relatedTarget: this }));
-        }
+        hand(this);
         return play.apply(this, arguments);
+    };
+    // A call's voices may play from a stream given to an element that plays it by itself.
+    const source = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", { ...source, set(stream) {
+        hand(this);
+        source.set.call(this, stream);
+    } });
+    if (typeof AudioNode === "undefined") return;
+    const watched = new WeakSet();
+    const running = new Set();
+    const update = (context) => {
+        const before = running.size > 0;
+        if (context.state === "running") running.add(context); else running.delete(context);
+        if (before !== running.size > 0) {
+            document.dispatchEvent(new Event(running.size ? "arbalete-audio-on" : "arbalete-audio-off"));
+        }
+    };
+    const connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (target) {
+        const context = this.context;
+        if (target instanceof AudioDestinationNode && context instanceof AudioContext
+            && !watched.has(context)) {
+            watched.add(context);
+            context.addEventListener("statechange", () => update(context));
+            update(context);
+        }
+        return connect.apply(this, arguments);
     };
 })()"#;
 
