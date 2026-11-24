@@ -152,7 +152,9 @@ fn page(tab: NodeId) -> Option<()> {
                         hidden_since: None,
                         frozen: false,
                         capturing: false,
-                        audible: HashSet::new(),
+                        frames: HashMap::new(),
+                        played: false,
+                        session: None,
                     },
                 )
             });
@@ -252,6 +254,7 @@ pub(super) fn content_created(profile: ProfileId, browser: Option<&mut Browser>)
     let Some(browser) = browser else { return };
     extensions::page_created(profile, browser);
     picture_page_created(browser);
+    media_page_created(browser);
     sound_page_created(browser);
     #[cfg(target_os = "macos")]
     cover_revived(Some(browser), true);
@@ -392,6 +395,8 @@ pub(super) fn wake_page(tab: NodeId) {
     let frozen = PAGES.with_borrow_mut(|pages| {
         let live = pages.get_mut(&tab)?;
         live.hidden_since = None;
+        // Media paused while its page shows has no player once the page is left.
+        live.played = live.frames.values().any(|media| media.audible);
         Some((std::mem::take(&mut live.frozen), live.browser.host()))
     });
     UNLOADED.with_borrow_mut(|unloaded| unloaded.remove(&tab));

@@ -10,28 +10,16 @@ pub(super) fn page_hidden(tab: NodeId) {
     post_task(ThreadId::UI, Some(&mut EnterPicture::new(tab)));
 }
 
-/// Keeps the handler a page gives the Media Session's `enterpictureinpicture` action, which
-/// Chromium runs as a call's tab is left and Google Meet answers with its Picture in Picture
-/// window. Like Chromium's, the window goes with its page.
-const KEEP_ENTER_PICTURE: &str = r#"(() => {
-    const session = navigator.mediaSession;
-    if (!session || !self.documentPictureInPicture || "__arbaleteEnterPicture" in session) return;
-    let enter = null;
-    Object.defineProperty(session, "__arbaleteEnterPicture", { get: () => enter });
-    const set = session.setActionHandler.bind(session);
-    session.setActionHandler = (action, handler) => {
-        if (action === "enterpictureinpicture") enter = handler;
-        return set(action, handler);
-    };
-    addEventListener("pagehide", () => documentPictureInPicture.window?.close());
-})()"#;
+/// Closes the page's Picture in Picture window with its page, like Chromium's.
+const CLOSE_PICTURE_WITH_PAGE: &str =
+    r#"addEventListener("pagehide", () => self.documentPictureInPicture?.window?.close())"#;
 
-/// Starts keeping a tab's page's `enterpictureinpicture` handler, in its documents to come and
-/// its current one.
+/// Closes a tab's page's Picture in Picture window with it, in its documents to come and its
+/// current one.
 pub(super) fn picture_page_created(browser: &Browser) {
     let Some(host) = browser.host() else { return };
     // New documents run the scripts added for them only while the Page domain is enabled.
-    let params = json!({ "source": KEEP_ENTER_PICTURE, "runImmediately": true });
+    let params = json!({ "source": CLOSE_PICTURE_WITH_PAGE, "runImmediately": true });
     for message in [
         json!({ "id": unanswered_id(), "method": "Page.enable" }),
         json!({ "id": unanswered_id(), "method": "Page.addScriptToEvaluateOnNewDocument", "params": params }),
@@ -40,16 +28,17 @@ pub(super) fn picture_page_created(browser: &Browser) {
     }
 }
 
-/// During a call (`call`), runs the page's `enterpictureinpicture` handler, like Chromium's
-/// automatic Picture in Picture; otherwise opens the video window on its video playing with
+/// During a call (`call`), runs the handler the page gives its Media Session's
+/// `enterpictureinpicture` action (kept by media.rs), which Google Meet answers with its Picture
+/// in Picture window, like Chromium's automatic Picture in Picture; otherwise opens the video window on its video playing with
 /// sound. Not when the page shows a window already, and the window it opens closes as the page
 /// shows again. Chromium only opens either for a user's gesture: the request stands for the
 /// user's, who left the tab.
 const ENTER_PICTURE: &str = r#"(async (call) => {
     const pictures = self.documentPictureInPicture;
     if (document.pictureInPictureElement || pictures?.window) return;
-    const enter = navigator.mediaSession?.__arbaleteEnterPicture;
-    if (call && enter) {
+    const enter = navigator.mediaSession?.__arbaleteActions?.enterpictureinpicture;
+    if (call && enter && pictures) {
         enter({ action: "enterpictureinpicture" });
         const shown = () => {
             if (document.hidden) return;

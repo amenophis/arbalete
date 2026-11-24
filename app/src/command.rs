@@ -438,6 +438,8 @@ pub enum Command {
     SetPinnedUrl(NodeId, String),
     /// Mutes a tab or gives it its sound back, from its menu.
     ToggleMute(NodeId),
+    /// Acts on a tab's media or call from its player in the sidebar.
+    Media(NodeId, MediaAction),
     /// Moves a tab or a folder to an index among a container's or a folder's children, as the
     /// app counts them once the node has left: the node, the parent and the index.
     Move(NodeId, NodeId, usize),
@@ -627,6 +629,24 @@ pub struct ExtensionToAdd {
     pub id: String,
 }
 
+/// What a media player in the sidebar does to its tab's page (Command::Media).
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MediaAction {
+    Play,
+    Pause,
+    PreviousTrack,
+    NextTrack,
+    /// Hides the player of media paused, until it plays again.
+    Dismiss,
+    /// Mutes the call's microphone, or no longer.
+    ToggleMicrophone,
+    /// Turns the call's camera off, or on.
+    ToggleCamera,
+    /// Leaves the call.
+    HangUp,
+}
+
 /// What to do with a download (Command::Download).
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -694,8 +714,8 @@ impl HitTarget {
 #[cfg(test)]
 mod tests {
     use super::{
-        Button, ButtonView, Command, InspectorPanel, LittleAction, PeekAction, Setting,
-        ShortcutEdit, Target,
+        Button, ButtonView, Command, InspectorPanel, LittleAction, MediaAction, PeekAction,
+        Setting, ShortcutEdit, Target,
     };
     use arbalete_core::sidebar::DownloadLocation;
 
@@ -767,6 +787,14 @@ mod tests {
         assert!(matches!(
             parse(r#"{"name":"rename","args":[12,"Work"]}"#),
             Some(Command::Rename(_, title)) if title == "Work"
+        ));
+        assert!(matches!(
+            parse(r#"{"name":"media","args":[4,"toggle-microphone"]}"#),
+            Some(Command::Media(_, MediaAction::ToggleMicrophone))
+        ));
+        assert!(matches!(
+            parse(r#"{"name":"media","args":[4,"next-track"]}"#),
+            Some(Command::Media(_, MediaAction::NextTrack))
         ));
         assert!(matches!(
             parse(r#"{"name":"split","args":[1,2,true]}"#),

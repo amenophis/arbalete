@@ -266,6 +266,7 @@ fn run_command(command: Command) {
                 mute_page(tab);
             }
         }
+        (Command::Media(tab, action), _) => media_command(tab, action),
         (Command::Move(id, parent, index), _) => {
             if update_sidebar(|sidebar| sidebar.move_node(id, parent, index)).is_ok() {
                 show_selected();
