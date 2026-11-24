@@ -274,7 +274,7 @@ pub(super) fn undo_close() {
 fn show_next(next: Option<NodeId>) {
     match next {
         Some(next) => select_tab(next),
-        None => hide_content(),
+        None => empty_card(),
     }
 }
 

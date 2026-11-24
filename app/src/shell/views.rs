@@ -59,7 +59,7 @@ pub(super) fn show_selected() {
     });
     prune_pages();
     let Some(tab) = tab.filter(|_| selected().is_some()) else {
-        hide_content();
+        empty_card();
         return;
     };
     // A split's tabs show together, the selected one focused.
@@ -438,11 +438,11 @@ fn space_tint(tab: NodeId) -> u32 {
 /// Tells the UI how the shown page stands: whether it loads and its history are its own.
 fn send_page_state() {
     let browser = content();
-    // A page about to open loads; an Easel's board never does.
-    let board = win().shown.get().is_some_and(has_easel_view);
+    // A page about to open loads; an Easel's board never does, nor an empty card.
+    let opening = win().shown.get().is_some_and(|tab| !has_easel_view(tab));
     let loading = browser
         .as_ref()
-        .map_or(!board, |browser| browser.is_loading() == 1);
+        .map_or(opening, |browser| browser.is_loading() == 1);
     update_page(|page| {
         page.loading = loading;
         page.can_go_back = browser
@@ -452,6 +452,12 @@ fn send_page_state() {
             .as_ref()
             .is_some_and(|browser| browser.can_go_forward() == 1);
     });
+}
+
+/// Leaves the card empty, an empty Space's panel: no page shows, so none goes back or forward.
+pub(super) fn empty_card() {
+    hide_content();
+    send_page_state();
 }
 
 /// Hides the shown page, which keeps running. Without one, the card shows its own color, an empty
