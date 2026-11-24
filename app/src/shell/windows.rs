@@ -481,9 +481,42 @@ pub fn window_activated(id: u32, active: bool) {
     }
     if active {
         picture_shown_back();
-    } else {
-        app_left(id);
     }
+}
+
+thread_local! {
+    /// The windows no longer in sight, whose video may float.
+    pub(super) static OUT_OF_SIGHT: RefCell<HashSet<u32>> = RefCell::default();
+}
+
+/// The window `id` shows to the user again, or no longer: its video floats only once it no
+/// longer shows, not as the window merely leaves the front beside another app's, and comes back
+/// as the window shows again.
+pub fn window_visible(id: u32, visible: bool, away: bool) {
+    let state = match (visible, away) {
+        (true, _) => "in sight",
+        (false, true) => "away, hidden or minimized",
+        (false, false) => "out of sight",
+    };
+    eprintln!("picture: window {id} {state}");
+    OUT_OF_SIGHT.with_borrow_mut(|windows| {
+        if visible {
+            windows.remove(&id)
+        } else {
+            windows.insert(id)
+        }
+    });
+    if !visible {
+        app_left(id, away);
+        return;
+    }
+    let current = FOCUSED.get();
+    if window_by_id(id).is_none() {
+        return;
+    }
+    focus(id);
+    picture_shown_back();
+    focus(current);
 }
 
 /// Whether the window `id` may close: every browser is asked to close, and it closes once they
