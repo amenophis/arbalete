@@ -53,6 +53,8 @@ final class AppModel: ObservableObject {
     @Published var siteControlsShown = false
     /// The folder or the tab whose name is being edited.
     @Published var renaming: Int?
+    /// The GitHub folders showing all their results, past the first `foldedRows`.
+    @Published var unfolded: Set<Int> = []
     /// The page's earlier or later pages, which a right click on Back or Forward asks for.
     @Published var history: PageHistory?
     /// The Space whose name or icon ("name" or "emoji") is edited in its header.
@@ -511,7 +513,7 @@ final class AppModel: ObservableObject {
         func find(_ items: [Item]) -> Item? {
             for item in items {
                 if item.id == id { return item }
-                if case .folder(_, _, _, let children) = item, let found = find(children) {
+                if case .folder(_, _, _, let children, _) = item, let found = find(children) {
                     return found
                 }
                 if case .split(_, let tabs) = item, let tab = tabs.first(where: { $0.id == id }) {
@@ -537,7 +539,7 @@ final class AppModel: ObservableObject {
         func find(_ items: [Item], _ parent: Int) -> (Int, Int)? {
             for (index, item) in items.enumerated() {
                 if item.id == id { return (parent, index) }
-                if case .folder(let folder, _, _, let children) = item,
+                if case .folder(let folder, _, _, let children, _) = item,
                     let found = find(children, folder)
                 {
                     return found
@@ -576,7 +578,7 @@ final class AppModel: ObservableObject {
     private func pins(_ container: Int, in page: SpacePage) -> Bool {
         func holds(_ items: [Item]) -> Bool {
             items.contains { item in
-                guard case .folder(let id, _, _, let children) = item else { return false }
+                guard case .folder(let id, _, _, let children, _) = item else { return false }
                 return id == container || holds(children)
             }
         }

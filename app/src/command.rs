@@ -141,6 +141,8 @@ pub enum BoostEditorAction {
 pub enum Command {
     /// The UI is listening: send it the current state.
     Ready,
+    /// The app came in front.
+    Activated,
     Back,
     Forward,
     /// Shows the page's earlier pages, or its later ones, at the pointer, from a right click on
@@ -360,6 +362,16 @@ pub enum Command {
     /// Creates a folder for the UI to rename, at the end of the displayed Space's pinned tabs,
     /// or of a folder, from its menu.
     NewFolder(Option<NodeId>),
+    /// Adds a GitHub folder at the end of a Space's pinned tabs, from the Space's menu
+    /// (decision 0013).
+    NewGithubFolder(NodeId),
+    /// Asks github.com again for a GitHub folder's search, from its menu.
+    RefreshGithubFolder(NodeId),
+    /// Shows one of `arbalete_core::github::LISTS`, by its index, in a GitHub folder too, or
+    /// no more.
+    ToggleGithubList(NodeId, usize),
+    /// Hides a repository, as "owner/name", from a GitHub folder, or shows it again.
+    ToggleGithubRepository(NodeId, String),
     /// Puts selected tabs in a new folder for the UI to rename (Sidebar::folder_with).
     FolderWith(Vec<NodeId>),
     /// Opens a new Easel in "Today", from the "+" menu or the Command Bar (decision 0009).

@@ -48,6 +48,7 @@ mod content;
 mod downloads_ui;
 mod easels;
 mod find;
+mod github_folders;
 mod history_ui;
 mod import_cookies;
 mod import_ui;
@@ -86,6 +87,7 @@ pub use content::*;
 use downloads_ui::*;
 use easels::*;
 use find::*;
+use github_folders::*;
 use history_ui::*;
 use import_ui::*;
 use inspector::*;
@@ -843,6 +845,25 @@ impl UiState {
             .collect()
     }
 
+    /// A folder's rows, a GitHub folder's with what each says of its result and whether it is
+    /// new (decision 0013).
+    fn github_items(
+        &self,
+        folder: NodeId,
+        mut items: Vec<serde_json::Value>,
+    ) -> Vec<serde_json::Value> {
+        let children = &self.sidebar.node(folder).expect("a known folder").children;
+        for (item, &id) in items.iter_mut().zip(children) {
+            if let Some(status) = self.sidebar.github_status(id) {
+                item["subtitle"] = json!(status);
+            }
+            if self.sidebar.github_unseen(id) {
+                item["unseen"] = json!(true);
+            }
+        }
+        items
+    }
+
     /// The tabs and folders inside a container or a folder, folders with their own content.
     fn items(&self, parent: NodeId, profile: ProfileId) -> Vec<serde_json::Value> {
         let node = self.sidebar.node(parent).expect("a known container");
@@ -850,11 +871,17 @@ impl UiState {
             .iter()
             .filter_map(|&id| match &self.sidebar.node(id)?.kind {
                 NodeKind::Tab(tab) => Some(tab_json(id, tab, profile)),
-                NodeKind::Folder { title, expanded } => Some(json!({
+                NodeKind::Folder {
+                    title,
+                    expanded,
+                    github,
+                } => Some(json!({
                     "id": id,
                     "title": title,
                     "expanded": expanded,
-                    "children": self.items(id, profile),
+                    "children": self.github_items(id, self.items(id, profile)),
+                    // Its row warns when its last update failed or SSO hides results.
+                    "github": github.as_ref().map(|github| json!({ "warning": github.warns() })),
                 })),
                 NodeKind::Split => Some(json!({ "id": id, "split": self.tabs(id, profile) })),
                 NodeKind::Container => None,

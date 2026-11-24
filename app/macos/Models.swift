@@ -132,19 +132,30 @@ struct Tab: Decodable, Identifiable {
     var recording: Bool?
     /// A site shares it: its row is framed in yellow.
     var shared: Bool?
+    /// What its row says of it under its title, like a GitHub folder's result's status.
+    var subtitle: String?
+    /// A GitHub folder's result new since its first ones, not shown since: its row shows a dot.
+    var unseen: Bool?
 
     /// Its title, or its address without one.
     var label: String { title.isEmpty ? url : title }
 }
 
+/// What a GitHub folder's row tells of it (decision 0013).
+struct GitHubFolder: Decodable, Equatable {
+    /// Its last update failed, or an organization's single sign-on hides some of its results.
+    let warning: Bool
+}
+
 /// A tab, a folder, or two tabs split in one row.
 enum Item: Decodable, Identifiable {
     case tab(Tab)
-    case folder(id: Int, title: String, expanded: Bool, children: [Item])
+    /// A GitHub folder lists pull requests (decision 0013).
+    case folder(id: Int, title: String, expanded: Bool, children: [Item], github: GitHubFolder?)
     case split(id: Int, tabs: [Tab])
 
     private enum Keys: String, CodingKey {
-        case id, title, expanded, children, split
+        case id, title, expanded, children, split, github
     }
 
     init(from decoder: Decoder) throws {
@@ -153,7 +164,8 @@ enum Item: Decodable, Identifiable {
         if let children = try keys.decodeIfPresent([Item].self, forKey: .children) {
             self = .folder(
                 id: id, title: try keys.decode(String.self, forKey: .title),
-                expanded: try keys.decode(Bool.self, forKey: .expanded), children: children)
+                expanded: try keys.decode(Bool.self, forKey: .expanded), children: children,
+                github: try keys.decodeIfPresent(GitHubFolder.self, forKey: .github))
         } else if let tabs = try keys.decodeIfPresent([Tab].self, forKey: .split) {
             self = .split(id: id, tabs: tabs)
         } else {
@@ -164,7 +176,7 @@ enum Item: Decodable, Identifiable {
     var id: Int {
         switch self {
         case .tab(let tab): tab.id
-        case .folder(let id, _, _, _), .split(let id, _): id
+        case .folder(let id, _, _, _, _), .split(let id, _): id
         }
     }
 
@@ -172,7 +184,7 @@ enum Item: Decodable, Identifiable {
     var tabs: [Tab] {
         switch self {
         case .tab(let tab): [tab]
-        case .folder(_, _, _, let children): children.flatMap(\.tabs)
+        case .folder(_, _, _, let children, _): children.flatMap(\.tabs)
         case .split(_, let tabs): tabs
         }
     }

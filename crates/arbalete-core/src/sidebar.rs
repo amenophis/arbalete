@@ -8,10 +8,11 @@
 //! archived tabs and its URL routing are saved as JSON (crate::store); each profile's history is a
 //! SQLite database of its own (crate::history).
 
+use crate::github::{self, Item};
 use crate::search::SearchEngine;
 use crate::url_routing::{Destination, UrlRouting};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProfileId(u64);
@@ -249,6 +250,9 @@ pub enum NodeKind {
     Folder {
         title: String,
         expanded: bool,
+        /// A GitHub folder's search, whose results are its tabs (decision 0013).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        github: Option<github::Folder>,
     },
     Tab(Tab),
     /// From two to `MAX_SPLIT_TABS` tabs side by side in one row, its children; it never holds
@@ -457,6 +461,9 @@ pub struct Sidebar {
     /// saved, it does not outlive a quit or a crash.
     #[serde(skip)]
     draft: Option<SpaceId>,
+    /// Opening a pull request no longer adds a GitHub folder to its Space (decision 0013).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    github_on_pull_request_off: bool,
 }
 
 /// How a split lays its tabs out: along one axis, each taking its factor of the room.
@@ -503,6 +510,7 @@ impl Sidebar {
             url_routing: UrlRouting::default(),
             splits: HashMap::new(),
             draft: None,
+            github_on_pull_request_off: false,
         }
     }
 
@@ -1378,6 +1386,13 @@ impl Sidebar {
     /// Shows `tab` in `space`. A favorite is shown in whichever Space it is selected from.
     pub fn select(&mut self, space: SpaceId, tab: NodeId) -> Result<(), Error> {
         self.check_tab(tab)?;
+        // A GitHub folder's new result is new no more.
+        if let Some(url) = self.result_url(tab)
+            && let Some(parent) = self.nodes[&tab].parent
+            && let Some(github) = self.github_folder_mut(parent)
+        {
+            github.unseen.remove(&url);
+        }
         let space = self.spaces.iter_mut().find(|s| s.id == space);
         space.ok_or(Error::UnknownSpace)?.selected = Some(tab);
         Ok(())
@@ -1472,8 +1487,269 @@ impl Sidebar {
         let folder = NodeKind::Folder {
             title: title.to_string(),
             expanded: true,
+            github: None,
         };
         Ok(self.insert(Some(parent), folder))
+    }
+
+    /// Adds a GitHub folder, "Pull Requests", showing all of `github::LISTS`, at the end of
+    /// `parent`, empty until `fill_github_folder` fills it.
+    pub fn add_github_folder(&mut self, parent: NodeId) -> Result<NodeId, Error> {
+        let folder = self.add_folder(parent, "Pull Requests")?;
+        if let NodeKind::Folder { github, .. } =
+            &mut self.nodes.get_mut(&folder).expect("added").kind
+        {
+            *github = Some(github::Folder {
+                lists: github::LISTS
+                    .iter()
+                    .map(|list| list.key.to_string())
+                    .collect(),
+                ..Default::default()
+            });
+        }
+        Ok(folder)
+    }
+
+    /// The GitHub folders and the searches they list.
+    pub fn github_folders(&self) -> Vec<(NodeId, Vec<&'static github::List>)> {
+        self.nodes
+            .values()
+            .filter_map(|node| match &node.kind {
+                NodeKind::Folder {
+                    github: Some(folder),
+                    ..
+                } => {
+                    let lists = folder.lists.iter().filter_map(|key| github::list(key));
+                    Some((node.id, lists.collect()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Shows a list in a GitHub folder too, or no more, in `github::LISTS`'s order; it always
+    /// shows one.
+    pub fn toggle_github_list(&mut self, folder: NodeId, key: &str) -> Result<(), Error> {
+        let github = self.github_folder_mut(folder).ok_or(Error::NotAFolder)?;
+        let shown = github.lists.iter().any(|list| list == key);
+        if shown && github.lists.len() == 1 {
+            return Ok(());
+        }
+        let lists = github::LISTS.iter().map(|list| list.key);
+        github.lists = lists
+            .filter(|&list| (list == key) != github.lists.iter().any(|shown| shown == list))
+            .map(str::to_string)
+            .collect();
+        Ok(())
+    }
+
+    /// Makes a GitHub folder's tabs a search's results, in their order, but those the user
+    /// removed and those merged or closed it did not hold: the tabs of results it already holds
+    /// stay, with their pages, new results get pinned tabs, and the rest goes, but a tab shown. `sso` are the organizations whose single
+    /// sign-on hides some, `now` the time in milliseconds since the Unix epoch. Returns whether
+    /// anything its rows show changed.
+    pub fn fill_github_folder(
+        &mut self,
+        folder: NodeId,
+        items: &[Item],
+        sso: &[String],
+        now: u64,
+    ) -> Result<bool, Error> {
+        let Some(github) = self.github_folder(folder).cloned() else {
+            return Err(Error::NotAFolder);
+        };
+        let before = self.nodes[&folder].children.clone();
+        let held: Vec<_> = before
+            .iter()
+            .filter_map(|&id| self.result_url(id))
+            .collect();
+        // Like Arc's, a pull request merged or closed stays, saying so, but only one it showed
+        // open: it never adds one.
+        let shown = |item: &&Item| {
+            let closed = matches!(item.status.as_deref(), Some("Merged" | "Closed"));
+            !github.hidden.contains(&item.url)
+                && github::repository(&item.url)
+                    .is_none_or(|repository| !github.hidden_repositories.contains(&repository))
+                && (!closed || held.contains(&item.url))
+        };
+        let mut kept = Vec::new();
+        let mut unseen = github.unseen.clone();
+        for item in items.iter().filter(shown) {
+            let found = before.iter().copied().find(|&id| {
+                !kept.contains(&id)
+                    && matches!(&self.nodes[&id].kind,
+                        NodeKind::Tab(tab) if tab.saved_url.as_ref().unwrap_or(&tab.url) == &item.url)
+            });
+            kept.push(found.unwrap_or_else(|| {
+                // New, unless the folder was empty: a result is new to what it showed.
+                if !before.is_empty() {
+                    unseen.insert(item.url.clone());
+                }
+                let tab = Tab::new(&item.url, &item.title, true);
+                self.insert(None, NodeKind::Tab(tab))
+            }));
+        }
+        // A tab shown stays last until it is not, so that a result read is not taken away.
+        let shown = |id: &NodeId| self.spaces.iter().any(|space| space.selected == Some(*id));
+        let stays: Vec<_> = before
+            .iter()
+            .filter(|id| !kept.contains(id) && shown(id))
+            .copied()
+            .collect();
+        kept.extend(stays);
+        let statuses: BTreeMap<_, _> = items
+            .iter()
+            .filter_map(|item| Some((item.url.clone(), item.status.clone()?)))
+            .collect();
+        unseen.retain(|url| items.iter().any(|item| &item.url == url));
+        let sso: BTreeSet<_> = sso.iter().cloned().collect();
+        let told = github.statuses != statuses
+            || github.unseen != unseen
+            || github.sso != sso
+            || github.failed;
+        let github = self.github_folder_mut(folder).expect("a GitHub folder");
+        github.statuses = statuses;
+        github.unseen = unseen;
+        github.sso = sso;
+        github.fetched = Some(now);
+        github.failed = false;
+        if kept == before {
+            return Ok(told);
+        }
+        for &id in &kept {
+            self.nodes.get_mut(&id).expect("a kept tab").parent = Some(folder);
+        }
+        let gone: Vec<_> = before.into_iter().filter(|id| !kept.contains(id)).collect();
+        *self.children_mut(folder) = kept.into_iter().chain(gone.iter().copied()).collect();
+        for id in gone {
+            self.drop_node(id)?;
+        }
+        Ok(true)
+    }
+
+    /// Notes that a GitHub folder's update failed; returns whether it had not already.
+    pub fn fail_github_folder(&mut self, folder: NodeId) -> Result<bool, Error> {
+        let github = self.github_folder_mut(folder).ok_or(Error::NotAFolder)?;
+        Ok(!std::mem::replace(&mut github.failed, true))
+    }
+
+    /// The repositories of a GitHub folder's results and those it hides, sorted, each with
+    /// whether the folder shows it.
+    pub fn github_repositories(&self, folder: NodeId) -> Vec<(String, bool)> {
+        let Some(github) = self.github_folder(folder) else {
+            return Vec::new();
+        };
+        let shown = self.nodes[&folder]
+            .children
+            .iter()
+            .filter_map(|&id| github::repository(&self.result_url(id)?));
+        let mut repositories: Vec<_> = shown
+            .filter(|repository| !github.hidden_repositories.contains(repository))
+            .map(|repository| (repository, true))
+            .chain(
+                github
+                    .hidden_repositories
+                    .iter()
+                    .map(|r| (r.clone(), false)),
+            )
+            .collect();
+        repositories.sort();
+        repositories.dedup();
+        repositories
+    }
+
+    /// Hides a repository's results from a GitHub folder, its tabs going at once, or shows them
+    /// again from the next refresh.
+    pub fn toggle_github_repository(
+        &mut self,
+        folder: NodeId,
+        repository: &str,
+    ) -> Result<(), Error> {
+        let github = self.github_folder_mut(folder).ok_or(Error::NotAFolder)?;
+        if github.hidden_repositories.remove(repository) {
+            return Ok(());
+        }
+        github.hidden_repositories.insert(repository.to_string());
+        let gone: Vec<_> = self.nodes[&folder]
+            .children
+            .iter()
+            .copied()
+            .filter(|&id| {
+                self.result_url(id)
+                    .and_then(|url| github::repository(&url))
+                    .as_deref()
+                    == Some(repository)
+            })
+            .collect();
+        for id in gone {
+            self.drop_node(id)?;
+        }
+        Ok(())
+    }
+
+    /// What a GitHub folder's row says of its result, if `tab` is one: merged, a draft…
+    pub fn github_status(&self, tab: NodeId) -> Option<&str> {
+        let github = self.github_folder(self.nodes.get(&tab)?.parent?)?;
+        github
+            .statuses
+            .get(&self.result_url(tab)?)
+            .map(String::as_str)
+    }
+
+    /// Whether `tab` is a GitHub folder's result new since its first ones, not shown since.
+    pub fn github_unseen(&self, tab: NodeId) -> bool {
+        let github = self
+            .nodes
+            .get(&tab)
+            .and_then(|node| self.github_folder(node.parent?));
+        github.is_some_and(|github| {
+            self.result_url(tab)
+                .is_some_and(|url| github.unseen.contains(&url))
+        })
+    }
+
+    /// Whether opening a pull request adds a GitHub folder to its Space without one.
+    pub fn github_on_pull_request(&self) -> bool {
+        !self.github_on_pull_request_off
+    }
+
+    pub fn set_github_on_pull_request(&mut self, on: bool) {
+        self.github_on_pull_request_off = !on;
+    }
+
+    /// Where a GitHub folder goes, like Arc's, as `tab` opens a pull request: its Space's pinned
+    /// tabs, unless the Space has one or the user turned that off.
+    pub fn github_folder_wanted(&self, tab: NodeId) -> Option<NodeId> {
+        let space = self.space_of(tab)?;
+        let has_one = self
+            .github_folders()
+            .iter()
+            .any(|&(folder, _)| self.space_of(folder) == Some(space));
+        (self.github_on_pull_request() && !has_one)
+            .then(|| self.space(space).ok().map(|s| s.pinned))?
+    }
+
+    /// The page of a GitHub folder's result: its tab's saved url.
+    fn result_url(&self, id: NodeId) -> Option<String> {
+        match &self.nodes.get(&id)?.kind {
+            NodeKind::Tab(tab) => Some(tab.saved_url.clone().unwrap_or_else(|| tab.url.clone())),
+            _ => None,
+        }
+    }
+
+    /// What a GitHub folder keeps, if `id` is one.
+    pub fn github_folder(&self, id: NodeId) -> Option<&github::Folder> {
+        match &self.nodes.get(&id)?.kind {
+            NodeKind::Folder { github, .. } => github.as_ref(),
+            _ => None,
+        }
+    }
+
+    fn github_folder_mut(&mut self, id: NodeId) -> Option<&mut github::Folder> {
+        match &mut self.nodes.get_mut(&id)?.kind {
+            NodeKind::Folder { github, .. } => github.as_mut(),
+            _ => None,
+        }
     }
 
     pub fn rename_folder(&mut self, id: NodeId, new_title: &str) -> Result<(), Error> {
@@ -2210,8 +2486,22 @@ impl Sidebar {
     }
 
     /// Removes a tab, a folder or a split with everything it contains; the other tab of a split
-    /// left alone takes the split's place.
+    /// left alone takes the split's place. A result removed from a GitHub folder stays out of it.
     pub fn remove(&mut self, id: NodeId) -> Result<(), Error> {
+        let parent = self.movable(id)?;
+        // Like Arc's, the user deleting one does not want them added on their own.
+        if self.github_folder(id).is_some() {
+            self.github_on_pull_request_off = true;
+        }
+        if let Some(url) = self.result_url(id)
+            && let Some(github) = self.github_folder_mut(parent)
+        {
+            github.hidden.insert(url);
+        }
+        self.drop_node(id)
+    }
+
+    fn drop_node(&mut self, id: NodeId) -> Result<(), Error> {
         let parent = self.movable(id)?;
         self.children_mut(parent).retain(|child| *child != id);
         self.dissolve(parent);
@@ -2476,7 +2766,9 @@ impl Sidebar {
 
     fn folder_mut(&mut self, id: NodeId) -> Result<(&mut String, &mut bool), Error> {
         match &mut self.nodes.get_mut(&id).ok_or(Error::UnknownNode)?.kind {
-            NodeKind::Folder { title, expanded } => Ok((title, expanded)),
+            NodeKind::Folder {
+                title, expanded, ..
+            } => Ok((title, expanded)),
             _ => Err(Error::NotAFolder),
         }
     }
@@ -2518,6 +2810,10 @@ impl Sidebar {
         match self.nodes.get(&id).map(|n| &n.kind) {
             None => Err(Error::UnknownNode),
             Some(NodeKind::Tab(_) | NodeKind::Split) => Err(Error::NotAContainer),
+            // Its search alone fills it.
+            Some(NodeKind::Folder {
+                github: Some(_), ..
+            }) => Err(Error::NotAContainer),
             Some(_) => Ok(()),
         }
     }
@@ -2732,6 +3028,258 @@ mod tests {
         assert_eq!(sidebar.displayed().selected, None);
         let today = sidebar.open_tab(home.id, "https://t.test/").unwrap();
         assert_eq!(sidebar.remove_folder(today), Err(Error::NotAFolder));
+    }
+
+    fn item(url: &str) -> Item {
+        Item {
+            url: url.to_string(),
+            title: url.to_string(),
+            status: None,
+        }
+    }
+
+    #[test]
+    fn fills_a_github_folder_with_its_results_keeping_open_tabs() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_github_folder(home.pinned).unwrap();
+        assert_eq!(
+            sidebar.github_folders(),
+            [(folder, github::LISTS.iter().collect())]
+        );
+        assert_eq!(sidebar.github_folder(folder).unwrap().fetched, None);
+        let (a, b, c) = (
+            item("https://a.test/1"),
+            item("https://b.test/2"),
+            item("https://c.test/3"),
+        );
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &[a.clone(), b.clone()], &[], 0),
+            Ok(true)
+        );
+        let [first, second] = children(&sidebar, folder)[..] else {
+            panic!("two tabs")
+        };
+        assert!(sidebar.is_pinned(first));
+        // The page of a result still found stays, even once it went elsewhere.
+        sidebar.select(home.id, second).unwrap();
+        sidebar.tab_mut(second).unwrap().url = "https://b.test/2/files".to_string();
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &[b.clone(), a.clone()], &[], 0),
+            Ok(true)
+        );
+        assert_eq!(children(&sidebar, folder), [second, first]);
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &[b.clone(), a], &[], 0),
+            Ok(false)
+        );
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &[c.clone(), b], &[], 0),
+            Ok(true)
+        );
+        let filled = children(&sidebar, folder);
+        assert_eq!(filled[1], second);
+        assert!(sidebar.node(first).is_none());
+        // Gone from the results, the tab shown stays last until another one shows.
+        assert_eq!(
+            sidebar.fill_github_folder(folder, std::slice::from_ref(&c), &[], 0),
+            Ok(false)
+        );
+        assert_eq!(children(&sidebar, folder), [filled[0], second]);
+        sidebar.select(home.id, filled[0]).unwrap();
+        assert_eq!(sidebar.fill_github_folder(folder, &[c], &[], 0), Ok(true));
+        assert_eq!(children(&sidebar, folder), [filled[0]]);
+        // Its rows tell what its results say.
+        let merged = Item {
+            status: Some("Merged".into()),
+            ..item("https://c.test/3")
+        };
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &[merged], &[], 0),
+            Ok(true)
+        );
+        assert_eq!(sidebar.github_status(filled[0]), Some("Merged"));
+        // The results after its first ones are new until shown.
+        let merged = Item {
+            status: Some("Merged".into()),
+            ..item("https://c.test/3")
+        };
+        sidebar
+            .fill_github_folder(folder, &[merged, item("https://d.test/4")], &[], 0)
+            .unwrap();
+        let new = children(&sidebar, folder)[1];
+        assert!(sidebar.github_unseen(new));
+        assert!(!sidebar.github_unseen(filled[0]));
+        sidebar.select(home.id, new).unwrap();
+        assert!(!sidebar.github_unseen(new));
+        sidebar.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn keeps_a_pull_request_merged_only_if_its_github_folder_showed_it() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_github_folder(home.pinned).unwrap();
+        let merged = |url| Item {
+            status: Some("Merged".into()),
+            ..item(url)
+        };
+        let (a, b) = (
+            "https://github.com/o/r/pull/1",
+            "https://github.com/o/r/pull/2",
+        );
+        sidebar
+            .fill_github_folder(folder, &[item(a), merged(b)], &[], 0)
+            .unwrap();
+        assert_eq!(children(&sidebar, folder).len(), 1);
+        sidebar
+            .fill_github_folder(folder, &[merged(a), merged(b)], &[], 0)
+            .unwrap();
+        let [tab] = children(&sidebar, folder)[..] else {
+            panic!("one tab")
+        };
+        assert_eq!(sidebar.github_status(tab), Some("Merged"));
+    }
+
+    #[test]
+    fn notes_how_a_github_folders_last_update_went() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_github_folder(home.pinned).unwrap();
+        let results = [item("https://a.test/1")];
+        sidebar
+            .fill_github_folder(folder, &results, &[], 5)
+            .unwrap();
+        assert_eq!(sidebar.fail_github_folder(folder), Ok(true));
+        assert_eq!(sidebar.fail_github_folder(folder), Ok(false));
+        let github = sidebar.github_folder(folder).unwrap();
+        assert!(github.failed && github.fetched == Some(5));
+        // A failure leaves its results; an update that works tells it.
+        assert_eq!(children(&sidebar, folder).len(), 1);
+        let sso = ["acme".to_string()];
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &results, &sso, 9),
+            Ok(true)
+        );
+        let github = sidebar.github_folder(folder).unwrap();
+        assert!(!github.failed && github.fetched == Some(9));
+        assert!(github.sso.contains("acme"));
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &results, &[], 9),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn keeps_a_result_removed_by_hand_out_of_its_github_folder() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_github_folder(home.pinned).unwrap();
+        let (a, b) = (item("https://a.test/1"), item("https://b.test/2"));
+        sidebar
+            .fill_github_folder(folder, &[a.clone(), b.clone()], &[], 0)
+            .unwrap();
+        let [first, _] = children(&sidebar, folder)[..] else {
+            panic!("two tabs")
+        };
+        sidebar.remove(first).unwrap();
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &[a.clone(), b.clone()], &[], 0),
+            Ok(false)
+        );
+        assert_eq!(children(&sidebar, folder).len(), 1);
+        // Gone from the results, a tab is not hidden for it.
+        sidebar.fill_github_folder(folder, &[a], &[], 0).unwrap();
+        assert_eq!(sidebar.fill_github_folder(folder, &[b], &[], 0), Ok(true));
+        assert_eq!(children(&sidebar, folder).len(), 1);
+    }
+
+    #[test]
+    fn hides_a_repository_from_its_github_folder() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_github_folder(home.pinned).unwrap();
+        let results = [
+            item("https://github.com/o/a/pull/1"),
+            item("https://github.com/o/b/pull/2"),
+        ];
+        sidebar
+            .fill_github_folder(folder, &results, &[], 0)
+            .unwrap();
+        assert_eq!(
+            sidebar.github_repositories(folder),
+            [("o/a".to_string(), true), ("o/b".to_string(), true)]
+        );
+        sidebar.toggle_github_repository(folder, "o/a").unwrap();
+        assert_eq!(children(&sidebar, folder).len(), 1);
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &results, &[], 0),
+            Ok(false)
+        );
+        assert_eq!(
+            sidebar.github_repositories(folder),
+            [("o/a".to_string(), false), ("o/b".to_string(), true)]
+        );
+        sidebar.toggle_github_repository(folder, "o/a").unwrap();
+        assert_eq!(
+            sidebar.fill_github_folder(folder, &results, &[], 0),
+            Ok(true)
+        );
+        assert_eq!(children(&sidebar, folder).len(), 2);
+        sidebar.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn opening_a_pull_request_wants_a_github_folder_until_one_is_deleted() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let tab = sidebar
+            .open_tab(home.id, "https://github.com/o/r/pull/1")
+            .unwrap();
+        assert_eq!(sidebar.github_folder_wanted(tab), Some(home.pinned));
+        let folder = sidebar.add_github_folder(home.pinned).unwrap();
+        assert_eq!(sidebar.github_folder_wanted(tab), None);
+        sidebar.remove(folder).unwrap();
+        assert!(!sidebar.github_on_pull_request());
+        assert_eq!(sidebar.github_folder_wanted(tab), None);
+        sidebar.set_github_on_pull_request(true);
+        assert_eq!(sidebar.github_folder_wanted(tab), Some(home.pinned));
+    }
+
+    #[test]
+    fn fills_a_github_folder_alone() {
+        let mut sidebar = Sidebar::default();
+        let home = home(&sidebar);
+        let folder = sidebar.add_github_folder(home.pinned).unwrap();
+        let tab = sidebar
+            .add_tab(home.pinned, "https://t.test/", "T")
+            .unwrap();
+        assert_eq!(sidebar.move_node(tab, folder, 0), Err(Error::NotAContainer));
+        assert_eq!(sidebar.add_folder(folder, "F"), Err(Error::NotAContainer));
+        let plain = sidebar.add_folder(home.pinned, "Plain").unwrap();
+        assert_eq!(
+            sidebar.fill_github_folder(plain, &[item("https://a.test/")], &[], 0),
+            Err(Error::NotAFolder)
+        );
+        // Saved and read back, it keeps its lists, which it shows together.
+        sidebar.toggle_github_list(folder, "review").unwrap();
+        let json = serde_json::to_string(&sidebar).unwrap();
+        let mut read: Sidebar = serde_json::from_str(&json).unwrap();
+        let keys = |sidebar: &Sidebar| -> Vec<_> {
+            sidebar.github_folders()[0]
+                .1
+                .iter()
+                .map(|list| list.key)
+                .collect()
+        };
+        assert_eq!(keys(&read), ["authored", "team"]);
+        read.toggle_github_list(folder, "review").unwrap();
+        assert_eq!(keys(&read), ["authored", "review", "team"]);
+        read.toggle_github_list(folder, "authored").unwrap();
+        read.toggle_github_list(folder, "review").unwrap();
+        // The last one stays.
+        read.toggle_github_list(folder, "team").unwrap();
+        assert_eq!(keys(&read), ["team"]);
     }
 
     #[test]

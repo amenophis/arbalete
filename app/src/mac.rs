@@ -1666,49 +1666,71 @@ fn native_menu(
     let menu = NSMenu::new(mtm);
     menu.setAutoenablesItems(false);
     for entry in entries {
-        let item = match entry {
-            Entry::Item(entry) => {
-                let item = item(
-                    mtm,
-                    &NSString::from_str(&entry.title),
-                    sel!(arbaleteMenuItem:),
-                    ns_string!(""),
-                );
-                item.setTag(actions.len() as isize);
-                if entry.checked {
-                    item.setState(NSControlStateValueOn);
-                }
-                item.setEnabled(entry.enabled);
-                actions.push(entry.action);
-                item
-            }
-            Entry::Submenu(title, entries) => {
-                let item = NSMenuItem::new(mtm);
-                item.setTitle(&NSString::from_str(&title));
-                item.setSubmenu(Some(&native_menu(mtm, entries, actions)));
-                item
-            }
-            Entry::Share(url) => {
-                let Some(link) = NSURL::URLWithString(&NSString::from_str(&url)) else {
-                    continue;
-                };
-                let items = NSArray::from_retained_slice(&[Retained::into_super(
-                    Retained::into_super(link),
-                )]);
-                // SAFETY: the picker takes the items a share menu offers, like links.
-                let picker = unsafe {
-                    NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items)
-                };
-                let item = picker.standardShareMenuItem(mtm);
-                // Kept while the menu shows, which its item needs.
-                SHARE_PICKER.set(Some(picker));
-                item
-            }
-            Entry::Separator => NSMenuItem::separatorItem(mtm),
-        };
-        menu.addItem(&item);
+        if let Some(item) = native_item(mtm, entry, actions) {
+            menu.addItem(&item);
+        }
     }
     menu
+}
+
+/// A menu's item, its actions noted in `actions`; None for a share item without a valid link.
+fn native_item(
+    mtm: MainThreadMarker,
+    entry: Entry,
+    actions: &mut Vec<Action>,
+) -> Option<Retained<NSMenuItem>> {
+    Some(match entry {
+        Entry::Item(entry) => {
+            let item = item(
+                mtm,
+                &NSString::from_str(&entry.title),
+                sel!(arbaleteMenuItem:),
+                ns_string!(""),
+            );
+            item.setTag(actions.len() as isize);
+            if entry.checked {
+                item.setState(NSControlStateValueOn);
+            }
+            item.setEnabled(entry.enabled);
+            actions.push(entry.action);
+            item
+        }
+        Entry::Submenu(title, entries) => {
+            let item = NSMenuItem::new(mtm);
+            item.setTitle(&NSString::from_str(&title));
+            item.setSubmenu(Some(&native_menu(mtm, entries, actions)));
+            item
+        }
+        Entry::Icon(file, entry) => {
+            let item = native_item(mtm, *entry, actions)?;
+            item.setImage(resource_image(file).as_deref());
+            item
+        }
+        Entry::Share(url) => {
+            let link = NSURL::URLWithString(&NSString::from_str(&url))?;
+            let items =
+                NSArray::from_retained_slice(&[Retained::into_super(Retained::into_super(link))]);
+            // SAFETY: the picker takes the items a share menu offers, like links.
+            let picker = unsafe {
+                NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items)
+            };
+            let item = picker.standardShareMenuItem(mtm);
+            // Kept while the menu shows, which its item needs.
+            SHARE_PICKER.set(Some(picker));
+            item
+        }
+        Entry::Separator => NSMenuItem::separatorItem(mtm),
+    })
+}
+
+/// An image of the app's resources, by its path there, sized for a menu, in the menu's color.
+fn resource_image(file: &str) -> Option<Retained<NSImage>> {
+    let resources = objc2_foundation::NSBundle::mainBundle().resourcePath()?;
+    let path = NSString::from_str(&format!("{resources}/{file}"));
+    let image = NSImage::initWithContentsOfFile(NSImage::alloc(), &path)?;
+    image.setTemplate(true);
+    image.setSize(NSSize::new(16.0, 16.0));
+    Some(image)
 }
 
 /// Asks the user before `site` opens `app`, like Chrome's "Open Zoom?".

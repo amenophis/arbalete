@@ -11,6 +11,8 @@ use serde_json::json;
 pub enum Entry {
     Item(Item),
     Submenu(String, Vec<Entry>),
+    /// An item or a submenu showing an image before its title: a file of the app's resources.
+    Icon(&'static str, Box<Entry>),
     /// The system's Share submenu for a link, its services with their icons, like Arc's.
     Share(String),
     Separator,
@@ -55,6 +57,11 @@ pub fn build(sidebar: &Sidebar, target: Target) -> Option<Vec<Entry>> {
         Target::Node(id) => match &sidebar.node(id)?.kind {
             NodeKind::Tab(tab) if sidebar.is_favorite(id) => Some(favorite(sidebar, id, &tab.url)),
             NodeKind::Tab(tab) => Some(tab_menu(sidebar, id, tab)),
+            NodeKind::Folder {
+                title,
+                github: Some(_),
+                ..
+            } => Some(github_folder(sidebar, id, title)),
             NodeKind::Folder { title, .. } => Some(folder(sidebar, id, title)),
             NodeKind::Split => Some(split_menu(sidebar, id)),
             NodeKind::Container => None,
@@ -153,6 +160,7 @@ pub fn find(entries: Vec<Entry>, id: &str) -> Option<Action> {
     entries.into_iter().find_map(|entry| match entry {
         Entry::Item(item) if item.id == id => Some(item.action),
         Entry::Submenu(_, entries) => find(entries, id),
+        Entry::Icon(_, entry) => find(vec![*entry], id),
         _ => None,
     })
 }
@@ -509,6 +517,7 @@ fn space_menu(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
             "New Folder",
             Action::Run(Command::NewFolder(Some(space.pinned))),
         ),
+        Entry::Submenu("Live Folder".to_string(), live_folders(sidebar, space)),
         Entry::Separator,
         Entry::Submenu(
             format!("Export “{}” into Folder", space.title),
@@ -622,6 +631,123 @@ fn folder(sidebar: &Sidebar, folder: NodeId, title: &str) -> Vec<Entry> {
             Action::Run(Command::CloseFolderTabs(folder)),
         ),
         item("delete", "Delete Folder", delete),
+    ]
+}
+
+/// A Space's live folders, like Arc's: its GitHub folder, one a Space (decision 0013).
+fn live_folders(sidebar: &Sidebar, space: &Space) -> Vec<Entry> {
+    let has_one = sidebar
+        .github_folders()
+        .iter()
+        .any(|&(folder, _)| sidebar.space_of(folder) == Some(space.id));
+    let github = Entry::Item(Item {
+        id: "github".to_string(),
+        title: "GitHub".to_string(),
+        checked: false,
+        enabled: !has_one,
+        action: Action::Run(Command::NewGithubFolder(space.pinned)),
+    });
+    vec![Entry::Icon(GITHUB_LOGO, Box::new(github))]
+}
+
+/// GitHub's logo, Primer Octicons' mark-github (app/resources/github, MIT).
+const GITHUB_LOGO: &str = "github/mark-github.svg";
+
+/// A GitHub folder's menu, like Arc's live folder's: its own submenu first, then moving,
+/// renaming and deleting it; nothing goes into it but its results.
+fn github_folder(sidebar: &Sidebar, folder: NodeId, title: &str) -> Vec<Entry> {
+    let Some(github) = sidebar.github_folder(folder) else {
+        return Vec::new();
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis() as u64);
+    let disabled = |id: &str, title: &str| {
+        Entry::Item(Item {
+            id: id.to_string(),
+            title: title.to_string(),
+            checked: false,
+            enabled: false,
+            action: Action::Run(Command::RefreshGithubFolder(folder)),
+        })
+    };
+    let mut entries = vec![
+        disabled("state", &github.state(now)),
+        item(
+            "refresh",
+            "Refresh",
+            Action::Run(Command::RefreshGithubFolder(folder)),
+        ),
+        Entry::Separator,
+    ];
+    // Like Arc's filters, its lists show together; it always shows one.
+    let shown = &github.lists;
+    entries.extend(
+        arbalete_core::github::LISTS
+            .iter()
+            .enumerate()
+            .map(|(index, list)| {
+                let checked = shown.iter().any(|key| key == list.key);
+                Entry::Item(Item {
+                    id: format!("list-{}", list.key),
+                    title: list.title.to_string(),
+                    checked,
+                    enabled: !checked || shown.len() > 1,
+                    action: Action::Run(Command::ToggleGithubList(folder, index)),
+                })
+            }),
+    );
+    let repositories = sidebar.github_repositories(folder);
+    if !repositories.is_empty() {
+        entries.extend([Entry::Separator, disabled("repositories", "Repositories")]);
+        entries.extend(repositories.into_iter().map(|(repository, shown)| {
+            Entry::Item(Item {
+                id: format!("repository-{repository}"),
+                title: repository.clone(),
+                checked: shown,
+                enabled: true,
+                action: Action::Run(Command::ToggleGithubRepository(folder, repository)),
+            })
+        }));
+        entries.push(disabled(
+            "repositories-hint",
+            "Those of the pull requests it shows",
+        ));
+    }
+    // The organizations whose single sign-on hides pull requests, each opening its sign-in.
+    if !github.sso.is_empty() {
+        entries.extend([Entry::Separator, disabled("sso", "Single Sign-On Required")]);
+        entries.extend(github.sso.iter().map(|org| {
+            let url = format!("https://github.com/orgs/{org}/sso");
+            item(&format!("sso-{org}"), org, Action::Run(Command::Open(url)))
+        }));
+        entries.push(disabled(
+            "sso-hint",
+            "Sign in to see all of their pull requests",
+        ));
+    }
+    let delete = Action::Confirm {
+        question: format!("Delete the live folder “{title}”?"),
+        detail: "Opening a pull request will no longer add one. To add it again, choose \
+            Live Folder ▸ GitHub in its Space’s menu.",
+        button: "Delete",
+        command: Command::DeleteFolder(folder),
+    };
+    vec![
+        Entry::Icon(
+            GITHUB_LOGO,
+            Box::new(Entry::Submenu("Pull Requests".to_string(), entries)),
+        ),
+        Entry::Separator,
+        move_to(sidebar, folder),
+        Entry::Separator,
+        item(
+            "rename",
+            "Rename…",
+            Action::Ask("arbalete:rename", json!(folder)),
+        ),
+        Entry::Separator,
+        item("delete", "Delete Live Folder", delete),
     ]
 }
 
@@ -753,6 +879,7 @@ mod tests {
                 Entry::Item(item) if item.checked => vec![format!("✓ {}", item.title)],
                 Entry::Item(item) if !item.enabled => vec![format!("({})", item.title)],
                 Entry::Item(item) => vec![item.title.clone()],
+                Entry::Icon(_, entry) => titles(std::slice::from_ref(entry)),
                 Entry::Submenu(title, entries) => {
                     let mut titles = vec![format!("{title} ▸")];
                     titles.extend(titles_of(entries));
@@ -1015,6 +1142,96 @@ mod tests {
     }
 
     #[test]
+    fn a_space_holds_one_github_folder_whose_menu_is_like_a_live_folders() {
+        let mut sidebar = Sidebar::default();
+        let space = sidebar.spaces()[0].clone();
+        assert_eq!(
+            find(build(&sidebar, Target::Space(space.id)).unwrap(), "github"),
+            Some(Action::Run(Command::NewGithubFolder(space.pinned)))
+        );
+        let folder = sidebar.add_github_folder(space.pinned).unwrap();
+        let menu = build(&sidebar, Target::Space(space.id)).unwrap();
+        let titles_now = titles(&menu);
+        let at = titles_now
+            .iter()
+            .position(|t| t == "Live Folder ▸")
+            .unwrap();
+        assert_eq!(titles_now[at + 1], "  (GitHub)");
+        let menu = build(&sidebar, Target::Node(folder)).unwrap();
+        let shown = titles(&menu);
+        assert_eq!(
+            shown[..7],
+            [
+                "Pull Requests ▸",
+                "  (Initializing…)",
+                "  Refresh",
+                "  -",
+                "  ✓ Created by Me",
+                "  ✓ Review Requests",
+                "  ✓ Team Review Requests",
+            ]
+        );
+        assert_eq!(
+            shown[shown.len() - 4..],
+            ["-", "Rename…", "-", "Delete Live Folder"]
+        );
+        assert_eq!(
+            choose(&sidebar, folder, "refresh"),
+            Some(Action::Run(Command::RefreshGithubFolder(folder)))
+        );
+        assert_eq!(
+            choose(&sidebar, folder, "list-team"),
+            Some(Action::Run(Command::ToggleGithubList(folder, 2)))
+        );
+        // Its results' repositories may be hidden; SSO's organizations open their sign-in.
+        let sso = ["acme".to_string()];
+        let results = [github_item("https://github.com/o/r/pull/1")];
+        sidebar
+            .fill_github_folder(folder, &results, &sso, 0)
+            .unwrap();
+        sidebar.fail_github_folder(folder).unwrap();
+        let menu = build(&sidebar, Target::Node(folder)).unwrap();
+        assert_eq!(
+            titles(&menu)[1..13],
+            [
+                "  (Failed to update)",
+                "  Refresh",
+                "  -",
+                "  ✓ Created by Me",
+                "  ✓ Review Requests",
+                "  ✓ Team Review Requests",
+                "  -",
+                "  (Repositories)",
+                "  ✓ o/r",
+                "  (Those of the pull requests it shows)",
+                "  -",
+                "  (Single Sign-On Required)",
+            ]
+        );
+        assert_eq!(
+            choose(&sidebar, folder, "repository-o/r"),
+            Some(Action::Run(Command::ToggleGithubRepository(
+                folder,
+                "o/r".to_string()
+            )))
+        );
+        assert_eq!(
+            choose(&sidebar, folder, "sso-acme"),
+            Some(Action::Run(Command::Open(
+                "https://github.com/orgs/acme/sso".to_string()
+            )))
+        );
+    }
+
+    fn github_item(url: &str) -> arbalete_core::github::Item {
+        arbalete_core::github::Item {
+            url: url.to_string(),
+            title: url.to_string(),
+            status: None,
+        }
+    }
+
+    #[test]
     fn a_folder_renames_holds_a_new_folder_moves_and_closes_its_tabs() {
         let mut sidebar = Sidebar::default();
         let pinned = sidebar.spaces()[0].pinned;
@@ -1111,6 +1328,8 @@ mod tests {
                 "  New Profile…",
                 "-",
                 "New Folder",
+                "Live Folder ▸",
+                "  GitHub",
                 "-",
                 "Export “Home” into Folder ▸",
                 "  (Home)",

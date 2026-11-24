@@ -321,6 +321,7 @@ wrap_request_context_handler! {
             name_web_data(self.profile);
             apply_download_folder(self.profile);
             extensions::profile_ready(self.profile, &profile_dir(self.profile));
+            refresh_github_folders();
             in_each_window(show_selected);
         }
     }
