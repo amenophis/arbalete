@@ -74,6 +74,7 @@ mod split;
 mod tabs;
 mod theme_picker;
 mod toasts;
+mod translate;
 mod views;
 mod windows;
 
@@ -116,6 +117,8 @@ use tabs::*;
 pub use tabs::{close_store_tab, open_store_tab};
 use theme_picker::*;
 use toasts::*;
+use translate::*;
+pub use translate::{page_translation, translated};
 use views::*;
 pub use windows::*;
 
@@ -905,6 +908,7 @@ fn tab_json(id: NodeId, tab: &Tab, profile: ProfileId) -> serde_json::Value {
         "shareInstead": offers_instead(id, &tab.url, profile),
         "recording": recording(id),
         "shared": shows_tab(id),
+        "translation": translation_json(id, &tab.url),
     })
 }
 
@@ -1154,6 +1158,8 @@ struct Live {
     played: bool,
     /// Which of its Media Session's actions the sidebar offers, as its page tells it (media.rs).
     session: Option<Session>,
+    /// Its language, unless the user reads it, and its translation (translate.rs).
+    translation: Option<Translation>,
 }
 
 /// An id for a DevTools message whose answer nobody reads: Chromium refuses a message whose id
@@ -1568,7 +1574,7 @@ mod tests {
             { "id": home, "title": "Home", "emoji": null, "theme": { "colors": ["#a352ff", "#5289ff", "#ff5252"], "mode": "auto", "intensity": 0.8, "noise": 0.4 }, "profile": profile, "pinned": [] },
             { "id": work, "title": "Work", "emoji": "💼", "theme": theme("#3e7bfa"), "profile": profile, "pinned": [
                 { "id": folder, "title": "Docs", "folder": true },
-                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "audible": false, "open": false, "developer": false, "boosted": false, "shareInstead": false, "recording": false, "shared": false },
+                { "id": docs, "url": "https://b.test/", "title": "B", "favicon": null, "muted": false, "audible": false, "open": false, "developer": false, "boosted": false, "shareInstead": false, "recording": false, "shared": false, "translation": null },
             ] },
         ]);
         assert_eq!(json["spaces"], spaces);

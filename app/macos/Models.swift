@@ -136,6 +136,8 @@ struct Tab: Decodable, Identifiable {
     var subtitle: String?
     /// A GitHub folder's result new since its first ones, not shown since: its row shows a dot.
     var unseen: Bool?
+    /// Its page is in a language the user does not read: the address offers translating it.
+    var translation: PageTranslation?
 
     /// Its title, or its address without one.
     var label: String { title.isEmpty ? url : title }

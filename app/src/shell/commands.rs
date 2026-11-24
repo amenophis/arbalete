@@ -408,6 +408,9 @@ fn run_command(command: Command) {
             set_site_searches(sites);
         }
         (Command::SitePictureInPicture(site, on), _) => allow_picture(site, on),
+        (Command::Translate(tab, on), _) => translate_tab(tab, on),
+        (Command::TranslateLanguage(language, choice), _) => translate_language(language, choice),
+        (Command::NeverTranslateSite(site, never), _) => never_translate_site(site, never),
         (Command::DeveloperMode(site, on), _) => set_developer_mode(site, on),
         (Command::NewBoost, _) => boosts::new_boost(),
         (Command::EditBoost(id), _) => boosts::edit_boost(id),

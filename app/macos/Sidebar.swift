@@ -437,6 +437,10 @@ struct AddressRow: View {
             }
             .buttonStyle(.plain)
             .help(tab?.url ?? "")
+            if let tab, let translation = tab.translation {
+                // Like Arc's, it shows while the page offers translating it, the pointer away too.
+                TranslateButton(model: model, tab: tab, translation: translation)
+            }
             if tab != nil {
                 HStack(spacing: 2) {
                     ForEach(model.state?.extensions ?? []) { ext in

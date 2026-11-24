@@ -51,6 +51,11 @@ pub struct Settings {
     /// The sites the Command Bar searches once Tab follows their name, besides the search
     /// engines, like Arc's site search.
     pub site_searches: Vec<Site>,
+    /// The languages always translated (true) or never offered (false), like `"de"` (decision
+    /// 0016).
+    pub translate_languages: BTreeMap<String, bool>,
+    /// The sites whose pages never offer translating, by host (and port).
+    pub never_translate_sites: Vec<String>,
 }
 
 /// A shortcut changed from its default, like Arc's: other keys, none, or who takes them first.
@@ -109,6 +114,8 @@ impl Default for Settings {
             media_sources: vec!["captures".into(), "downloads".into()],
             onboarded: false,
             site_searches: arbalete_core::search::default_sites(),
+            translate_languages: BTreeMap::new(),
+            never_translate_sites: Vec::new(),
         }
     }
 }
@@ -161,6 +168,8 @@ mod tests {
             media_sources: vec!["desktop".into()],
             onboarded: true,
             site_searches: Vec::new(),
+            translate_languages: BTreeMap::from([("de".into(), true)]),
+            never_translate_sites: vec!["example.com".into()],
             shortcuts: BTreeMap::from([(
                 "newTab".into(),
                 ShortcutOverride {

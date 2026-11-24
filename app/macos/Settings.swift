@@ -18,6 +18,9 @@ struct SettingsDetail: Decodable {
         var ninthSidebarItem: Bool
         var countFavorites: Bool
         var siteSearches: [Site]
+        /// The languages always translated (true) or never offered (false), like "de".
+        var translateLanguages: [String: Bool]
+        var neverTranslateSites: [String]
     }
     struct Choice: Decodable, Identifiable, Hashable {
         var id: String
@@ -459,12 +462,44 @@ private struct AdvancedSettings: View {
                         label: "Keep videos playing in Picture in Picture when you switch tabs",
                         isOn: binding(general.pictureInPicture, "picture-in-picture"))
                 }
+                TranslationChoices(settings: settings, general: general)
             }
         }
     }
 
     private func binding(_ value: Bool, _ key: String) -> Binding<Bool> {
         Binding(get: { value }, set: { settings.app.run("set-setting", key, $0) })
+    }
+}
+
+/// The languages and sites whose translation was chosen from a page's popover, each to forget
+/// (decision 0016).
+private struct TranslationChoices: View {
+    @ObservedObject var settings: SettingsModel
+    let general: SettingsDetail.General
+
+    var body: some View {
+        let languages = general.translateLanguages.sorted { $0.key < $1.key }
+        if !languages.isEmpty || !general.neverTranslateSites.isEmpty {
+            SettingsCard {
+                SettingsRow(
+                    label: "Page translation",
+                    note: "Pages are translated on this Mac. A page in another language offers it by the address."
+                ) { EmptyView() }
+                ForEach(languages, id: \.key) { language, always in
+                    SettingsLine()
+                    SettingsRow(label: "\(always ? "Always" : "Never") translate \(languageName(language))") {
+                        Button("Forget") { settings.app.run("translate-language", language, NSNull()) }
+                    }
+                }
+                ForEach(general.neverTranslateSites, id: \.self) { site in
+                    SettingsLine()
+                    SettingsRow(label: "Never translate \(site)") {
+                        Button("Forget") { settings.app.run("never-translate-site", site, false) }
+                    }
+                }
+            }
+        }
     }
 }
 

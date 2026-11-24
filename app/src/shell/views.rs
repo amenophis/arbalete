@@ -155,6 +155,7 @@ fn page(tab: NodeId) -> Option<()> {
                         frames: HashMap::new(),
                         played: false,
                         session: None,
+                        translation: None,
                     },
                 )
             });
@@ -256,6 +257,7 @@ pub(super) fn content_created(profile: ProfileId, browser: Option<&mut Browser>)
     picture_page_created(browser);
     media_page_created(browser);
     sound_page_created(browser);
+    translate_page_created(browser);
     #[cfg(target_os = "macos")]
     cover_revived(Some(browser), true);
     // Made in page(), it is not one of the pages yet, which mutes it once it is.

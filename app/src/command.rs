@@ -545,6 +545,13 @@ pub enum Command {
     RemoveSiteSearch(String),
     /// Lets a site's videos go on in Picture in Picture, or no longer: its host, and whether.
     SitePictureInPicture(String, bool),
+    /// Translates a tab's page, or shows its original again (decision 0016).
+    Translate(NodeId, bool),
+    /// Always translates a language, never offers it, or forgets the choice: like `"de"`, and
+    /// whether always, or null.
+    TranslateLanguage(String, Option<bool>),
+    /// Never offers translating a site's pages, or does again: its host, and whether never.
+    NeverTranslateSite(String, bool),
     /// Turns a site's developer mode on or off: its host, and whether.
     DeveloperMode(String, bool),
     /// Makes a Boost for the shown page's site and opens the editor on it.

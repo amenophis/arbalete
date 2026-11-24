@@ -60,6 +60,9 @@ unsafe extern "C" {
     fn arbalete_ui_page_closed(view: *mut std::ffi::c_void);
     fn arbalete_ui_hand_pages_over(from: u32, to: u32);
     fn arbalete_ui_focus_page(tab: i64);
+    fn arbalete_ui_page_language(lang: *const c_char, sample: *const c_char) -> *mut c_char;
+    fn arbalete_ui_translate(page: i32, batch: u32, source: *const c_char, texts: *const c_char);
+    fn free(pointer: *mut c_void);
     fn arbalete_ui_easel(window: u32, tab: i64, easel: *const c_char) -> bool;
     fn arbalete_ui_easel_closed(tab: i64);
     fn arbalete_ui_live_capture_view(easel: i64, id: i64) -> *mut std::ffi::c_void;
@@ -579,6 +582,46 @@ pub fn tools_closed(view: *mut std::ffi::c_void) {
 pub fn focus_page(tab: i64) {
     // SAFETY: a plain value.
     unsafe { arbalete_ui_focus_page(tab) };
+}
+
+/// The language of a page, from its `lang` and a sample of its text, like "de", unless it is one
+/// the user reads or macOS cannot translate pages (decision 0016).
+pub fn page_language(lang: &str, sample: &str) -> Option<String> {
+    let (Ok(lang), Ok(sample)) = (CString::new(lang), CString::new(sample)) else {
+        return None;
+    };
+    // SAFETY: C strings that outlive the call; the language returned is the caller's to free.
+    unsafe {
+        let language = arbalete_ui_page_language(lang.as_ptr(), sample.as_ptr());
+        if language.is_null() {
+            return None;
+        }
+        let owned = CStr::from_ptr(language).to_string_lossy().into_owned();
+        free(language.cast());
+        Some(owned)
+    }
+}
+
+/// Has macOS translate a batch of a page's text from its language, `source`, to the user's: the
+/// translations come back to arbalete_translated.
+pub fn translate(page: i32, batch: u32, source: &str, texts: &[String]) {
+    let texts = serde_json::to_string(texts).unwrap_or_default();
+    let (Ok(source), Ok(texts)) = (CString::new(source), CString::new(texts)) else {
+        return;
+    };
+    // SAFETY: C strings that outlive the call, which copies them.
+    unsafe { arbalete_ui_translate(page, batch, source.as_ptr(), texts.as_ptr()) };
+}
+
+/// macOS translated a batch of a page's text, as a JSON array of strings in the batch's order, or
+/// could not: null.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_translated(page: i32, batch: u32, translations: *const c_char) {
+    let translations = (!translations.is_null())
+        // SAFETY: a C string that lives through the call.
+        .then(|| unsafe { CStr::from_ptr(translations) })
+        .and_then(|json| serde_json::from_slice(json.to_bytes()).ok());
+    crate::shell::translated(page, batch, translations);
 }
 
 /// Shows `text`, a hovered link's address, at the bottom of the page CEF draws at `view`, or hides

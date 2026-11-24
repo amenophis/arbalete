@@ -29,3 +29,7 @@ bool arbalete_picture_should_close(unsigned int id);
 
 /// The Picture in Picture window `id`'s bar asks for its page's tab: it shows, and the window goes.
 void arbalete_picture_back(unsigned int id);
+
+/// macOS translated a batch of the text of the page whose browser is `page`, as a JSON array of
+/// strings, or could not: null (app/macos/Translate.swift).
+void arbalete_translated(int page, unsigned int batch, const char *translations);
