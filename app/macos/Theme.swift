@@ -21,13 +21,18 @@ import SwiftUI
 /// forces, and as the system is in automatic appearance; an incognito window's, dark. Chromium
 /// follows the app's appearance, which Arc sets too.
 @MainActor func showPages(of model: AppModel) {
-    let mode = model.state?.incognito == true ? "dark" : model.space?.theme.mode ?? "auto"
+    let mode = pageMode(of: model)
     // Setting it again would tell its observers, which republish the state, again. AppKit gives
     // back another appearance than the one set, so it remembers its own.
     guard mode != pagesMode else { return }
     pagesMode = mode
     let name: NSAppearance.Name? = mode == "dark" ? .darkAqua : mode == "light" ? .aqua : nil
     NSApp.appearance = name.flatMap(NSAppearance.init(named:))
+}
+
+/// The mode a window's pages ask for: dark when incognito, else its Space's.
+@MainActor func pageMode(of model: AppModel) -> String {
+    model.state?.incognito == true ? "dark" : model.space?.theme.mode ?? "auto"
 }
 
 /// The mode showPages last gave the app, automatic at launch.
