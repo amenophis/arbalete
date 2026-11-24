@@ -1013,10 +1013,7 @@ wrap_focus_handler! {
             if source != FocusSource::SYSTEM || !hidden || selected {
                 return 0;
             }
-            #[cfg(target_os = "macos")]
-            crate::mac::activate();
-            select_tab(tab);
-            focus_page(tab);
+            tab_to_front(tab);
             1
         }
     }

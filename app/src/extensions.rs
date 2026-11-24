@@ -1657,6 +1657,7 @@ wrap_dev_tools_message_observer! {
             let Some(message) = parse(message) else { return 0 };
             if let Some(browser) = browser {
                 crate::shell::page_sound(browser, &message);
+                crate::shell::picture_message(browser, &message);
             }
             // The sessions of the page's frames of other sites only tell of sound.
             if !message["sessionId"].is_null() {

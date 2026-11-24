@@ -476,6 +476,11 @@ pub fn window_activated(id: u32, active: bool) {
     } else if !active {
         snapshot_shown();
     }
+    if active {
+        picture_shown_back();
+    } else {
+        app_left(id);
+    }
 }
 
 /// Whether the window `id` may close: every browser is asked to close, and it closes once they
