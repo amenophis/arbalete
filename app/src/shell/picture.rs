@@ -1,6 +1,7 @@
 //! Picture in Picture, like Arc's: a tab left during a call, like Google Meet's, goes on in the
 //! page's own Picture in Picture window, and one left while its video plays with sound in
-//! Chromium's floating video window; either closes as the tab shows again.
+//! Chromium's floating video window, as is one shown as the app goes behind another; either
+//! closes as the tab shows again, or the window comes back in front.
 
 use super::*;
 
@@ -38,6 +39,74 @@ pub(super) fn picture_page_created(browser: &Browser) {
     ] {
         host.send_dev_tools_message(Some(message.to_string().as_bytes()));
     }
+    watch_back(&host);
+}
+
+/// The binding through which a page's main frame tells that its video left Chromium's floating
+/// window by its back to tab button, and the world it watches from.
+const BACK_BINDING: &str = "__arbaletePictureBack";
+const BACK_WORLD: &str = "arbalete-picture";
+
+/// Tells that a video left the floating window still playing: by its back to tab button, which
+/// Chromium's close button differs from by pausing it first. Chromium asks the page's browser to
+/// come to the front then, which CEF leaves to the app.
+const WATCH_BACK: &str = r#"addEventListener("leavepictureinpicture", ({ target }) => {
+    setTimeout(() => {
+        if (!target.paused && typeof __arbaletePictureBack === "function") __arbaletePictureBack("");
+    }, 250);
+}, true)"#;
+
+/// Starts watching a page's main frame for its video coming back by the floating window's back
+/// to tab button, in its documents to come and its current one.
+fn watch_back(host: &BrowserHost) {
+    // New documents get the binding only while the Runtime domain is enabled.
+    let binding = json!({ "name": BACK_BINDING, "executionContextName": BACK_WORLD });
+    let script = json!({ "source": WATCH_BACK, "worldName": BACK_WORLD, "runImmediately": true });
+    for (method, params) in [
+        ("Runtime.enable", json!({})),
+        ("Runtime.addBinding", binding),
+        ("Page.addScriptToEvaluateOnNewDocument", script),
+    ] {
+        let message = json!({ "id": unanswered_id(), "method": method, "params": params });
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+    }
+}
+
+/// Learns from a message of a page's DevTools session that its video came back by the floating
+/// window's back to tab button: like Chromium's, the app comes to the front with its tab. Not
+/// for a tab already in front, whose video the app itself takes back.
+pub fn picture_message(browser: &Browser, message: &serde_json::Value) {
+    if message["method"] != "Runtime.bindingCalled"
+        || message["params"]["name"] != BACK_BINDING
+        || !message["sessionId"].is_null()
+    {
+        return;
+    }
+    let Some(tab) = page_tab(browser) else { return };
+    #[cfg(target_os = "macos")]
+    if !crate::mac::app_active() || !window_tabs().contains(&tab) {
+        tab_to_front(tab);
+    }
+}
+
+/// Shows a tab, with the keyboard, in the focused window brought in front: on the desktop it
+/// is on, which macOS switches to. The app is already in front for a click on one of its
+/// Picture in Picture windows, which show on every desktop.
+pub(super) fn tab_to_front(tab: NodeId) {
+    if let Some(window) = win().window.with_borrow(Clone::clone) {
+        window.activate();
+    }
+    select_tab(tab);
+    focus_page(tab);
+}
+
+/// The tabs the focused window shows: a split's, or its one tab.
+fn window_tabs() -> Vec<NodeId> {
+    let mut tabs = win().split.borrow().0.clone();
+    if tabs.is_empty() {
+        tabs.extend(win().shown.get());
+    }
+    tabs
 }
 
 /// During a call (`call`), runs the page's `enterpictureinpicture` handler, like Chromium's
@@ -72,6 +141,22 @@ const ENTER_PICTURE: &str = r#"(async (call) => {
     document.addEventListener("visibilitychange", shown);
 })(CALL).catch(() => {})"#;
 
+/// Takes back the videos the window's pages show in Chromium's floating video window, as the
+/// window comes back in front: the user came back to them. Tabs left keep theirs, which come back
+/// as the tab shows again (ENTER_PICTURE).
+pub(super) fn picture_shown_back() {
+    let expression = "document.pictureInPictureElement && document.exitPictureInPicture()";
+    for tab in window_tabs() {
+        let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
+            continue;
+        };
+        let params = json!({ "expression": expression });
+        let message =
+            json!({ "id": unanswered_id(), "method": "Runtime.evaluate", "params": params });
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+    }
+}
+
 /// Lets a site's videos go on in Picture in Picture as its tabs are left, or no longer, from its
 /// site controls.
 pub(super) fn allow_picture(site: String, on: bool) {
@@ -88,6 +173,36 @@ pub(super) fn allow_picture(site: String, on: bool) {
     }
 }
 
+/// Puts the video of a tab the window `window` shows in Chromium's floating window, as the app
+/// goes behind another one, once AppKit is done with it: its window going behind another of
+/// Arbalete's, or behind the video window itself, leaves it in the page. Coming back to the
+/// window takes it back (picture_shown_back).
+pub(super) fn app_left(window: u32) {
+    post_task(ThreadId::UI, Some(&mut LeftApp::new(window)));
+}
+
+/// Opens a tab's page's Picture in Picture window, as ENTER_PICTURE does, unless the user turned
+/// it off, or off for its site.
+fn enter_picture(tab: NodeId, call: bool) {
+    let settings = app_settings();
+    let blocked = tab_url(tab).is_some_and(|url| {
+        settings
+            .no_picture_sites
+            .iter()
+            .any(|blocked| *blocked == site(&url))
+    });
+    if !settings.picture_in_picture || blocked {
+        return;
+    }
+    let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
+        return;
+    };
+    let expression = ENTER_PICTURE.replace("(CALL)", &format!("({call})"));
+    let params = json!({ "expression": expression, "userGesture": true });
+    let message = json!({ "id": unanswered_id(), "method": "Runtime.evaluate", "params": params });
+    host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+}
+
 wrap_task! {
     struct EnterPicture {
         tab: NodeId,
@@ -95,22 +210,39 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let settings = app_settings();
-            let blocked = tab_url(self.tab).is_some_and(|url| {
-                settings.no_picture_sites.iter().any(|blocked| *blocked == site(&url))
+            let call = PAGES.with_borrow(|pages| {
+                let live = pages.get(&self.tab).filter(|live| live.hidden_since.is_some())?;
+                Some(live.capturing)
             });
-            if !settings.picture_in_picture || blocked {
+            if let Some(call) = call {
+                enter_picture(self.tab, call);
+            }
+        }
+    }
+}
+
+wrap_task! {
+    struct LeftApp {
+        window: u32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            #[cfg(target_os = "macos")]
+            if crate::mac::app_active() {
                 return;
             }
-            let page = PAGES.with_borrow(|pages| {
-                let live = pages.get(&self.tab).filter(|live| live.hidden_since.is_some())?;
-                Some((live.browser.host()?, live.capturing))
-            });
-            let Some((host, call)) = page else { return };
-            let expression = ENTER_PICTURE.replace("(CALL)", &format!("({call})"));
-            let params = json!({ "expression": expression, "userGesture": true });
-            let message = json!({ "id": unanswered_id(), "method": "Runtime.evaluate", "params": params });
-            host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+            let current = FOCUSED.get();
+            if window_by_id(self.window).is_none() {
+                return;
+            }
+            focus(self.window);
+            let tabs = window_tabs();
+            focus(current);
+            // A call's page shows its own window only as its tab is left: its video stays.
+            for tab in tabs {
+                enter_picture(tab, false);
+            }
         }
     }
 }
@@ -210,9 +342,7 @@ pub fn picture_can_close(id: u32) -> bool {
 pub fn picture_back(id: u32) {
     let tab = PICTURES.with_borrow(|pictures| pictures.iter().find(|p| p.id == id).map(|p| p.tab));
     if let Some(tab) = tab.filter(|&tab| tab_url(tab).is_some()) {
-        crate::mac::activate();
-        select_tab(tab);
-        focus_page(tab);
+        tab_to_front(tab);
     }
     if let Some(host) = picture_host(id) {
         host.close_browser(0);
@@ -223,9 +353,7 @@ pub fn picture_back(id: u32) {
 /// but the one showing `asking`'s page, whose request would go with it.
 #[cfg(target_os = "macos")]
 pub(super) fn back_to_tab(tab: NodeId, asking: &Browser) {
-    crate::mac::activate();
-    select_tab(tab);
-    focus_page(tab);
+    tab_to_front(tab);
     let hosts: Vec<_> = PICTURES.with_borrow(|pictures| {
         pictures
             .iter()

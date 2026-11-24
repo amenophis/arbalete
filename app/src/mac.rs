@@ -1821,10 +1821,10 @@ pub fn mouse_down() -> bool {
     NSEvent::pressedMouseButtons() != 0
 }
 
-/// Brings the app in front of the others, like a click on its window would.
-pub fn activate() {
+/// Whether the app is in front of the others.
+pub fn app_active() -> bool {
     let mtm = MainThreadMarker::new().expect("main thread");
-    NSApp(mtm).activate();
+    NSApp(mtm).isActive()
 }
 
 /// Puts a link on the clipboard.
