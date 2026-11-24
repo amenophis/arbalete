@@ -12,7 +12,8 @@ pub fn post(command: Command) {
     post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
 }
 
-/// Whether Back, Forward and Stop Loading can act on the shown page, for the menus to grey them.
+/// Whether a command on the shown page can act, for the menus to grey it: any needs a page shown,
+/// Back and Forward its history, Stop Loading a load.
 pub fn can_run(command: &Command) -> bool {
     content().is_some_and(|browser| match command {
         Command::Back => browser.can_go_back() == 1,

@@ -425,11 +425,22 @@ define_class!(
                 item.setState(if on_top { NSControlStateValueOn } else { NSControlStateValueOff });
                 return Bool::new(window.is_some());
             }
-            // Like Arc's and Chrome's, greyed when the shown page cannot act on them.
+            // Like Arc's and Chrome's, greyed when the shown page cannot act on them, or when no
+            // page shows.
             let page = [
                 (sel!(arbaleteBack:), Command::Back),
                 (sel!(arbaleteForward:), Command::Forward),
                 (sel!(arbaleteStop:), Command::Stop),
+                (sel!(arbaleteReload:), Command::Reload),
+                (sel!(arbaleteForceReload:), Command::ForceReload),
+                (sel!(arbaleteActualSize:), Command::Zoom(Zoom::Reset)),
+                (sel!(arbaleteZoomIn:), Command::Zoom(Zoom::In)),
+                (sel!(arbaleteZoomOut:), Command::Zoom(Zoom::Out)),
+                (sel!(arbaleteViewSource:), Command::ViewSource),
+                (sel!(arbaleteDevTools:), Command::DevTools(None)),
+                (sel!(arbaleteJavaScriptConsole:), Command::DevToolsPanel(InspectorPanel::Console)),
+                (sel!(arbaleteInspectElements:), Command::DevToolsPanel(InspectorPanel::Elements)),
+                (sel!(arbaletePrint:), Command::Print),
             ];
             if let Some((_, command)) = page.iter().find(|(sel, _)| action == Some(*sel)) {
                 return Bool::new(crate::shell::can_run(command));
