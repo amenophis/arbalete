@@ -14,7 +14,8 @@ const WORLD: &str = "arbalete-translate";
 /// Tells a sample of the page's text and its `lang` once it loaded, and keeps
 /// `__arbaleteTranslation`, which hands the page's text in batches as it comes near the viewport,
 /// puts their translations in place, translates the text added later and shows the originals
-/// again. macOS takes seconds a batch: the text read first is translated first.
+/// again. macOS takes a moment for each text, whatever the batch: the text read first is
+/// translated first, in small batches, and a text translated once in the page is not handed again.
 const TRANSLATE: &str = r#"(() => {
     if (window !== top || window.__arbaleteTranslation) return;
     const tell = (said) => {
@@ -26,8 +27,8 @@ const TRANSLATE: &str = r#"(() => {
     // Each translated node's text before, and the translation put in its place.
     const originals = new Map();
     const shown = new WeakMap();
-    // The nodes of each batch handed, with the text handed.
-    const batches = new Map();
+    // Each text's translation, the texts of each batch handed, and the nodes waiting for each.
+    const cache = new Map(), batches = new Map(), waiting = new Map();
     // The elements watched until they come near the viewport, and those that came.
     let watched = new WeakSet(), near = new WeakSet();
     let next = 0, on = false, queued = [], timer = 0;
@@ -62,22 +63,36 @@ const TRANSLATE: &str = r#"(() => {
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         for (let node; (node = walker.nextNode());) if (wanted(node)) add(node);
     };
+    // Puts a node's translation in place, its spaces kept, unless it changed since.
+    const put = (node, text, translation) => {
+        const current = node.nodeValue;
+        if (!node.isConnected || current.trim() !== text) return;
+        if (!originals.has(node)) originals.set(node, current);
+        const shownText = current.match(/^\s*/)[0] + translation + current.match(/\s*$/)[0];
+        shown.set(node, shownText);
+        node.nodeValue = shownText;
+    };
     const send = () => {
         timer = 0;
-        let nodes = [], texts = [], length = 0;
+        let texts = [], length = 0;
         const flush = () => {
-            if (!nodes.length) return;
+            if (!texts.length) return;
             const batch = next++;
-            batches.set(batch, { nodes, texts });
+            batches.set(batch, texts);
             tell({ batch, texts });
-            nodes = []; texts = []; length = 0;
+            texts = []; length = 0;
         };
         for (const node of new Set(queued)) {
             if (!node.isConnected || shown.get(node) === node.nodeValue) continue;
-            nodes.push(node);
-            texts.push(node.nodeValue.trim());
-            length += node.nodeValue.length;
-            if (nodes.length >= 20 || length >= 2000) flush();
+            const text = node.nodeValue.trim();
+            if (cache.has(text)) put(node, text, cache.get(text));
+            else if (waiting.has(text)) waiting.get(text).push(node);
+            else {
+                waiting.set(text, [node]);
+                texts.push(text);
+                length += text.length;
+                if (texts.length >= 5 || length >= 1000) flush();
+            }
         }
         queued = [];
         flush();
@@ -103,17 +118,14 @@ const TRANSLATE: &str = r#"(() => {
             observer.observe(document.body, { childList: true, subtree: true, characterData: true });
         },
         apply(batch, translations) {
-            const handed = batches.get(batch);
+            const texts = batches.get(batch) ?? [];
             batches.delete(batch);
-            if (!on || !handed) return;
-            handed.nodes.forEach((node, i) => {
-                const text = node.nodeValue;
-                // Changed since it was handed, or not translated.
-                if (text.trim() !== handed.texts[i] || !translations[i]) return;
-                if (!originals.has(node)) originals.set(node, text);
-                const translation = text.match(/^\s*/)[0] + translations[i] + text.match(/\s*$/)[0];
-                shown.set(node, translation);
-                node.nodeValue = translation;
+            texts.forEach((text, i) => {
+                const nodes = waiting.get(text) ?? [];
+                waiting.delete(text);
+                if (!translations[i]) return;
+                cache.set(text, translations[i]);
+                if (on) for (const node of nodes) put(node, text, translations[i]);
             });
         },
         stop() {
@@ -126,6 +138,7 @@ const TRANSLATE: &str = r#"(() => {
             timer = 0;
             queued = [];
             batches.clear();
+            waiting.clear();
             for (const [node, text] of originals) {
                 shown.delete(node);
                 node.nodeValue = text;
