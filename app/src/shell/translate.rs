@@ -163,6 +163,9 @@ pub(super) struct Translation {
     language: String,
     /// Translated, or being.
     translated: bool,
+    /// The batches of its text handed to macOS and not translated yet: the address shows the
+    /// translation in progress.
+    pending: usize,
 }
 
 /// Starts watching a tab's page's language, in its documents to come and its current one.
@@ -278,6 +281,7 @@ fn language_told(browser: &Browser, context: i64, lang: &str, sample: &str) {
         context,
         language,
         translated: false,
+        pending: 0,
     };
     if with_translation(browser, |kept| *kept = Some(translation)).is_none() {
         return;
@@ -291,13 +295,16 @@ fn language_told(browser: &Browser, context: i64, lang: &str, sample: &str) {
 /// Has the native interface translate a batch of a page's text from its language.
 fn batch_told(browser: &Browser, batch: u32, texts: &[String]) {
     let language = with_translation(browser, |translation| {
-        translation
-            .as_ref()
-            .filter(|t| t.translated)
-            .map(|t| t.language.clone())
+        let translation = translation.as_mut().filter(|t| t.translated)?;
+        translation.pending += 1;
+        Some((translation.language.clone(), translation.pending == 1))
     });
-    if let Some(Some(language)) = language {
+    if let Some(Some((language, first))) = language {
         crate::native::translate(browser.identifier(), batch, &language, texts);
+        // The address shows the translation in progress.
+        if first {
+            send_state();
+        }
     }
 }
 
@@ -312,6 +319,11 @@ pub fn translated(page: i32, batch: u32, translations: Option<Vec<String>>) {
     }) else {
         return;
     };
+    let done = with_translation(&browser, |translation| {
+        let translation = translation.as_mut()?;
+        translation.pending = translation.pending.saturating_sub(1);
+        Some(translation.pending == 0)
+    });
     match translations {
         Some(translations) => {
             let expression = format!(
@@ -319,6 +331,9 @@ pub fn translated(page: i32, batch: u32, translations: Option<Vec<String>>) {
                 json!(translations)
             );
             evaluate(&browser, &expression);
+            if done == Some(Some(true)) {
+                send_state();
+            }
         }
         None => {
             stop(&browser);
@@ -352,7 +367,13 @@ fn start(browser: &Browser) {
 fn stop(browser: &Browser) {
     crate::native::translate_stop(browser.identifier());
     evaluate(browser, "__arbaleteTranslation.stop()");
-    with_translation(browser, |t| t.as_mut().map(|t| t.translated = false));
+    // The batches waiting are dropped.
+    with_translation(browser, |t| {
+        t.as_mut().map(|t| {
+            t.translated = false;
+            t.pending = 0;
+        })
+    });
 }
 
 /// Translates a tab's page, from its popover, or shows its original again.
@@ -389,7 +410,7 @@ pub(super) fn translation_json(tab: NodeId, url: &str) -> serde_json::Value {
     if never && !translation.translated {
         return serde_json::Value::Null;
     }
-    json!({ "language": translation.language, "translated": translation.translated, "always": choice == Some(true) })
+    json!({ "language": translation.language, "translated": translation.translated, "pending": translation.pending > 0, "always": choice == Some(true) })
 }
 
 /// Always translates a language, never does, or forgets the choice: the pages in it show so.

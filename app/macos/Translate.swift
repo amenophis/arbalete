@@ -11,6 +11,8 @@ import Translation
 struct PageTranslation: Decodable, Equatable {
     var language: String
     var translated: Bool
+    /// Some of its text is with macOS, being translated.
+    var pending: Bool
     var always: Bool
 }
 
@@ -136,10 +138,25 @@ struct TranslateButton: View {
     }
 
     var body: some View {
-        IconButton(
-            symbol: "translate", label: "Translate page", size: 26,
-            active: shown || translation.translated, rest: 1
-        ) { shown.toggle() }
+        Group {
+            if translation.pending {
+                // While macOS translates, a spinner in its place.
+                Button { shown.toggle() } label: {
+                    ProgressView().controlSize(.small)
+                        .frame(width: 26, height: 26)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(0.1)))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Translating…")
+                .accessibilityLabel("Translating page")
+            } else {
+                IconButton(
+                    symbol: "translate", label: "Translate page", size: 26,
+                    active: shown || translation.translated, rest: 1
+                ) { shown.toggle() }
+            }
+        }
         .popover(isPresented: _shown.projectedValue, arrowEdge: .bottom) {
             if #available(macOS 26, *) {
                 TranslatePopover(model: model, tab: tab, translation: translation) { shown = false }
@@ -163,14 +180,18 @@ private struct TranslatePopover: View {
     }
     /// Set to download the page's language, through the system's sheet.
     private let _download = State<TranslationSession.Configuration?>(initialValue: nil)
+    /// The system downloads the page's language.
+    private let _downloading = State<Bool>(initialValue: false)
 
     var body: some View {
         let name = languageName(translation.language)
         let target = languageName(targetLanguage().minimalIdentifier)
         VStack(alignment: .leading, spacing: 10) {
             Text(
-                translation.translated
-                    ? "Translated from \(name)." : "Translate this page from \(name) to \(target)?"
+                translation.pending
+                    ? "Translating from \(name)…"
+                    : translation.translated
+                        ? "Translated from \(name)." : "Translate this page from \(name) to \(target)?"
             )
             .font(.system(size: 13, weight: .semibold))
             .fixedSize(horizontal: false, vertical: true)
@@ -178,6 +199,11 @@ private struct TranslatePopover: View {
             case .unsupported:
                 Text("macOS can't translate \(name) to \(target).")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
+            case .supported where _downloading.wrappedValue:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Downloading \(name)…").foregroundStyle(.secondary)
+                }
             case .supported:
                 Button("Download \(name)…") {
                     _download.wrappedValue = TranslationSession.Configuration(
@@ -225,8 +251,11 @@ private struct TranslatePopover: View {
         .frame(width: 270, alignment: .leading)
         .task(id: _download.wrappedValue == nil) { await checkStatus() }
         .translationTask(_download.wrappedValue) { session in
+            _downloading.wrappedValue = true
             try? await session.prepareTranslation()
             await checkStatus()
+            _downloading.wrappedValue = false
+            _download.wrappedValue = nil
         }
     }
 
