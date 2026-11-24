@@ -337,6 +337,7 @@ wrap_browser_process_handler! {
             apply_shortcuts();
             restore(self.data_dir.join(store::FILE_NAME));
             check_archive();
+            schedule_github_folders();
             DOWNLOADS.set(downloads::load(&self.data_dir.join(downloads::FILE_NAME)));
             make_bridge();
             #[cfg(target_os = "macos")]

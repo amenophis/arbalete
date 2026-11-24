@@ -614,7 +614,7 @@ struct SpaceSections: View {
     /// The row showing a tab: its own, its split's, or its closed folder's.
     static func row(of tab: Int, in items: [Item]) -> Int? {
         for item in items {
-            if case .folder(_, _, true, let children) = item {
+            if case .folder(_, _, true, let children, _) = item {
                 if let row = row(of: tab, in: children) { return row }
             } else if item.tabs.contains(where: { $0.id == tab }) {
                 return item.id
@@ -1385,19 +1385,33 @@ struct ItemRows: View {
                                 SplitHalf(leading: leading)
                             }
                         }
-                case .folder(let id, let title, let expanded, _):
-                    FolderRow(model: model, id: id, title: title, expanded: expanded)
+                case .folder(let id, let title, let expanded, _, let github):
+                    FolderRow(model: model, id: id, title: title, expanded: expanded, github: github)
                 case .split(let id, let tabs):
                     SplitRow(model: model, id: id, tabs: tabs, selected: selected)
                 }
             }
             .padding(.leading, CGFloat(depth) * Measure.indent)
-            if case .folder(let id, _, true, let children) = item {
+            if case .folder(let id, _, true, let children, let github) = item {
+                // Like Arc's, a long GitHub folder shows its first results, the tab selected
+                // among the others too, and a row showing them all.
+                let folded = github != nil && children.count > foldedRows && !model.unfolded.contains(id)
+                let shown =
+                    folded
+                    ? Array(children.prefix(foldedRows))
+                        + children.dropFirst(foldedRows).filter { row in
+                            row.tabs.contains { $0.id == selected }
+                        }
+                    : children
                 // Like Arc's, a folder opening slides its rows down from under it.
                 ItemRows(
-                    model: model, items: children, parent: id, selected: selected,
+                    model: model, items: shown, parent: id, selected: selected,
                     pinned: pinned, depth: depth + 1)
                     .transition(.move(edge: .top).combined(with: .opacity))
+                if folded {
+                    ShowMoreRow { model.unfolded.insert(id) }
+                        .padding(.leading, CGFloat(depth + 1) * Measure.indent)
+                }
             }
         }
     }
@@ -1447,7 +1461,7 @@ struct FolderIcon: View {
 /// The last row `items` show, inside an open folder at their end, if any.
 func lastShown(_ items: [Item]) -> Int? {
     guard let last = items.last else { return nil }
-    if case .folder(_, _, true, let children) = last, let inner = lastShown(children) {
+    if case .folder(_, _, true, let children, _) = last, let inner = lastShown(children) {
         return inner
     }
     return last.id
@@ -1456,7 +1470,7 @@ func lastShown(_ items: [Item]) -> Int? {
 /// The open folders among `items`, as deep as they go.
 func openFolders(_ items: [Item]) -> [Int] {
     items.flatMap { item -> [Int] in
-        guard case .folder(let id, _, let expanded, let children) = item, expanded else { return [] }
+        guard case .folder(let id, _, let expanded, let children, _) = item, expanded else { return [] }
         return [id] + openFolders(children)
     }
 }
@@ -1499,6 +1513,12 @@ struct TabRow: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(tab.label).lineLimit(1)
+                    if let subtitle = tab.subtitle, model.renameHint != tab.id {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Ink.secondary)
+                            .lineLimit(1)
+                    }
                     if model.renameHint == tab.id {
                         Text("Double-click to rename")
                             .font(.system(size: 11))
@@ -1508,6 +1528,13 @@ struct TabRow: View {
                 }
                 .animation(.easeInOut(duration: 0.15), value: model.renameHint == tab.id)
                 Spacer(minLength: 0)
+                if tab.unseen == true && !hovered && !active {
+                    Circle()
+                        .fill(model.accent(in: spaceTheme))
+                        .frame(width: 7, height: 7)
+                        .padding(.trailing, 6)
+                        .help("New")
+                }
                 if hovered && tab.shareInstead == true {
                     CloseButton(symbol: "rectangle.inset.filled.and.person.filled", help: "Share This Tab Instead") {
                         model.run("share-this-tab", tab.id)
@@ -1567,6 +1594,44 @@ struct TabRow: View {
     }
 }
 
+/// GitHub's logo, Primer Octicons' mark-github, with its license (MIT) in app/resources/github.
+let githubLogo: NSImage? = Bundle.main.url(
+    forResource: "mark-github", withExtension: "svg", subdirectory: "github"
+).flatMap { NSImage(contentsOf: $0) }
+
+/// How many results a GitHub folder shows before its Show More row.
+let foldedRows = 8
+
+/// Shows all of a GitHub folder's results.
+struct ShowMoreRow: View {
+    let show: () -> Void
+    private let _hovered = State<Bool>(initialValue: false)
+    private var hovered: Bool {
+        get { _hovered.wrappedValue }
+        nonmutating set { _hovered.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 16)
+            Text("Show More").lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .font(.system(size: 14))
+        .frame(height: Measure.rowFill)
+        .background(
+            RoundedRectangle(cornerRadius: Measure.radius).fill(hovered ? Ink.item : .clear))
+        .padding(.vertical, (Measure.row - Measure.rowFill) / 2)
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .onTapGesture(perform: show)
+    }
+}
+
 /// A click collapses or expands the folder; its menu's Rename edits its title.
 struct FolderRow: View {
     @ObservedObject var model: AppModel
@@ -1574,6 +1639,7 @@ struct FolderRow: View {
     let id: Int
     let title: String
     let expanded: Bool
+    let github: GitHubFolder?
     private let _hovered = State<Bool>(initialValue: false)
     private var hovered: Bool {
         get { _hovered.wrappedValue }
@@ -1583,12 +1649,30 @@ struct FolderRow: View {
     var body: some View {
         HStack(spacing: 8) {
             FolderIcon(open: expanded, tint: model.accent(in: spaceTheme))
+                .overlay(alignment: .bottom) {
+                    if github != nil, let logo = githubLogo {
+                        // GitHub's logo on its front tells a GitHub folder, like Arc's.
+                        Image(nsImage: logo)
+                            .resizable()
+                            .renderingMode(.template)
+                            .foregroundStyle(.white)
+                            .frame(width: 7, height: 7)
+                            .padding(.bottom, 2)
+                    }
+                }
                 .frame(width: 16)
             if model.renaming == id {
                 NameField(model: model, id: id, title: title, blank: false)
             } else {
                 Text(title).lineLimit(1)
                 Spacer(minLength: 0)
+                if github?.warning == true {
+                    // Like Arc's: its menu tells what went wrong.
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .help("Its last update failed, or single sign-on hides pull requests")
+                }
             }
         }
         .padding(.horizontal, 10)

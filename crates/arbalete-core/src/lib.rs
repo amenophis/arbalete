@@ -5,6 +5,7 @@
 pub mod boosts;
 pub mod easel;
 pub mod favicon;
+pub mod github;
 pub mod history;
 pub mod import;
 pub mod search;

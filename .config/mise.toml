@@ -143,6 +143,8 @@ run = [
   "plutil -insert SUAutomaticallyUpdate -bool YES target/bundle/Arbalete.app/Contents/Info.plist",
   # The fonts of Easels' texts, like Arc's (app/macos/Easel.swift), with their license (SIL OFL).
   "cp -R app/resources/fonts target/bundle/Arbalete.app/Contents/Resources/fonts",
+  # GitHub's logo, from Primer Octicons, with its license (MIT), on GitHub folders (decision 0013).
+  "cp -R app/resources/github target/bundle/Arbalete.app/Contents/Resources/github",
   # The Boosts' code editor (app/editor), with Monaco and its license and notices, which
   # redistributing it requires.
   "mkdir -p target/bundle/Arbalete.app/Contents/Resources/editor && cp app/editor/* target/bundle/Arbalete.app/Contents/Resources/editor/",

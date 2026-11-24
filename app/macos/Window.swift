@@ -33,6 +33,7 @@ final class Backdrop {
                     MainActor.assumeIsolated {
                         effect.state = NSApp.isActive ? .active : .inactive
                         model.active = NSApp.isActive
+                        if NSApp.isActive { model.run("activated") }
                     }
                 }
             }

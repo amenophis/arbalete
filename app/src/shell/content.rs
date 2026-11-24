@@ -947,6 +947,14 @@ wrap_load_handler! {
             }
             #[cfg(target_os = "macos")]
             cover_revived(browser.as_deref(), is_loading == 1);
+            let main = browser.as_deref().and_then(|browser| browser.main_frame());
+            let url = main.map(|frame| CefString::from(&frame.url()).to_string()).unwrap_or_default();
+            if is_loading == 0 && site(&url) == "github.com" {
+                refresh_github_folders_soon(|sidebar, folder| sidebar.profile_of(folder) == Some(self.profile));
+                if let Some(tab) = browser.as_deref().and_then(page_tab) {
+                    opened_github_page(self.profile, tab, &url);
+                }
+            }
             if let Some(tab) = browser.as_deref().and_then(page_tab) {
                 pane_changed(tab);
                 if is_loading == 0 && let Some(browser) = browser.as_deref() {

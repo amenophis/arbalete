@@ -103,6 +103,8 @@ pub(super) fn select_tab(id: NodeId) {
     });
     if selected.is_ok() {
         show_selected();
+        let parent = STATE.with_borrow(|state| state.sidebar.node(id)?.parent);
+        refresh_github_folders_soon(|_, folder| parent == Some(folder));
     }
 }
 
@@ -122,6 +124,7 @@ pub(super) fn show_space(id: SpaceId) {
     }
     if update_sidebar(|sidebar| sidebar.display(id)).is_ok() {
         show_selected();
+        refresh_github_folders_soon(|sidebar, folder| sidebar.space_of(folder) == Some(id));
     }
 }
 

@@ -671,7 +671,7 @@ private struct RowDrop: DropDelegate {
     /// before or after the row.
     private func linkTarget(at point: CGPoint) -> DropTarget {
         let band = min(size.height / 4, 8)
-        if case .folder(let id, _, _, _) = item, point.y >= band, point.y <= size.height - band {
+        if case .folder(let id, _, _, _, _) = item, point.y >= band, point.y <= size.height - band {
             return .into(id)
         }
         return fallback(at: point)
@@ -680,11 +680,11 @@ private struct RowDrop: DropDelegate {
     /// Opens a link dropped on the row as a tab where `linkTarget` says.
     private func dropLink(_ info: DropInfo) {
         let target = linkTarget(at: info.location)
-        if case .into(let folder) = target, case .folder(_, _, _, let children) = item {
+        if case .into(let folder) = target, case .folder(_, _, _, let children, _) = item {
             return model.dropLink(info, into: folder, at: children.count)
         }
         // After an open folder is before what it holds.
-        if case .after = target, case .folder(let folder, _, true, _) = item {
+        if case .after = target, case .folder(let folder, _, true, _, _) = item {
             return model.dropLink(info, into: folder, at: 0)
         }
         guard let (parent, index) = model.place(of: item.id) else { return }
@@ -715,13 +715,13 @@ private struct RowDrop: DropDelegate {
             case .before, .on: ids.forEach { place($0, 0) }
             case .after:
                 // After an open folder is before what it holds.
-                if case .folder(let folder, _, true, _) = item {
+                if case .folder(let folder, _, true, _, _) = item {
                     ids.enumerated().forEach { model.move($1, to: folder, $0) }
                 } else {
                     ids.reversed().forEach { place($0, 1) }
                 }
             case .into(let folder):
-                if case .folder(_, _, _, let children) = item {
+                if case .folder(_, _, _, let children, _) = item {
                     ids.enumerated().forEach { model.move($1, to: folder, children.count + $0) }
                 }
             // Several tabs join the split in their order, each after the one before.
@@ -752,7 +752,7 @@ private struct RowDrop: DropDelegate {
         if point.y < band { return .before(item.id) }
         let bottom = point.y > size.height - band
         switch item {
-        case .folder(let id, _, let open, let children) where !bottom || (open && !children.isEmpty):
+        case .folder(let id, _, let open, let children, _) where !bottom || (open && !children.isEmpty):
             return model.dragged == id ? nil : .into(id)
         case .tab(let tab) where model.draggedTab && model.dragged != tab.id:
             return .split(tab.id, leading: point.x < size.width / 2)

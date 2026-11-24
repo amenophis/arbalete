@@ -176,6 +176,13 @@ fn run_command(command: Command) {
         (Command::Pin(tab), _) => toggle_pin(tab),
         (Command::NewFolder(parent), _) => new_folder(parent),
         (Command::FolderWith(tabs), _) => folder_with(&tabs),
+        (Command::NewGithubFolder(parent), _) => new_github_folder(parent),
+        (Command::RefreshGithubFolder(folder), _) => refresh_github_folder(folder),
+        (Command::ToggleGithubList(folder, list), _) => toggle_github_list(folder, list),
+        (Command::Activated, _) => refresh_github_folders_soon(|_, _| true),
+        (Command::ToggleGithubRepository(folder, repository), _) => {
+            toggle_github_repository(folder, &repository)
+        }
         (Command::NewEasel, _) => new_easel(),
         (Command::ShowLiveCapture(number, id, url, page, scale), _) => {
             show_live_capture((number, id), &url, page, scale)
