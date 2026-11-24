@@ -1,6 +1,6 @@
 //! The NSApplication subclass CEF requires on macOS, and the menus.
 
-use crate::command::{Command, Zoom};
+use crate::command::{Command, InspectorPanel, Zoom};
 use crate::menu::{Action, Entry};
 use crate::settings::{Keys, Priority, Settings};
 use crate::swipe::{Phase, Scroll};
@@ -275,6 +275,16 @@ define_class!(
         #[unsafe(method(arbaleteDevTools:))]
         fn dev_tools(&self, _sender: Option<&AnyObject>) {
             crate::shell::run(Command::DevTools(None));
+        }
+
+        #[unsafe(method(arbaleteJavaScriptConsole:))]
+        fn java_script_console(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::DevToolsPanel(InspectorPanel::Console));
+        }
+
+        #[unsafe(method(arbaleteInspectElements:))]
+        fn inspect_elements(&self, _sender: Option<&AnyObject>) {
+            crate::shell::run(Command::DevToolsPanel(InspectorPanel::Elements));
         }
 
         #[unsafe(method(arbaleteStop:))]
@@ -994,6 +1004,19 @@ pub fn setup_menu() {
                     ns_string!("Developer Tools"),
                     sel!(arbaleteDevTools:),
                     NSF12FunctionKey,
+                ),
+                // ⌥⌘J and ⌥⌘C, like Chrome's and Arc's.
+                option_item(
+                    mtm,
+                    ns_string!("JavaScript Console"),
+                    sel!(arbaleteJavaScriptConsole:),
+                    ns_string!("j"),
+                ),
+                option_item(
+                    mtm,
+                    ns_string!("Inspect Elements"),
+                    sel!(arbaleteInspectElements:),
+                    ns_string!("c"),
                 ),
             ],
         ),
