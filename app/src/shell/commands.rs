@@ -12,6 +12,16 @@ pub fn post(command: Command) {
     post_task(ThreadId::UI, Some(&mut RunCommand::new(command)));
 }
 
+/// Whether Back, Forward and Stop Loading can act on the shown page, for the menus to grey them.
+pub fn can_run(command: &Command) -> bool {
+    content().is_some_and(|browser| match command {
+        Command::Back => browser.can_go_back() == 1,
+        Command::Forward => browser.can_go_forward() == 1,
+        Command::Stop => browser.is_loading() == 1,
+        _ => true,
+    })
+}
+
 /// Runs a command from the UI or a menu, on the UI thread.
 /// Runs a command from the window `window`.
 #[cfg(target_os = "macos")]
