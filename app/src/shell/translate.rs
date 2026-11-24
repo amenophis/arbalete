@@ -12,8 +12,9 @@ const BINDING: &str = "__arbaleteTranslate";
 const WORLD: &str = "arbalete-translate";
 
 /// Tells a sample of the page's text and its `lang` once it loaded, and keeps
-/// `__arbaleteTranslation`, which hands the page's text in batches, puts their translations in
-/// place, translates the text added later and shows the originals again.
+/// `__arbaleteTranslation`, which hands the page's text in batches as it comes near the viewport,
+/// puts their translations in place, translates the text added later and shows the originals
+/// again. macOS takes seconds a batch: the text read first is translated first.
 const TRANSLATE: &str = r#"(() => {
     if (window !== top || window.__arbaleteTranslation) return;
     const tell = (said) => {
@@ -27,16 +28,39 @@ const TRANSLATE: &str = r#"(() => {
     const shown = new WeakMap();
     // The nodes of each batch handed, with the text handed.
     const batches = new Map();
+    // The elements watched until they come near the viewport, and those that came.
+    let watched = new WeakSet(), near = new WeakSet();
     let next = 0, on = false, queued = [], timer = 0;
     const wanted = (node) => /\p{L}/u.test(node.nodeValue) && !node.parentElement?.closest(skip);
+    const later = () => { if (!timer) timer = setTimeout(send, 50); };
+    const visible = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            visible.unobserve(entry.target);
+            near.add(entry.target);
+            for (const node of entry.target.childNodes) {
+                if (node.nodeType === Node.TEXT_NODE && wanted(node)) queued.push(node);
+            }
+        }
+        later();
+    }, { rootMargin: "50% 0px" });
+    // A text node is handed once its element comes near the viewport, at once if it came.
+    const add = (node) => {
+        const parent = node.parentElement;
+        if (near.has(parent)) queued.push(node);
+        else if (!watched.has(parent)) {
+            watched.add(parent);
+            visible.observe(parent);
+        }
+    };
     const collect = (root) => {
         if (root.nodeType === Node.TEXT_NODE) {
-            if (wanted(root)) queued.push(root);
+            if (wanted(root)) add(root);
             return;
         }
         if (root.nodeType !== Node.ELEMENT_NODE || root.closest(skip)) return;
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-        for (let node; (node = walker.nextNode());) if (wanted(node)) queued.push(node);
+        for (let node; (node = walker.nextNode());) if (wanted(node)) add(node);
     };
     const send = () => {
         timer = 0;
@@ -53,7 +77,7 @@ const TRANSLATE: &str = r#"(() => {
             nodes.push(node);
             texts.push(node.nodeValue.trim());
             length += node.nodeValue.length;
-            if (nodes.length >= 50 || length >= 4000) flush();
+            if (nodes.length >= 20 || length >= 2000) flush();
         }
         queued = [];
         flush();
@@ -69,14 +93,13 @@ const TRANSLATE: &str = r#"(() => {
                 record.addedNodes.forEach(collect);
             }
         }
-        if (!timer) timer = setTimeout(send, 300);
+        later();
     });
     window.__arbaleteTranslation = {
         start() {
             if (on || !document.body) return;
             on = true;
             collect(document.body);
-            send();
             observer.observe(document.body, { childList: true, subtree: true, characterData: true });
         },
         apply(batch, translations) {
@@ -96,6 +119,9 @@ const TRANSLATE: &str = r#"(() => {
         stop() {
             on = false;
             observer.disconnect();
+            visible.disconnect();
+            watched = new WeakSet();
+            near = new WeakSet();
             clearTimeout(timer);
             timer = 0;
             queued = [];
@@ -176,6 +202,8 @@ pub fn page_translation(browser: &Browser, message: &serde_json::Value) {
         }
         "Page.frameNavigated" if params["frame"]["parentId"].is_null() => {
             let gone = with_translation(browser, |translation| translation.take());
+            // The batches of the document gone are not translated.
+            crate::native::translate_stop(browser.identifier());
             // A page translated goes on translating the pages it leads to in its language.
             KEPT.with_borrow_mut(|kept| {
                 let id = browser.identifier();
@@ -309,6 +337,7 @@ fn start(browser: &Browser) {
 }
 
 fn stop(browser: &Browser) {
+    crate::native::translate_stop(browser.identifier());
     evaluate(browser, "__arbaleteTranslation.stop()");
     with_translation(browser, |t| t.as_mut().map(|t| t.translated = false));
 }

@@ -55,6 +55,15 @@ public func pageLanguage(_ lang: UnsafePointer<CChar>, _ sample: UnsafePointer<C
 /// The last batch to translate: batches are translated one after the other.
 @MainActor private var translating: Task<Void, Never>?
 
+/// Each page's count of stops: a batch asked before the last stop is dropped.
+@MainActor private var epochs: [Int32: Int] = [:]
+
+/// Drops the batches of a page's text not translated yet: it shows its original, or went.
+@_cdecl("arbalete_ui_translate_stop")
+public func translateStop(_ page: Int32) {
+    MainActor.assumeIsolated { epochs[page, default: 0] += 1 }
+}
+
 /// Translates a batch of a page's text from its language, `source`, to the user's, and gives
 /// the translations to arbalete_translated, or null when macOS cannot, like a language not
 /// downloaded.
@@ -70,8 +79,11 @@ public func translate(
             return
         }
         let previous = translating
+        let epoch = epochs[page, default: 0]
         translating = Task { @MainActor in
             await previous?.value
+            // The page showed its original or went since.
+            guard epochs[page, default: 0] == epoch else { return }
             let json = await translations(texts, from: source)
                 .flatMap { try? JSONEncoder().encode($0) }
                 .flatMap { String(data: $0, encoding: .utf8) }
@@ -105,6 +117,7 @@ public func translate(
         }
         return translated
     } catch {
+        NSLog("Arbalete: translating from %@ failed: %@", source, String(describing: error))
         sessions[source] = nil
         return nil
     }

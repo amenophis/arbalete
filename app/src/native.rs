@@ -62,6 +62,7 @@ unsafe extern "C" {
     fn arbalete_ui_focus_page(tab: i64);
     fn arbalete_ui_page_language(lang: *const c_char, sample: *const c_char) -> *mut c_char;
     fn arbalete_ui_translate(page: i32, batch: u32, source: *const c_char, texts: *const c_char);
+    fn arbalete_ui_translate_stop(page: i32);
     fn free(pointer: *mut c_void);
     fn arbalete_ui_easel(window: u32, tab: i64, easel: *const c_char) -> bool;
     fn arbalete_ui_easel_closed(tab: i64);
@@ -611,6 +612,12 @@ pub fn translate(page: i32, batch: u32, source: &str, texts: &[String]) {
     };
     // SAFETY: C strings that outlive the call, which copies them.
     unsafe { arbalete_ui_translate(page, batch, source.as_ptr(), texts.as_ptr()) };
+}
+
+/// Drops the batches of a page's text not translated yet: the page shows its original, or went.
+pub fn translate_stop(page: i32) {
+    // SAFETY: a plain value.
+    unsafe { arbalete_ui_translate_stop(page) };
 }
 
 /// macOS translated a batch of a page's text, as a JSON array of strings in the batch's order, or
