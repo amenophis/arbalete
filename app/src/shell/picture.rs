@@ -233,10 +233,10 @@ pub(super) fn allow_picture(site: String, on: bool) {
 }
 
 /// Puts the video of a tab the window `window` shows in Chromium's floating window, as the
-/// window no longer shows with the app behind others, or is `away`, hidden with the app or
-/// minimized, once AppKit is done with it: like Arc's, a window still in sight beside another
-/// app's keeps it, and one behind another of Arbalete's windows too. Seeing the window again takes it back
-/// (picture_shown_back).
+/// window no longer shows with the app behind others, or is `away`, hidden with the app,
+/// minimized or on a desktop no longer shown, once AppKit is done with it: like Arc's, a window
+/// still in sight beside another app's keeps it, and one behind another of Arbalete's windows
+/// too. Seeing the window again takes it back (picture_shown_back).
 pub(super) fn app_left(window: u32, away: bool) {
     post_task(ThreadId::UI, Some(&mut LeftApp::new(window, away)));
 }

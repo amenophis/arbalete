@@ -495,7 +495,7 @@ thread_local! {
 pub fn window_visible(id: u32, visible: bool, away: bool) {
     let state = match (visible, away) {
         (true, _) => "in sight",
-        (false, true) => "away, hidden or minimized",
+        (false, true) => "away, hidden, minimized or on another desktop",
         (false, false) => "out of sight",
     };
     eprintln!("picture: window {id} {state}");

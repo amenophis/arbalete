@@ -59,14 +59,19 @@ private final class MainWindow: NSObject, NSWindowDelegate {
         // Minimized, the window may still tell it is visible as it goes to the Dock. Hiding, the
         // app tells before its windows go, while its pages still show, and they stay out of
         // sight until it shows again or comes in front, whatever their occlusion tells meanwhile.
-        for (name, object) in [
-            (NSWindow.didChangeOcclusionStateNotification, window as Any),
-            (NSWindow.didMiniaturizeNotification, window),
-            (NSApplication.willHideNotification, NSApp), (NSApplication.didUnhideNotification, NSApp),
-            (NSApplication.didBecomeActiveNotification, NSApp),
+        // On a desktop no longer shown, the app may stay in front and its occlusion still tell
+        // it is visible: the desktop switch tells.
+        let workspace = NSWorkspace.shared.notificationCenter
+        for (center, name, object) in [
+            (NotificationCenter.default, NSWindow.didChangeOcclusionStateNotification, window as Any),
+            (.default, NSWindow.didMiniaturizeNotification, window),
+            (.default, NSApplication.willHideNotification, NSApp),
+            (.default, NSApplication.didUnhideNotification, NSApp),
+            (.default, NSApplication.didBecomeActiveNotification, NSApp),
+            (workspace, NSWorkspace.activeSpaceDidChangeNotification, nil),
         ] {
             observers.append(
-                NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) {
+                center.addObserver(forName: name, object: object, queue: .main) {
                     [id, weak window] notification in
                     MainActor.assumeIsolated {
                         guard let window else { return }
@@ -83,7 +88,7 @@ private final class MainWindow: NSObject, NSWindowDelegate {
                             appHiding = false
                         default: break
                         }
-                        let away = appHiding || window.isMiniaturized
+                        let away = appHiding || window.isMiniaturized || !window.isOnActiveSpace
                         let visible = window.occlusionState.contains(.visible) && !away
                         arbalete_window_visible(id, visible, away)
                     }
@@ -104,6 +109,7 @@ private final class MainWindow: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         observers.forEach(NotificationCenter.default.removeObserver)
+        observers.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
         observers = []
         // After AppKit is done with it.
         DispatchQueue.main.async { [id] in
