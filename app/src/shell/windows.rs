@@ -73,8 +73,10 @@ fn close_standalone() {
     send_archive();
 }
 
-/// Opens an incognito window as `new_incognito_window` does, on a tab showing `url` if any.
+/// Opens an incognito window as `new_incognito_window` does, on a tab showing `url` if any: of the
+/// displayed Space's profile, like Chrome's, whose extensions allowed in incognito run there.
 pub(super) fn open_incognito_window(url: Option<&str>) {
+    let of = extensions_profile(displayed_profile());
     let space = update_sidebar(Sidebar::open_incognito);
     let tab = url
         .map(|url| update_sidebar(|sidebar| sidebar.open_tab(space, url).expect("the new Space")));
@@ -86,12 +88,11 @@ pub(super) fn open_incognito_window(url: Option<&str>) {
         };
         (profile, view)
     });
-    let dir = std::env::temp_dir().join(format!(
-        "arbalete-incognito-{}-{}",
-        std::process::id(),
-        serde_json::to_string(&profile).expect("an id")
-    ));
-    INCOGNITO.with_borrow_mut(|incognito| incognito.insert(profile, dir));
+    // Our CEF build (amenophis/cef-builds, incognito-of-profile.patch) makes a cache path
+    // `Incognito <id>` in a profile's directory an in-memory profile of that one.
+    let id = serde_json::to_string(&profile).expect("an id");
+    let dir = profile_dir(of).join(format!("Incognito {id}"));
+    INCOGNITO.with_borrow_mut(|incognito| incognito.insert(profile, Incognito { dir, of }));
     open_window_in(view, tab.is_none(), Some(space));
 }
 
@@ -127,8 +128,8 @@ fn close_incognito(id: u32) {
     }
     let _ = update_sidebar(|sidebar| sidebar.close_incognito(space));
     CONTEXTS.with_borrow_mut(|contexts| contexts.remove(&profile));
-    if let Some(dir) = INCOGNITO.with_borrow_mut(|incognito| incognito.remove(&profile)) {
-        let _ = std::fs::remove_dir_all(dir);
+    if let Some(incognito) = INCOGNITO.with_borrow_mut(|incognito| incognito.remove(&profile)) {
+        let _ = std::fs::remove_dir_all(incognito.dir);
     }
     // Its downloads leave the list, never saved; their files stay.
     DOWNLOADS.with_borrow_mut(|list| {
@@ -521,8 +522,8 @@ pub fn window_closed(id: u32) {
         show_selected();
     } else if let Some(host) = bridge_host() {
         // Quitting: the incognito windows' folders go too.
-        for (_, dir) in INCOGNITO.take() {
-            let _ = std::fs::remove_dir_all(dir);
+        for (_, incognito) in INCOGNITO.take() {
+            let _ = std::fs::remove_dir_all(incognito.dir);
         }
         // The bridge closes last, which quits (browser_closed): closed with the pages, it could
         // quit while the windows still close their overlays, and the app crashed.

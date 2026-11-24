@@ -19,7 +19,7 @@
     left: 0,
     width: 1280,
     height: 820,
-    incognito: false,
+    incognito: self.__arbaleteInitial?.tabs?.[0]?.incognito ?? false,
     type: "normal",
     state: "normal",
     alwaysOnTop: false,
@@ -67,6 +67,8 @@
   };
   self.__arbaleteSync = (state) => {
     tabs = state.tabs;
+    // The window is incognito while its tab is, an incognito window's (docs/extension-events.md).
+    window_.incognito = tabs[0]?.incognito ?? false;
     announce(state);
   };
   // Chrome's APIs take a callback last, or return a promise without one.
