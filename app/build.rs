@@ -74,6 +74,9 @@ fn main() {
     }
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=ArbaleteUI");
+    // The classes only AppleScript names, which nothing links to (macos/Scripting.swift), are
+    // kept too, in the app: the helpers have no interface.
+    println!("cargo:rustc-link-arg-bin=arbalete=-ObjC");
     // The Swift runtime ships with macOS; the SDK holds what links to it.
     let sdk = Command::new("xcrun")
         .args(["--show-sdk-path"])

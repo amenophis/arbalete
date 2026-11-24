@@ -775,6 +775,39 @@ extern "C" fn send(window: u32, json: *const c_char) {
     }
 }
 
+/// Runs `script` in the page of the tab `tab`, for AppleScript (app/macos/Scripting.swift): `done`
+/// then takes `context`, the script's result as text, null for none, or why it failed, and whether
+/// it ran. False if the tab has no live page, without calling `done`.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_execute_javascript(
+    tab: u64,
+    script: *const c_char,
+    done: extern "C" fn(*mut c_void, *const c_char, bool),
+    context: *mut c_void,
+) -> bool {
+    // SAFETY: the interface passes a string that lives during the call.
+    let script = unsafe { CStr::from_ptr(script) }.to_string_lossy();
+    let Ok(tab) = serde_json::from_value(serde_json::json!(tab)) else {
+        return false;
+    };
+    crate::shell::execute_javascript(
+        tab,
+        &script,
+        Box::new(move |result| {
+            let (text, ok) = match result {
+                Ok(text) => (text, true),
+                Err(error) => (Some(error), false),
+            };
+            let text = text.and_then(|text| CString::new(text.replace('\0', "")).ok());
+            done(
+                context,
+                text.as_ref().map_or(std::ptr::null(), |text| text.as_ptr()),
+                ok,
+            );
+        }),
+    )
+}
+
 /// The file behind a url of the app's UI, like a tab's cached icon, for the interface to load;
 /// null for none. The caller frees it with arbalete_free_string.
 #[unsafe(no_mangle)]

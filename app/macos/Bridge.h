@@ -29,3 +29,10 @@ bool arbalete_picture_should_close(unsigned int id);
 
 /// The Picture in Picture window `id`'s bar asks for its page's tab: it shows, and the window goes.
 void arbalete_picture_back(unsigned int id);
+
+/// Runs `script` in the page of the tab `tab`, for AppleScript (Scripting.swift): `done` then takes
+/// `context`, the script's result as text, null for none, or why it failed, and whether it ran.
+/// False if the tab has no live page, without calling `done`.
+bool arbalete_execute_javascript(unsigned long long tab, const char *script,
+                                 void (*done)(void *context, const char *result, bool ok),
+                                 void *context);
