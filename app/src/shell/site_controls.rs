@@ -52,7 +52,7 @@ pub(super) fn show_site_controls(button: Button) {
         return;
     };
     win().site_button.set(Some(button));
-    extensions::reload(displayed_profile());
+    extensions::reload(extensions_profile(displayed_profile()));
     send_site_controls(&url);
     place_site_controls();
     let Some(controller) = win().site.with_borrow(Clone::clone) else {
@@ -97,11 +97,11 @@ pub(super) fn pinned_extensions(profile: ProfileId) -> Vec<String> {
 }
 
 /// Sends the site controls' panel the selected tab's address, `url`, and the displayed Space's
-/// profile's extensions.
+/// profile's extensions (shown_extensions).
 pub(super) fn send_site_controls(url: &str) {
-    let profile = displayed_profile();
+    let (profile, extensions) = shown_extensions(displayed_profile());
     let pinned = pinned_extensions(profile);
-    let extensions: Vec<_> = extensions::list(profile)
+    let extensions: Vec<_> = extensions
         .iter()
         .map(|extension| {
             let mut json = extension_json(profile, extension);
@@ -245,8 +245,10 @@ pub(super) fn open_extension_popup(id: &str) {
     if open.as_deref() == Some(id) || just_closed {
         return;
     }
-    let profile = extension_profile();
-    let (Some(url), Some(button)) = (
+    // An incognito window's extensions run in its profile, their popups too, as in Chrome.
+    let (profile, extensions) = shown_extensions(extension_profile());
+    let (true, Some(url), Some(button)) = (
+        extensions.iter().any(|extension| extension.id == id),
         extensions::popup_url(profile, id),
         win().site_button.with_borrow(Clone::clone),
     ) else {
@@ -295,8 +297,8 @@ fn open_extension_window(profile: ProfileId, id: String, url: String, button: Op
 /// Opens an extension's options page: in a tab when it asks for one, like Chrome; otherwise, as
 /// Chrome shows it in a dialog, in a window like its popup's, over the main window's middle.
 pub(super) fn open_extension_options(id: &str) {
-    let profile = displayed_profile();
-    let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
+    let (profile, extensions) = shown_extensions(displayed_profile());
+    let extension = extensions.into_iter().find(|e| e.id == id);
     let (Some(extension), Some(url)) = (extension, extensions::options_url(profile, id)) else {
         return;
     };

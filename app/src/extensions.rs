@@ -36,6 +36,10 @@ pub struct Installed {
     pub options_in_tab: bool,
     /// Turned off by the user (or by Chromium), it stays installed but does not run.
     pub enabled: bool,
+    /// Allowed in incognito by the user, on Chromium's page of the extension, like Chrome's: it
+    /// runs in the profile's incognito windows too.
+    #[serde(skip)]
+    pub incognito: bool,
     pub description: String,
     pub version: String,
     /// What the library details, like Chromium's extensions page.
@@ -115,6 +119,7 @@ pub fn installed(profile_dir: &Path) -> Vec<Installed> {
             };
             Some(Installed {
                 enabled: !disabled,
+                incognito: setting["incognito"] == true,
                 details,
                 ..extension
             })
@@ -159,6 +164,7 @@ fn read_manifest(id: &str, dir: &Path) -> Option<Installed> {
         options_in_tab: manifest["options_ui"]["open_in_tab"] == true
             || manifest["options_ui"]["page"].is_null(),
         enabled: true,
+        incognito: false,
         description: localized(
             dir,
             &manifest,
@@ -253,6 +259,8 @@ pub struct ActiveTab {
     pub title: String,
     pub favicon: Option<String>,
     pub loading: bool,
+    /// In an incognito window of the profile: only the extensions allowed in incognito see it.
+    pub incognito: bool,
 }
 
 /// A tab's page: its browser context and, once the session has told it, its tab id.
@@ -309,10 +317,16 @@ impl Bridge {
     /// The state one of a profile's extensions sees: its active tab, with its page's tab id, and
     /// its address, title and icon only if the extension may see them (exposes_tab_details). A
     /// popup the user opened holds `activeTab` for it, as in Chrome.
+    /// The profile's incognito window in front hides from the extensions not allowed there, as
+    /// Chrome's: none of their windows has the focus then.
     fn state(&self, profile: ProfileId, extension: &str, popup: bool) -> Value {
+        let installed = list(profile).into_iter().find(|e| e.id == extension);
         let tab = self.tabs.get(&profile).and_then(Option::as_ref);
+        if tab.is_some_and(|tab| tab.incognito) && !installed.as_ref().is_some_and(|e| e.incognito)
+        {
+            return state_json(false, None, None, false);
+        }
         let details = tab.is_some_and(|tab| {
-            let installed = list(profile).into_iter().find(|e| e.id == extension);
             installed.is_some_and(|installed| {
                 let details = &installed.details;
                 (popup && details.permissions.iter().any(|p| p == "activeTab"))
@@ -436,6 +450,17 @@ pub fn options_url(profile: ProfileId, id: &str) -> Option<String> {
 /// A profile's browser context, once one of its pages has told it.
 fn context_of(profile: ProfileId) -> Option<String> {
     BRIDGE.with_borrow(|bridge| bridge.contexts.get(&profile).cloned())
+}
+
+/// Reads a profile's extensions again as their page closes, then once Chromium has written what
+/// it changed there that only its preferences tell, like Allow in Incognito.
+pub fn page_left(profile: ProfileId) {
+    reload(profile);
+    post_delayed_task(
+        ThreadId::UI,
+        Some(&mut Reread::new(profile)),
+        PREFERENCES_WRITTEN_MS,
+    );
 }
 
 /// Reads a profile's extensions again, after their page may have changed them.
@@ -767,7 +792,7 @@ fn state_json(focused: bool, tab: Option<&ActiveTab>, tab_id: Option<i64>, detai
                 "active": true,
                 "highlighted": true,
                 "pinned": false,
-                "incognito": false,
+                "incognito": tab.incognito,
                 "status": if tab.loading { "loading" } else { "complete" },
                 "url": tab.url,
                 "title": tab.title,
@@ -1714,7 +1739,7 @@ mod tests {
         let profile = TestDir::new("extensions");
         let preferences = json!({ "extensions": { "settings": {
             "dark": { "location": 1, "path": "dark/1.0_0", "disable_reasons": [], "from_webstore": true, "first_install_time": "13437699171529348" },
-            "block": { "location": 1, "path": "block/2.0_0", "disable_reasons": [] },
+            "block": { "location": 1, "path": "block/2.0_0", "disable_reasons": [], "incognito": true },
             "off": { "location": 1, "path": "off/1.0_0", "disable_reasons": [1] },
             "pdf": { "location": 5, "path": "/framework/pdf" },
             "flag": { "location": 8, "path": "/somewhere/flag" },
@@ -1740,6 +1765,8 @@ mod tests {
             .collect();
         assert_eq!(names, ["Dark Reader", "Off", "uBlock Origin Lite"]);
         assert!(list[0].enabled && !list[1].enabled && list[2].enabled);
+        // Allowed in incognito only as the user allowed it.
+        assert!(!list[0].incognito && !list[1].incognito && list[2].incognito);
         let list = [&list[0], &list[2]];
         assert_eq!(list[0].popup.as_deref(), Some("ui/popup.html"));
         assert_eq!(
@@ -1834,6 +1861,7 @@ mod tests {
             title: "Example".into(),
             favicon: None,
             loading: true,
+            incognito: false,
         };
         assert_eq!(
             state_json(true, Some(&tab), None, true),

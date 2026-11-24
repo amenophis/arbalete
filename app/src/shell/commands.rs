@@ -586,7 +586,7 @@ fn run_command(command: Command) {
         (Command::ManageExtensions, _) => open_tab("chrome://extensions"),
         (Command::SiteTargets(targets), _) => win().site_targets.set(targets),
         (Command::RemoveExtension(id), _) => {
-            let profile = displayed_profile();
+            let profile = extensions_profile(displayed_profile());
             let extension = extensions::list(profile).into_iter().find(|e| e.id == id);
             let Some(extension) = extension else { return };
             #[cfg(target_os = "macos")]
@@ -601,12 +601,12 @@ fn run_command(command: Command) {
         }
         (Command::ExtensionOptions(id), _) => open_extension_options(&id),
         (Command::SetExtensionEnabled(id, enabled), _) => {
-            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            let profile = extensions_profile(displayed_profile());
             extensions::set_enabled(profile, &id, enabled);
             send_state();
         }
         (Command::PinExtension(id, pinned), _) => {
-            let profile = STATE.with_borrow(|state| state.sidebar.displayed().profile);
+            let profile = extensions_profile(displayed_profile());
             let _ = update_sidebar(|sidebar| sidebar.pin_extension(profile, &id, pinned));
         }
         (Command::OpenPinnedExtension(id, button), _) => {

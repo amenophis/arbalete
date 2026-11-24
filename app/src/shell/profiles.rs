@@ -270,19 +270,20 @@ pub fn opened_web_data(profile: ProfileId) -> Option<PathBuf> {
 }
 
 /// Opens a profile's web data in its own directory, `Profile <id>`: Chromium only accepts profile
-/// directories directly in the root cache path. CEF needs it initialized before a browser can
-/// use it (ProfileContextHandler).
+/// directories directly in the root cache path. An incognito window's stays in memory, made of
+/// the profile it was opened from, for its directory in that one's (open_incognito_window). CEF
+/// needs it initialized before a browser can use it (ProfileContextHandler).
 pub(super) fn create_profile_context(profile: ProfileId) {
+    // An incognito window's profile is made of its profile's, which must be open first: its pages
+    // show once both are (on_request_context_initialized).
+    let of = extensions_profile(profile);
+    if of != profile && opened_web_data(of).is_none() {
+        return;
+    }
     CONTEXTS.with_borrow_mut(|contexts| contexts.insert(profile, None));
-    // Without a directory, an incognito window's web data stays in memory.
-    let incognito = INCOGNITO.with_borrow(|incognito| incognito.contains_key(&profile));
     let dir = profile_dir(profile);
     let settings = RequestContextSettings {
-        cache_path: CefString::from(if incognito {
-            ""
-        } else {
-            dir.to_str().expect("a UTF-8 path")
-        }),
+        cache_path: CefString::from(dir.to_str().expect("a UTF-8 path")),
         // The app restores its tabs at launch, so it keeps the cookies without an expiry date
         // too, like Chrome when it continues where it left off: many sites keep a sign-in in one.
         persist_session_cookies: 1,
@@ -295,7 +296,8 @@ pub(super) fn create_profile_context(profile: ProfileId) {
 }
 
 pub(super) fn profile_dir(profile: ProfileId) -> PathBuf {
-    if let Some(dir) = INCOGNITO.with_borrow(|incognito| incognito.get(&profile).cloned()) {
+    if let Some(dir) = INCOGNITO.with_borrow(|incognito| Some(incognito.get(&profile)?.dir.clone()))
+    {
         return dir;
     }
     let id = serde_json::to_string(&profile).expect("an id");

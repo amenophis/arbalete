@@ -18,7 +18,8 @@ pub(super) fn show_menu(target: Target) {
 /// Shows the developer bar's extensions menu at the pointer, like Arc's: the displayed Space's
 /// profile's extensions turned on, then adding and managing them.
 pub(super) fn show_extensions_menu() {
-    let extensions: Vec<_> = extensions::list(extension_profile())
+    let extensions: Vec<_> = shown_extensions(extension_profile())
+        .1
         .into_iter()
         .filter(|extension| extension.enabled)
         .map(|extension| (extension.id, extension.name))
@@ -44,8 +45,8 @@ pub(super) fn extension_profile() -> ProfileId {
 
 /// Shows the menu of an extension of the displayed Space's profile, by its id.
 pub(super) fn show_extension_menu(id: Option<&String>) {
-    let profile = displayed_profile();
-    let extension = id.and_then(|id| extensions::list(profile).into_iter().find(|e| &e.id == id));
+    let (profile, extensions) = shown_extensions(displayed_profile());
+    let extension = id.and_then(|id| extensions.into_iter().find(|e| &e.id == id));
     let Some(extension) = extension else { return };
     let pinned = pinned_extensions(profile).contains(&extension.id);
     let entries = menu::extension_menu(

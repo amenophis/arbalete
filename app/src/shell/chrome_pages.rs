@@ -145,7 +145,7 @@ pub(super) fn is_chrome_page(url: &str) -> bool {
 /// what it changed shows, as Chromium tells nothing of it.
 pub(super) fn left_page(profile: ProfileId, tab: NodeId) {
     if tab_has(tab, |tab| tab.url.starts_with("chrome://extensions")) {
-        extensions::reload(profile);
+        extensions::page_left(profile);
     }
 }
 
@@ -405,7 +405,7 @@ wrap_window_delegate! {
                 }
             });
             // What the extensions page changed shows.
-            extensions::reload(self.profile);
+            extensions::page_left(self.profile);
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 { 1 }

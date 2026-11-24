@@ -268,9 +268,9 @@ thread_local! {
     /// The menu item's title of the shortcut the page has first, pressed once, until the page
     /// leaves it (page_offered_shortcut).
     static OFFERED_SHORTCUT: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// The incognito windows' profiles, with the temporary folder that stands for their
-    /// directory, removed with the window: their web data stays in memory.
-    static INCOGNITO: RefCell<HashMap<ProfileId, PathBuf>> = RefCell::default();
+    /// The incognito windows' profiles, with their directory, removed with the window, and the
+    /// profile each was opened from.
+    static INCOGNITO: RefCell<HashMap<ProfileId, Incognito>> = RefCell::default();
     /// ⌥⌘N is registered to open Little Arbalete from any app (the little_hotkey setting).
     static LITTLE_HOTKEY: Cell<bool> = const { Cell::new(false) };
     /// Browsers not closed yet: the app quits when the last one closes.
@@ -771,10 +771,9 @@ impl UiState {
     }
 
     /// The displayed Space's profile's pinned extensions that are installed and turned on, in the
-    /// order they were pinned.
+    /// order they were pinned (shown_extensions).
     fn pinned_extensions(&self) -> Vec<serde_json::Value> {
-        let profile = self.sidebar.displayed().profile;
-        let installed = extensions::list(profile);
+        let (profile, installed) = shown_extensions(self.sidebar.displayed().profile);
         let profiles = self.sidebar.profiles();
         let pinned = profiles
             .iter()
@@ -991,10 +990,12 @@ fn send_state() {
         dispatch(&win().reveal_view, "arbalete:state", &json);
     });
     // Extensions see the displayed Space's profile in front, with its selected tab as its active
-    // tab.
+    // tab; an incognito window's, its profile's, in front only for those allowed in incognito
+    // (extensions::ActiveTab::incognito), once it shows a tab.
     let active = STATE.with_borrow(|state| {
         let sidebar = &state.sidebar;
         let space = sidebar.displayed();
+        let incognito = sidebar.is_incognito(space.id);
         let tab = space.selected.and_then(|selected| {
             let NodeKind::Tab(tab) = &sidebar.node(selected)?.kind else {
                 return None;
@@ -1006,11 +1007,16 @@ fn send_state() {
                 title: tab.label().to_string(),
                 favicon: tab.favicon.clone(),
                 loading: browser.is_some_and(|browser| browser.is_loading() == 1),
+                incognito,
             })
         });
-        (space.profile, tab)
+        (extensions_profile(space.profile), tab, incognito)
     });
-    let mut active = HashMap::from([active]);
+    let (profile, tab, incognito) = active;
+    let mut active = HashMap::new();
+    if !incognito || tab.is_some() {
+        active.insert(profile, tab);
+    }
     // The Little Arbalete window in front last shows its profile's active tab.
     let little = LITTLE.with_borrow(|littles| {
         let little = littles.iter().find(|l| Some(l.id) == ACTIVE_LITTLE.get())?;
@@ -1021,6 +1027,7 @@ fn send_state() {
             title: little.title.clone(),
             favicon: None,
             loading: browser.is_some_and(|browser| browser.is_loading() == 1),
+            incognito: false,
         };
         Some((little.profile, Some(tab)))
     });
@@ -1119,6 +1126,33 @@ fn mirror(view: &RefCell<Option<Panel>>, overlay: &Spot) {
 
 pub fn displayed_profile() -> ProfileId {
     STATE.with_borrow(|state| state.sidebar.displayed().profile)
+}
+
+/// An incognito window's profile: its web data stays in memory, made of the profile it was opened
+/// from, `of`, like Chrome's, whose extensions allowed in incognito run in it.
+struct Incognito {
+    /// Its directory, `Incognito <id>` in its profile's, which only the app writes in.
+    dir: PathBuf,
+    of: ProfileId,
+}
+
+/// The profile whose extensions run in `profile`'s pages: an incognito window's, the one it was
+/// opened from.
+fn extensions_profile(profile: ProfileId) -> ProfileId {
+    INCOGNITO
+        .with_borrow(|incognito| incognito.get(&profile).map(|incognito| incognito.of))
+        .unwrap_or(profile)
+}
+
+/// The extensions `profile`'s windows show, with the profile they are of: an incognito window's,
+/// those of its profile allowed in incognito, like Chrome's.
+fn shown_extensions(profile: ProfileId) -> (ProfileId, Vec<extensions::Installed>) {
+    let of = extensions_profile(profile);
+    let mut list = extensions::list(of);
+    if of != profile {
+        list.retain(|extension| extension.incognito);
+    }
+    (of, list)
 }
 
 /// The selected tab's address.
