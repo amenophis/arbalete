@@ -660,6 +660,15 @@ public func pageClosed(_ view: UnsafeMutableRawPointer?) {
     }
 }
 
+/// Gives the container of the tab `from`'s page to the tab `to`, which takes the page over, as a
+/// closed tab reopens.
+@_cdecl("arbalete_ui_page_renumbered")
+public func pageRenumbered(_ from: Int64, _ to: Int64) {
+    MainActor.assumeIsolated {
+        pageContainers[Int(to)] = pageContainers.removeValue(forKey: Int(from))
+    }
+}
+
 /// Moves the pages' containers out of the window `from`, which closes, into the window `to`,
 /// hidden.
 @_cdecl("arbalete_ui_hand_pages_over")

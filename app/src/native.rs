@@ -58,6 +58,7 @@ unsafe extern "C" {
     fn arbalete_ui_panes(window: u32, panes: *const c_char) -> *mut std::ffi::c_void;
     fn arbalete_ui_page_view(window: u32, tab: i64) -> *mut std::ffi::c_void;
     fn arbalete_ui_page_closed(view: *mut std::ffi::c_void);
+    fn arbalete_ui_page_renumbered(from: i64, to: i64);
     fn arbalete_ui_hand_pages_over(from: u32, to: u32);
     fn arbalete_ui_focus_page(tab: i64);
     fn arbalete_ui_easel(window: u32, tab: i64, easel: *const c_char) -> bool;
@@ -502,6 +503,12 @@ pub fn page_view(window: u32, tab: i64) -> Option<*mut std::ffi::c_void> {
 pub fn page_closed(view: *mut std::ffi::c_void) {
     // SAFETY: CEF's view of a browser closing, which the call only compares.
     unsafe { arbalete_ui_page_closed(view) };
+}
+
+/// Gives the container of the tab `from`'s page to the tab `to`, which takes the page over.
+pub fn page_renumbered(from: i64, to: i64) {
+    // SAFETY: plain values.
+    unsafe { arbalete_ui_page_renumbered(from, to) };
 }
 
 /// Shows an Easel's board (JSON) in the view of the tab `tab`, made in the window `window` the

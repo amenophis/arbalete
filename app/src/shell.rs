@@ -177,6 +177,9 @@ thread_local! {
     /// The live page of each tab shown since it opened, hidden while another tab is shown:
     /// switching back to it does not load it again.
     static PAGES: RefCell<HashMap<NodeId, Live>> = RefCell::default();
+    /// The pages of tabs just closed, hidden and frozen, with when they closed: reopened, a tab
+    /// takes its page back with its history, which CEF cannot give a new page (keep_closed_page).
+    static CLOSED_PAGES: RefCell<HashMap<NodeId, (Live, i64)>> = RefCell::default();
     /// The import assistant, shown above the page; created the first time it is shown, as most
     /// sessions never import.
     static IMPORT_VIEW: RefCell<Option<Panel>> = const { RefCell::new(None) };

@@ -130,6 +130,11 @@ fn page(tab: NodeId) -> Option<()> {
         let profile = state.sidebar.profile_of(tab)?;
         Some((profile, state.sidebar.tab_mut(tab)?.url.clone()))
     })?;
+    // A tab reopened takes back its page, kept frozen and hidden: showing wakes it.
+    if take_closed_page(tab, profile) {
+        mute_page(tab);
+        return Some(());
+    }
     match CONTEXTS.with_borrow(|contexts| contexts.get(&profile).cloned()) {
         Some(Some(mut context)) => {
             let start = if url.is_empty() { "about:blank" } else { &url };
@@ -501,20 +506,25 @@ pub(super) fn hide_content() {
     place_card();
 }
 
-/// Closes the pages of the tabs closed, archived or moved to another profile's Space, whose web
-/// data a page cannot change, and forgets the pictures of the tabs gone.
+/// Keeps the pages of the tabs closed or archived a while (keep_closed_page), closes those of the
+/// tabs moved to another profile's Space, whose web data a page cannot change, and forgets the
+/// pictures of the tabs gone.
 pub(super) fn prune_pages() {
-    let gone: Vec<NodeId> = STATE.with_borrow(|state| {
+    let gone: Vec<(NodeId, bool)> = STATE.with_borrow(|state| {
         PAGES.with_borrow(|pages| {
             pages
                 .iter()
                 .filter(|(tab, live)| state.sidebar.profile_of(**tab) != Some(live.profile))
-                .map(|(tab, _)| *tab)
+                .map(|(tab, _)| (*tab, state.sidebar.node(*tab).is_none()))
                 .collect()
         })
     });
-    for tab in gone {
-        close_page(tab);
+    for (tab, closed) in gone {
+        if closed {
+            keep_closed_page(tab);
+        } else {
+            close_page(tab);
+        }
     }
     prune_easel_views();
     STATE.with_borrow(|state| {
@@ -536,6 +546,90 @@ pub(super) fn close_page(tab: NodeId) {
     if win().shown.get() == Some(tab) {
         win().shown.set(None);
     }
+    if let Some(host) = live.browser.host() {
+        host.close_browser(1);
+    }
+}
+
+/// Keeps a closed tab's page hidden, muted and frozen rather than closing it, like a tab
+/// unloaded later (expire_closed_pages): reopened with ⌘Z or ⇧⌘T, the tab takes it back, its
+/// back and forward history with it, which CEF cannot give a new page. An incognito window's
+/// page closes, as its tabs cannot be reopened, and so does a page using the camera, the
+/// microphone or the screen, or shared, whose use stops with it.
+fn keep_closed_page(tab: NodeId) {
+    let keep = PAGES.with_borrow(|pages| {
+        pages.get(&tab).is_some_and(|live| {
+            !live.capturing
+                && !INCOGNITO.with_borrow(|incognito| incognito.contains_key(&live.profile))
+        })
+    });
+    if !keep || is_shared(tab) {
+        return close_page(tab);
+    }
+    close_inspector(tab);
+    let Some(mut live) = PAGES.with_borrow_mut(|pages| pages.remove(&tab)) else {
+        return;
+    };
+    if win().shown.get() == Some(tab) {
+        win().shown.set(None);
+    }
+    if let Some(host) = live.browser.host() {
+        host.was_hidden(1);
+        host.set_audio_muted(1);
+        // Its Picture in Picture window closes with it, as it would with a page closing.
+        let expression = "self.documentPictureInPicture?.window?.close(); \
+            document.pictureInPictureElement && document.exitPictureInPicture()";
+        let params = json!({ "expression": expression });
+        let message =
+            json!({ "id": unanswered_id(), "method": "Runtime.evaluate", "params": params });
+        host.send_dev_tools_message(Some(message.to_string().as_bytes()));
+        set_frozen(Some(&host), true);
+    }
+    live.frozen = true;
+    CLOSED_PAGES.with_borrow_mut(|closed| closed.insert(tab, (live, now())));
+}
+
+/// Gives a tab reopened, `tab`, the page it had as the tab `closed`, if it is kept still: its
+/// view moves along.
+pub(super) fn reopen_page(closed: NodeId, tab: NodeId) {
+    let Some(page) = CLOSED_PAGES.with_borrow_mut(|pages| pages.remove(&closed)) else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    crate::native::page_renumbered(tab_number(closed), tab_number(tab));
+    CLOSED_PAGES.with_borrow_mut(|pages| pages.insert(tab, page));
+}
+
+/// Takes a reopened tab's kept page back among the pages, if it has one of its profile: its tab
+/// went back to another profile's Space, which it cannot change, closes it.
+fn take_closed_page(tab: NodeId, profile: ProfileId) -> bool {
+    let Some((live, _)) = CLOSED_PAGES.with_borrow_mut(|pages| pages.remove(&tab)) else {
+        return false;
+    };
+    if live.profile != profile {
+        close_live(&live);
+        return false;
+    }
+    PAGES.with_borrow_mut(|pages| pages.insert(tab, live));
+    true
+}
+
+/// Closes the closed tabs' pages kept as long as a hidden page stays loaded, or all of them.
+pub(super) fn expire_closed_pages(all: bool) {
+    let due = now() - current_suspend_delays().1;
+    let expired: Vec<Live> = CLOSED_PAGES.with_borrow_mut(|pages| {
+        pages
+            .extract_if(|_, (_, closed)| all || *closed <= due)
+            .map(|(_, (live, _))| live)
+            .collect()
+    });
+    for live in &expired {
+        close_live(live);
+    }
+}
+
+/// Closes a page that is no tab's: its container then goes (BrowserLifeSpan's do_close).
+fn close_live(live: &Live) {
     if let Some(host) = live.browser.host() {
         host.close_browser(1);
     }

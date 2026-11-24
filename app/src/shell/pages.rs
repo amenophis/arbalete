@@ -25,7 +25,7 @@ fn suspend_delays(pressure: MemoryPressure, low_power: bool) -> (i64, i64) {
 }
 
 /// The suspension delays as the system stands now.
-fn current_suspend_delays() -> (i64, i64) {
+pub(super) fn current_suspend_delays() -> (i64, i64) {
     #[cfg(target_os = "macos")]
     return suspend_delays(crate::mac::memory_pressure(), crate::mac::low_power());
 }
@@ -56,6 +56,8 @@ pub fn low_power_changed(low_power: bool) {
 /// unloads once due. A page capturing, or of a site kept awake, is never suspended, nor is any
 /// when the settings say so.
 pub(super) fn suspend_hidden_pages() {
+    // Closed tabs' pages, which no setting keeps.
+    expire_closed_pages(false);
     let settings = app_settings();
     if !settings.suspend_tabs {
         return;
