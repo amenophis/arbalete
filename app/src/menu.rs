@@ -711,7 +711,7 @@ fn github_folder(sidebar: &Sidebar, folder: NodeId, title: &str) -> Vec<Entry> {
         }));
         entries.push(disabled(
             "repositories-hint",
-            "Those of the pull requests it shows",
+            "Only repositories with pull requests here",
         ));
     }
     // The organizations whose single sign-on hides pull requests, each opening its sign-in.
@@ -1203,7 +1203,7 @@ mod tests {
                 "  -",
                 "  (Repositories)",
                 "  ✓ o/r",
-                "  (Those of the pull requests it shows)",
+                "  (Only repositories with pull requests here)",
                 "  -",
                 "  (Single Sign-On Required)",
             ]
