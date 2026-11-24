@@ -55,6 +55,7 @@ struct SidebarView: View {
                     if model.state?.incognito != true {
                         UpdateBanner(model: model)
                     }
+                    MediaPlayers(model: model)
                 }
                 // Like Arc's, the tabs fade out behind the library's recent items; past them, the
                 // toolbar and the footer, 40 points each.

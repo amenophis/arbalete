@@ -5,7 +5,7 @@
 
 use crate::command::{
     Button, ButtonView, Command, DownloadAction, ExtensionTarget, HitTarget, InspectorPanel,
-    LittleAction, PeekAction, Setting, ShortcutEdit, SiteData, Target, Zoom,
+    LittleAction, MediaAction, PeekAction, Setting, ShortcutEdit, SiteData, Target, Zoom,
 };
 use crate::downloads::{self, Download};
 use crate::extensions;
@@ -26,7 +26,7 @@ use arbalete_core::undo::Edits;
 use arbalete_core::url_routing::Destination;
 use arbalete_core::{favicon, store};
 use cef::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::Entry;
@@ -54,6 +54,7 @@ mod import_ui;
 mod inspector;
 mod layout;
 mod little;
+mod media;
 mod menus;
 mod onboarding;
 mod overlay;
@@ -90,6 +91,7 @@ use import_ui::*;
 use inspector::*;
 pub use layout::*;
 pub use little::*;
+use media::*;
 pub use menus::*;
 pub use onboarding::onboarding_shown;
 use onboarding::*;
@@ -753,6 +755,8 @@ impl UiState {
             // The displayed Space's profile's pinned extensions, installed and turned on, whose
             // buttons show by the address.
             "extensions": self.pinned_extensions(),
+            // The players of the tabs left playing media or holding a call.
+            "players": self.players(),
             // All of them, which the library lists.
             "closed": self.closed.iter().rev().take(RECENTLY_CLOSED).map(|closed| json!({
                 "url": shown_url(&closed.tab.url),
@@ -1115,8 +1119,13 @@ struct Live {
     frozen: bool,
     /// It uses the camera, the microphone or the screen.
     capturing: bool,
-    /// Its frames playing sound (sound::page_sound): its row shows the speaker.
-    audible: HashSet<String>,
+    /// What its frames that played sound since their document play (sound::page_sound): its
+    /// row shows the speaker while one plays.
+    frames: HashMap<String, FrameMedia>,
+    /// Its media played while it was hidden: its player shows in the sidebar (media.rs).
+    played: bool,
+    /// Which of its Media Session's actions the sidebar offers, as its page tells it (media.rs).
+    session: Option<Session>,
 }
 
 /// An id for a DevTools message whose answer nobody reads: Chromium refuses a message whose id

@@ -20,6 +20,8 @@ struct AppState: Decodable {
     var standalone: Bool?
     /// The displayed Space's profile's pinned extensions, whose buttons show by the address.
     var extensions: [Extension]
+    /// The players of the tabs left playing media or holding a call (macos/Media.swift).
+    var players: [Player]?
     /// The tabs closed since launch, the last closed first.
     var closed: [ClosedTab]
 }
