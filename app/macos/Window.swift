@@ -494,7 +494,7 @@ final class SidebarResize: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
-        // Like Arc's, a double-click gives it back its usual width (SNAP_SIDEBAR).
+        // Like Arc's, a double-click gives it back its usual width (SIDEBAR_WIDTH in app/src/settings.rs).
         if event.clickCount == 2 {
             send(command("resize-sidebar", 228))
             return
