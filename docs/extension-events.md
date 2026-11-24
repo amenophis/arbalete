@@ -11,7 +11,9 @@ Bitwarden's unlock window, are Chromium's: they get Chrome's events natively.
 ## What the shim knows
 
 One window, id 1, and one tab in it: the displayed Space's selected tab (or Little Arbalete's), once its
-page has a tab id. A worker's first state is announced like a change, as its script ran before the shim.
+page has a tab id. An incognito window's selected tab is its profile's, `incognito: true`, only for the extensions
+allowed in incognito ([decision 0018](decisions/0018-extensions-in-incognito.md)): the others see no window
+focused. A worker's first state is announced like a change, as its script ran before the shim.
 
 | Field | Chrome | Shim |
 |---|---|---|
