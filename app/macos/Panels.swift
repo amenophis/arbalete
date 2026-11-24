@@ -12,8 +12,6 @@ final class FindBar: ObservableObject {
     @Published var text = ""
     @Published var found: (count: Int, active: Int)?
     weak var field: NSTextField?
-    /// Whether its surface takes the keyboard as it shows: from ⌘F, not as its page shows again.
-    var takesKeyboard: (Bool) -> Void = { _ in }
     private let app: AppModel
 
     init(app: AppModel) {
@@ -34,9 +32,9 @@ final class FindBar: ObservableObject {
             text = show.text
             field?.stringValue = text
             found = show.found.map { ($0.count, $0.active) }
-            takesKeyboard(show.focus)
-            // Once the surface shows, which takes the keyboard for itself first.
-            if show.focus { DispatchQueue.main.async { self.focus() } }
+            // From ⌘F, not as its page shows again. Only the field takes the keyboard: its surface
+            // taking it too, for SwiftUI's view, could keep it from the field on a first ⌘F.
+            if show.focus { focus() }
         case "arbalete:found":
             if let detail = try? JSONDecoder().decode(Found.self, from: detail), !text.isEmpty {
                 found = (detail.count, detail.active)
@@ -51,10 +49,10 @@ final class FindBar: ObservableObject {
         var active: Int
     }
 
-    /// Gives the field the keyboard, its text selected, as ⌘F and the arrows do in Arc's. The
-    /// first time, the field comes once SwiftUI lays the bar out, a moment after it shows.
+    /// Gives the field the keyboard, its text selected, as ⌘F and the arrows do in Arc's, once
+    /// it shows: the first time, the field comes once SwiftUI lays the bar out, a moment later.
     func focus(tries: Int = 10) {
-        guard let field, let window = field.window else {
+        guard let field, let window = field.window, !field.isHiddenOrHasHiddenAncestor else {
             if tries > 0 {
                 DispatchQueue.main.async { [weak self] in self?.focus(tries: tries - 1) }
             }
