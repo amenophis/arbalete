@@ -1068,13 +1068,19 @@ private struct DownloadLocationPicker: View {
     }
 }
 
-/// Like Arc's, a profile's data in Chromium's own settings pages.
+/// Like Arc's, a profile's data in Chromium's own settings pages, then those the app has no
+/// settings of its own for: what sites may do, the languages, the fonts and zoom, and the rest.
 private let dataPages: [(String, String, Color, String)] = [
     ("Privacy and Security", "lock.fill", Color(red: 0.07, green: 0.45, blue: 0.85), "chrome://settings/privacy"),
     ("Passwords", "key.fill", Color(red: 0.16, green: 0.67, blue: 0.27), "chrome://password-manager/passwords"),
     ("Credit Cards", "creditcard.fill", Color(red: 0.85, green: 0.69, blue: 0.09), "chrome://settings/payments"),
+    ("Addresses and More", "person.text.rectangle.fill", Color(red: 0.2, green: 0.6, blue: 0.6), "chrome://settings/autofill"),
     ("Notifications", "bell.fill", Color(red: 0.85, green: 0.45, blue: 0.16), "chrome://settings/content/notifications"),
+    ("Site Settings", "hand.raised.fill", Color(red: 0.36, green: 0.36, blue: 0.85), "chrome://settings/content"),
+    ("Languages", "globe", Color(red: 0.0, green: 0.6, blue: 0.85), "chrome://settings/languages"),
+    ("Fonts and Zoom", "textformat.size", Color(red: 0.55, green: 0.35, blue: 0.75), "chrome://settings/appearance"),
     ("Clear Browsing Data", "trash.fill", Color(red: 0.85, green: 0.2, blue: 0.22), "chrome://settings/clearBrowserData"),
+    ("All Settings", "gearshape.fill", Color(red: 0.5, green: 0.5, blue: 0.53), "chrome://settings"),
 ]
 
 /// A row leading to one of Chromium's pages, like Arc's: a colored tile, the label, an arrow.
