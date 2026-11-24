@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<!-- Arbalete's AppleScript dictionary (app/macos/Scripting.swift, decision 0017). -->
+<dictionary title="Arbalete Terminology">
+
+  <suite name="Standard Suite" code="????" description="Common terms for most applications.">
+
+    <command name="count" code="corecnte" description="Count the elements of an object.">
+      <cocoa class="NSCountCommand"/>
+      <direct-parameter type="specifier" description="The object whose elements are counted."/>
+      <parameter name="each" code="kocl" type="type" optional="yes" description="The class of the elements counted.">
+        <cocoa key="ObjectClass"/>
+      </parameter>
+      <result type="integer" description="How many there are."/>
+    </command>
+
+    <command name="make" code="corecrel" description="Make a tab, with its URL, or a window.">
+      <cocoa class="ArbaleteScriptMake"/>
+      <parameter name="new" code="kocl" type="type" description="The class of the new object: tab or window.">
+        <cocoa key="ObjectClass"/>
+      </parameter>
+      <parameter name="at" code="insh" type="location specifier" optional="yes" description="Where: in a window's displayed Space, or in a Space, which then shows. The front window by default.">
+        <cocoa key="Location"/>
+      </parameter>
+      <parameter name="with properties" code="prdt" type="record" optional="yes" description="The new tab's properties: its URL.">
+        <cocoa key="KeyDictionary"/>
+      </parameter>
+      <result type="specifier" description="The new tab."/>
+    </command>
+
+    <command name="close" code="coreclos" description="Close a window or a tab.">
+      <cocoa class="NSCloseCommand"/>
+      <direct-parameter type="specifier" description="The window or the tab."/>
+    </command>
+
+    <command name="quit" code="aevtquit" description="Quit the application.">
+      <cocoa class="NSQuitCommand"/>
+    </command>
+
+    <class name="application" code="capp" description="Arbalete.">
+      <cocoa class="NSApplication"/>
+      <element type="window" access="r" description="The browser windows, front to back.">
+        <cocoa key="scriptWindows"/>
+      </element>
+      <property name="name" code="pnam" type="text" access="r" description="The application's name."/>
+      <property name="frontmost" code="pisf" type="boolean" access="r" description="Whether it is the active application.">
+        <cocoa key="isActive"/>
+      </property>
+      <property name="version" code="vers" type="text" access="r" description="Its version."/>
+      <responds-to command="quit">
+        <cocoa method="handleQuitScriptCommand:"/>
+      </responds-to>
+    </class>
+
+    <class name="window" code="cwin" description="A browser window." plural="windows">
+      <cocoa class="ArbaleteScriptWindow"/>
+      <element type="tab" access="r" description="The tabs of the Space it shows, in sidebar order: its profile's favorites, then the pinned tabs, then today's.">
+        <cocoa key="scriptTabs"/>
+      </element>
+      <element type="space" access="r" description="The Spaces it can show, in sidebar order: only its own in an incognito or a blank window.">
+        <cocoa key="scriptSpaces"/>
+      </element>
+      <property name="id" code="ID  " type="integer" access="r" description="Its identifier, for this run of the application.">
+        <cocoa key="uniqueID"/>
+      </property>
+      <property name="name" code="pnam" type="text" access="r" description="The title of its active tab.">
+        <cocoa key="name"/>
+      </property>
+      <property name="index" code="pidx" type="integer" access="r" description="Its place among the windows, front to back.">
+        <cocoa key="index"/>
+      </property>
+      <property name="visible" code="pvis" type="boolean" access="r" description="Whether it shows on screen.">
+        <cocoa key="visible"/>
+      </property>
+      <property name="incognito" code="Ainc" type="boolean" access="r" description="Whether it is an incognito window.">
+        <cocoa key="incognito"/>
+      </property>
+      <property name="active tab" code="Aatb" type="tab" access="r" description="The tab it shows.">
+        <cocoa key="activeTab"/>
+      </property>
+      <property name="active space" code="Aasp" type="space" access="r" description="The Space it shows.">
+        <cocoa key="activeSpace"/>
+      </property>
+      <responds-to command="close">
+        <cocoa method="scriptClose:"/>
+      </responds-to>
+    </class>
+  </suite>
+
+  <suite name="Arbalete Suite" code="Arba" description="Tabs and Spaces.">
+
+    <class name="space" code="Aspc" description="A Space of the sidebar." plural="spaces">
+      <cocoa class="ArbaleteScriptSpace"/>
+      <element type="tab" access="r" description="Its tabs, in sidebar order: its profile's favorites, then its pinned tabs, then today's.">
+        <cocoa key="scriptTabs"/>
+      </element>
+      <property name="id" code="ID  " type="integer" access="r" description="Its identifier.">
+        <cocoa key="uniqueID"/>
+      </property>
+      <property name="title" code="Attl" type="text" access="r" description="Its name.">
+        <cocoa key="title"/>
+      </property>
+      <responds-to command="focus">
+        <cocoa method="scriptFocus:"/>
+      </responds-to>
+    </class>
+
+    <class name="tab" code="Atab" description="A tab." plural="tabs">
+      <cocoa class="ArbaleteScriptTab"/>
+      <property name="id" code="ID  " type="integer" access="r" description="Its identifier.">
+        <cocoa key="uniqueID"/>
+      </property>
+      <property name="title" code="Attl" type="text" access="r" description="Its page's title.">
+        <cocoa key="title"/>
+      </property>
+      <property name="URL" code="pURL" type="text" description="Its page's address. Setting it shows the tab and loads the address there.">
+        <cocoa key="address"/>
+      </property>
+      <responds-to command="select">
+        <cocoa method="scriptSelect:"/>
+      </responds-to>
+      <responds-to command="close">
+        <cocoa method="scriptClose:"/>
+      </responds-to>
+      <responds-to command="execute">
+        <cocoa method="scriptExecute:"/>
+      </responds-to>
+    </class>
+
+    <command name="select" code="ArbaSelc" description="Show a tab in its window, which comes in front of the others.">
+      <direct-parameter type="tab" description="The tab."/>
+    </command>
+
+    <command name="focus" code="ArbaFocs" description="Show a Space in its window, which comes in front of the others.">
+      <direct-parameter type="space" description="The Space."/>
+    </command>
+
+    <command name="execute" code="ArbaExJS" description="Run JavaScript in a tab's page, which must be loaded, and give its result: a string as itself, another value in JSON.">
+      <direct-parameter type="tab" description="The tab."/>
+      <parameter name="javascript" code="ArJS" type="text" description="The script. A promise it gives is awaited.">
+        <cocoa key="javascript"/>
+      </parameter>
+      <result type="text" description="Its result, nothing for undefined."/>
+    </command>
+  </suite>
+</dictionary>
