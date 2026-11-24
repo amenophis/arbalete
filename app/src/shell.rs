@@ -11,7 +11,7 @@ use crate::downloads::{self, Download};
 use crate::extensions;
 use crate::menu::{self, Action};
 use crate::permissions;
-use crate::settings::{self, Settings};
+use crate::settings::{self, SIDEBAR_WIDTH, Settings};
 use crate::strings::{chromium, chromium_with};
 use arbalete_core::history::{self, History};
 use arbalete_core::import::browsers::{self, Family};
@@ -125,8 +125,6 @@ const UI_ORIGIN: &str = "arb://ui/";
 /// CEF's root cache path, which holds every profile's web data. Read from the IO thread too,
 /// which serves the favicons.
 static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
-
-const SIDEBAR_WIDTH: i32 = 260;
 
 /// The docked sidebar is wider while it shows the library.
 const LIBRARY_WIDTH: i32 = SIDEBAR_WIDTH + 180;

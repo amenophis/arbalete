@@ -88,8 +88,6 @@ pub(super) fn docked_width() -> i32 {
 // Measured on Arc's.
 const MIN_SIDEBAR: i32 = 164;
 const MAX_SIDEBAR: i32 = 500;
-/// The width the sidebar's edge snaps to, like Arc's.
-const SNAP_SIDEBAR: i32 = 228;
 /// The window's least size, measured on Arc's, whatever the sidebar's width.
 pub(super) const MIN_WINDOW_WIDTH: i32 = 470;
 pub(super) const MIN_WINDOW_HEIGHT: i32 = 385;
@@ -126,8 +124,8 @@ pub(super) fn resize_sidebar(x: f64) {
     }
     let mut width = (x.round() as i32).clamp(MIN_SIDEBAR, MAX_SIDEBAR);
     // Like Arc's, it snaps to its usual width near it.
-    if (width - SNAP_SIDEBAR).abs() < 14 {
-        width = SNAP_SIDEBAR;
+    if (width - SIDEBAR_WIDTH).abs() < 14 {
+        width = SIDEBAR_WIDTH;
     }
     if width == sidebar_width() {
         return;

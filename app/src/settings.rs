@@ -8,6 +8,10 @@ use std::{collections::BTreeMap, fs, io, path::Path};
 /// The settings' file name in the data directory.
 pub const FILE_NAME: &str = "settings.json";
 
+/// The sidebar's usual width, in points, Arc's: a new install's, and the one a double-click on
+/// its edge gives back.
+pub const SIDEBAR_WIDTH: i32 = 228;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -100,7 +104,7 @@ impl Default for Settings {
             picture_in_picture: true,
             awake_sites: Vec::new(),
             no_picture_sites: Vec::new(),
-            sidebar_width: 260,
+            sidebar_width: SIDEBAR_WIDTH,
             sidebar_hint_shown: false,
             developer_sites: BTreeMap::new(),
             ninth_sidebar_item: false,
@@ -177,7 +181,7 @@ mod tests {
         fs::write(&path, r#"{ "warnBeforeQuit": true }"#).unwrap();
         assert!(load(&path).restore_session && load(&path).suspend_tabs);
         assert!(load(&path).picture_in_picture);
-        assert_eq!(load(&path).sidebar_width, 260);
+        assert_eq!(load(&path).sidebar_width, SIDEBAR_WIDTH);
         assert!(!load(&path).ninth_sidebar_item && load(&path).count_favorites);
         fs::write(&path, "not json").unwrap();
         assert_eq!(load(&path), Settings::default());
