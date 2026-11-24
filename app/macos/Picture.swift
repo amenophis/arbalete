@@ -24,6 +24,8 @@ final class PictureWindow: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.level = .floating
         window.hidesOnDeactivate = false
+        // It floats to be seen with the app away, hidden too.
+        window.canHide = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isOpaque = false
         window.backgroundColor = .clear
@@ -153,6 +155,27 @@ public func openPicture(_ id: UInt32, _ width: Int32, _ height: Int32) -> Unsafe
 }
 
 /// Closes the Picture in Picture window `id`, its page closing: its view goes with the window.
+/// Keeps Chromium's floating video windows in sight as the app hides, like Chromium's, and shows
+/// the ones opened while it is hidden, as its video floats from its hiding: AppKit would show
+/// them only as it comes back. Again a moment later, for a window Chromium has yet to show.
+@_cdecl("arbalete_ui_keep_floating_videos")
+public func keepFloatingVideos() {
+    MainActor.assumeIsolated {
+        keepFloating()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { keepFloating() }
+    }
+}
+
+@MainActor func keepFloating() {
+    for window in NSApp.windows
+    where window.level >= .floating && window.canHide
+        && String(describing: type(of: window)).hasPrefix("NativeWidgetMac")
+    {
+        window.canHide = false
+        if NSApp.isHidden { window.orderFrontRegardless() }
+    }
+}
+
 @_cdecl("arbalete_ui_picture_closed")
 public func pictureClosed(_ id: UInt32) {
     MainActor.assumeIsolated { pictures.removeValue(forKey: Int(id))?.window.close() }

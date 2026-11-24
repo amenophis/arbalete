@@ -13,6 +13,10 @@ void arbalete_window_resized(unsigned int id);
 /// The window `id` came in front, or left it.
 void arbalete_window_activated(unsigned int id, bool active);
 
+/// The window `id` shows to the user, or no longer: behind other windows, on a desktop not
+/// shown, or `away`, hidden with the app or minimized.
+void arbalete_window_visible(unsigned int id, bool visible, bool away);
+
 /// Whether the window `id` may close now: the app may first close its pages.
 bool arbalete_window_should_close(unsigned int id);
 

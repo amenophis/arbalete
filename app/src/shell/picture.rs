@@ -1,7 +1,7 @@
 //! Picture in Picture, like Arc's: a tab left during a call, like Google Meet's, goes on in the
 //! page's own Picture in Picture window, and one left while its video plays with sound in
-//! Chromium's floating video window, as is one shown as the app goes behind another; either
-//! closes as the tab shows again, or the window comes back in front.
+//! Chromium's floating video window, as is one shown as its window goes out of sight; either
+//! closes as the tab shows again, or the window comes back in sight.
 
 use super::*;
 
@@ -64,6 +64,24 @@ fn watch_back(host: &BrowserHost) {
 /// window's back to tab button: like Chromium's, the app comes to the front with its tab. Not
 /// for a tab already in front, whose video the app itself takes back.
 pub fn picture_message(browser: &Browser, message: &serde_json::Value) {
+    if message["id"]
+        .as_i64()
+        .is_some_and(|id| PICTURE_IDS.contains(&id))
+    {
+        let url = page_tab(browser).and_then(tab_url).unwrap_or_default();
+        let result = &message["result"]["result"]["value"];
+        match result.as_str() {
+            Some(result) => {
+                eprintln!("picture: {url}: {result}");
+                #[cfg(target_os = "macos")]
+                if result.starts_with("float: floating (") {
+                    crate::native::keep_floating_videos();
+                }
+            }
+            None => eprintln!("picture: {url}: {message}"),
+        }
+        return;
+    }
     if message["method"] != "Runtime.bindingCalled"
         || message["params"]["name"] != BACK_BINDING
         || !message["sessionId"].is_null()
@@ -97,15 +115,56 @@ fn window_tabs() -> Vec<NodeId> {
     tabs
 }
 
+/// The ids of the messages floating a page's video or taking it back, whose answers tell how it
+/// went (picture_message): each its own, as Chromium refuses one sent again before its answer.
+const PICTURE_IDS: std::ops::Range<i64> = 26_000_000..27_000_000;
+
+fn picture_id() -> i64 {
+    thread_local! {
+        static NEXT: Cell<i64> = const { Cell::new(PICTURE_IDS.start) };
+    }
+    let id = NEXT.get();
+    NEXT.set(if id + 1 < PICTURE_IDS.end {
+        id + 1
+    } else {
+        PICTURE_IDS.start
+    });
+    id
+}
+
+/// Puts a page's floating video steps in one line, each starting once the one before is done:
+/// a video asked back as the app comes in front and shows again, or by Back to tab while the
+/// app takes it back, would otherwise have its window close with the page still keeping it.
+/// Taking a video back tries again until the page no longer keeps it. Each step tells how it
+/// went (picture_message).
+const PICTURE_STEPS: &str = r#"self.__arbalete_picture_step ??= (() => {
+    let last = Promise.resolve();
+    // A step Chromium never answers lets the next ones go after a while.
+    const late = () => new Promise((done) => setTimeout(() => done("timed out"), 3000));
+    return (step) => (last = last
+        .then(() => Promise.race([step(), late()]))
+        .catch((error) => `failed: ${error}`));
+})();
+self.__arbalete_picture_back ??= async () => {
+    if (!document.pictureInPictureElement) return "back: none floating";
+    for (let tries = 0; document.pictureInPictureElement && tries < 4; tries++) {
+        await document.exitPictureInPicture().catch(() => {});
+        if (document.pictureInPictureElement) await new Promise((done) => setTimeout(done, 250));
+    }
+    return document.pictureInPictureElement ? "back: still floating" : "back: taken back";
+};
+"#;
+
 /// During a call (`call`), runs the handler the page gives its Media Session's
 /// `enterpictureinpicture` action (kept by media.rs), which Google Meet answers with its Picture
-/// in Picture window, like Chromium's automatic Picture in Picture; otherwise opens the video window on its video playing with
-/// sound. Not when the page shows a window already, and the window it opens closes as the page
-/// shows again. Chromium only opens either for a user's gesture: the request stands for the
-/// user's, who left the tab.
-const ENTER_PICTURE: &str = r#"(async (call) => {
+/// in Picture window, like Chromium's automatic Picture in Picture; otherwise opens the video
+/// window on its video playing with sound. Not when the page shows a window already, and the
+/// window it opens closes as the page shows again. Chromium only opens either for a user's
+/// gesture: the request stands for the user's, who left the tab. After PICTURE_STEPS.
+const ENTER_PICTURE: &str = r#"__arbalete_picture_step(async () => {
+    const call = CALL;
     const pictures = self.documentPictureInPicture;
-    if (document.pictureInPictureElement || pictures?.window) return;
+    if (document.pictureInPictureElement || pictures?.window) return "float: floating already";
     const enter = navigator.mediaSession?.__arbaleteActions?.enterpictureinpicture;
     if (call && enter && pictures) {
         enter({ action: "enterpictureinpicture" });
@@ -114,34 +173,45 @@ const ENTER_PICTURE: &str = r#"(async (call) => {
             document.removeEventListener("visibilitychange", shown);
             pictures.window?.close();
         };
-        return document.addEventListener("visibilitychange", shown);
+        document.addEventListener("visibilitychange", shown);
+        return "float: call window asked";
     }
-    if (!document.pictureInPictureEnabled) return;
+    if (!document.pictureInPictureEnabled) return "float: not enabled";
     const video = [...document.querySelectorAll("video")].find((video) =>
         !video.paused && !video.ended && !video.muted && video.volume > 0
             && video.readyState > 2 && !video.disablePictureInPicture);
-    if (!video) return;
+    if (!video) {
+        const videos = [...document.querySelectorAll("video")].map((video) =>
+            `paused ${video.paused}, ended ${video.ended}, muted ${video.muted}, volume ${video.volume}, `
+                + `ready ${video.readyState}, disabled ${video.disablePictureInPicture}`);
+        return `float: no video playing with sound (page ${document.visibilityState}; ${videos.join("; ")})`;
+    }
     await video.requestPictureInPicture();
     const shown = () => {
         if (document.hidden) return;
         document.removeEventListener("visibilitychange", shown);
-        if (document.pictureInPictureElement === video) document.exitPictureInPicture();
+        if (document.pictureInPictureElement === video) __arbalete_picture_step(__arbalete_picture_back);
     };
     document.addEventListener("visibilitychange", shown);
-})(CALL).catch(() => {})"#;
+    return `float: floating (page ${document.visibilityState})`;
+})"#;
 
 /// Takes back the videos the window's pages show in Chromium's floating video window, as the
-/// window comes back in front: the user came back to them. Tabs left keep theirs, which come back
-/// as the tab shows again (ENTER_PICTURE).
+/// window comes back in sight: the user came back to them. Tabs left keep theirs, which come
+/// back as the tab shows again (ENTER_PICTURE).
 pub(super) fn picture_shown_back() {
-    let expression = "document.pictureInPictureElement && document.exitPictureInPicture()";
+    eprintln!(
+        "picture: taking back the videos of window {}",
+        FOCUSED.get()
+    );
+    let expression = format!("{PICTURE_STEPS}__arbalete_picture_step(__arbalete_picture_back)");
     for tab in window_tabs() {
         let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
             continue;
         };
-        let params = json!({ "expression": expression });
-        let message =
-            json!({ "id": unanswered_id(), "method": "Runtime.evaluate", "params": params });
+        let params =
+            json!({ "expression": expression, "awaitPromise": true, "returnByValue": true });
+        let message = json!({ "id": picture_id(), "method": "Runtime.evaluate", "params": params });
         host.send_dev_tools_message(Some(message.to_string().as_bytes()));
     }
 }
@@ -162,12 +232,13 @@ pub(super) fn allow_picture(site: String, on: bool) {
     }
 }
 
-/// Puts the video of a tab the window `window` shows in Chromium's floating window, as the app
-/// goes behind another one, once AppKit is done with it: its window going behind another of
-/// Arbalete's, or behind the video window itself, leaves it in the page. Coming back to the
-/// window takes it back (picture_shown_back).
-pub(super) fn app_left(window: u32) {
-    post_task(ThreadId::UI, Some(&mut LeftApp::new(window)));
+/// Puts the video of a tab the window `window` shows in Chromium's floating window, as the
+/// window no longer shows with the app behind others, or is `away`, hidden with the app or
+/// minimized, once AppKit is done with it: like Arc's, a window still in sight beside another
+/// app's keeps it, and one behind another of Arbalete's windows too. Seeing the window again takes it back
+/// (picture_shown_back).
+pub(super) fn app_left(window: u32, away: bool) {
+    post_task(ThreadId::UI, Some(&mut LeftApp::new(window, away)));
 }
 
 /// Opens a tab's page's Picture in Picture window, as ENTER_PICTURE does, unless the user turned
@@ -181,14 +252,20 @@ fn enter_picture(tab: NodeId, call: bool) {
             .any(|blocked| *blocked == site(&url))
     });
     if !settings.picture_in_picture || blocked {
+        eprintln!("picture: not floating, turned off for all sites or this one");
         return;
     }
     let Some(host) = PAGES.with_borrow(|pages| pages.get(&tab)?.browser.host()) else {
         return;
     };
-    let expression = ENTER_PICTURE.replace("(CALL)", &format!("({call})"));
-    let params = json!({ "expression": expression, "userGesture": true });
-    let message = json!({ "id": unanswered_id(), "method": "Runtime.evaluate", "params": params });
+    let expression = format!(
+        "{PICTURE_STEPS}{}",
+        ENTER_PICTURE.replace("CALL", &call.to_string())
+    );
+    let params = json!({
+        "expression": expression, "userGesture": true, "awaitPromise": true, "returnByValue": true,
+    });
+    let message = json!({ "id": picture_id(), "method": "Runtime.evaluate", "params": params });
     host.send_dev_tools_message(Some(message.to_string().as_bytes()));
 }
 
@@ -213,18 +290,25 @@ wrap_task! {
 wrap_task! {
     struct LeftApp {
         window: u32,
+        away: bool,
     }
 
     impl Task {
         fn execute(&self) {
             #[cfg(target_os = "macos")]
-            if crate::mac::app_active() {
+            if crate::mac::app_active() && !self.away {
+                eprintln!("picture: window {} stays, Arbalete is in front", self.window);
                 return;
             }
+            // Back in sight before its turn, as the window comes back during a switch.
             let current = FOCUSED.get();
-            if window_by_id(self.window).is_none() {
+            if window_by_id(self.window).is_none()
+                || !OUT_OF_SIGHT.with_borrow(|windows| windows.contains(&self.window))
+            {
+                eprintln!("picture: window {} stays, back in sight", self.window);
                 return;
             }
+            eprintln!("picture: floating the video of window {}", self.window);
             focus(self.window);
             let tabs = window_tabs();
             focus(current);

@@ -49,6 +49,7 @@ unsafe extern "C" {
     fn arbalete_ui_little_page_closed(view: *mut c_void);
     fn arbalete_ui_open_picture(id: u32, width: i32, height: i32) -> *mut c_void;
     fn arbalete_ui_picture_closed(id: u32);
+    fn arbalete_ui_keep_floating_videos();
     fn arbalete_ui_settings_focused() -> bool;
     fn arbalete_ui_make_default_browser();
     fn arbalete_ui_start_updates();
@@ -281,6 +282,13 @@ pub extern "C" fn arbalete_window_activated(window: u32, active: bool) {
     crate::shell::window_activated(window, active);
 }
 
+/// The window `window` shows to the user, or no longer: covered, or `away`, hidden with the
+/// app or minimized.
+#[unsafe(no_mangle)]
+pub extern "C" fn arbalete_window_visible(window: u32, visible: bool, away: bool) {
+    crate::shell::window_visible(window, visible, away);
+}
+
 /// Whether the window `window` may close now.
 #[unsafe(no_mangle)]
 pub extern "C" fn arbalete_window_should_close(window: u32) -> bool {
@@ -430,6 +438,13 @@ pub fn open_picture(id: u32, width: i32, height: i32) -> Option<*mut c_void> {
 pub fn picture_closed(id: u32) {
     // SAFETY: a plain value.
     unsafe { arbalete_ui_picture_closed(id) };
+}
+
+/// Keeps Chromium's floating video windows in sight as the app hides, and shows the ones opened
+/// while it is hidden.
+pub fn keep_floating_videos() {
+    // SAFETY: no arguments.
+    unsafe { arbalete_ui_keep_floating_videos() };
 }
 
 /// Whether the Picture in Picture window `id` may close now: its page closes first, which closes it.

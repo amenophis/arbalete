@@ -4,6 +4,9 @@
 
 import AppKit
 
+/// Whether the app hides, from its notice it will until it shows again.
+@MainActor private var appHiding = false
+
 /// A main window, the delegate of its NSWindow, telling the app what happens to it.
 @MainActor
 private final class MainWindow: NSObject, NSWindowDelegate {
@@ -51,6 +54,39 @@ private final class MainWindow: NSObject, NSWindowDelegate {
                 NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) {
                     [id] _ in
                     MainActor.assumeIsolated { arbalete_window_activated(id, active) }
+                })
+        }
+        // Minimized, the window may still tell it is visible as it goes to the Dock. Hiding, the
+        // app tells before its windows go, while its pages still show, and they stay out of
+        // sight until it shows again or comes in front, whatever their occlusion tells meanwhile.
+        for (name, object) in [
+            (NSWindow.didChangeOcclusionStateNotification, window as Any),
+            (NSWindow.didMiniaturizeNotification, window),
+            (NSApplication.willHideNotification, NSApp), (NSApplication.didUnhideNotification, NSApp),
+            (NSApplication.didBecomeActiveNotification, NSApp),
+        ] {
+            observers.append(
+                NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) {
+                    [id, weak window] notification in
+                    MainActor.assumeIsolated {
+                        guard let window else { return }
+                        switch notification.name {
+                        case NSApplication.willHideNotification: appHiding = true
+                        // A floating video shown while hidden shows the whole app, not in
+                        // front: the app hides again, the video staying.
+                        case NSApplication.didUnhideNotification
+                        where appHiding && !NSApp.isActive:
+                            keepFloating()
+                            NSApp.hide(nil)
+                        case NSApplication.didUnhideNotification,
+                            NSApplication.didBecomeActiveNotification:
+                            appHiding = false
+                        default: break
+                        }
+                        let away = appHiding || window.isMiniaturized
+                        let visible = window.occlusionState.contains(.visible) && !away
+                        arbalete_window_visible(id, visible, away)
+                    }
                 })
         }
     }
