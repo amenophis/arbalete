@@ -890,6 +890,7 @@ final class NativeWindow {
         // Space's appearance forces, and as the system is in automatic appearance, whatever the
         // Space's colors, which only decide the sidebar's (isDark). The system's changing
         // republishes the state (AppModel).
+        var asked: String?
         appearance = app.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in
             guard let self else { return }
             let mode = app.space?.theme.mode ?? "auto"
@@ -897,8 +898,13 @@ final class NativeWindow {
             let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             self.surfaces.values.forEach { $0.appearance = appearance }
             // The focused window's Space decides, or, the app in the background, the last one to
-            // change.
-            if self.window?.isKeyWindow == true || NSApp.keyWindow == nil { showPages(of: app) }
+            // change. Only a change of its own mode counts there: answering the republish the
+            // appearance's changing causes, every window would take its turn, endlessly.
+            let changed = pageMode(of: app) != asked
+            asked = pageMode(of: app)
+            if self.window?.isKeyWindow == true || (NSApp.keyWindow == nil && changed) {
+                showPages(of: app)
+            }
         }
         observers.append(
             NotificationCenter.default.addObserver(
