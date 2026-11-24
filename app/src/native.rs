@@ -283,7 +283,7 @@ pub extern "C" fn arbalete_window_activated(window: u32, active: bool) {
 }
 
 /// The window `window` shows to the user, or no longer: covered, or `away`, hidden with the
-/// app or minimized.
+/// app, minimized or on a desktop no longer shown.
 #[unsafe(no_mangle)]
 pub extern "C" fn arbalete_window_visible(window: u32, visible: bool, away: bool) {
     crate::shell::window_visible(window, visible, away);
