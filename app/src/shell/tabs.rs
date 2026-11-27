@@ -55,6 +55,52 @@ pub(super) fn open_background_tab(url: &str) {
             .expect("the displayed Space")
     });
     load_hidden(tab);
+    opened_behind(tab);
+}
+
+/// Opens a tab for a page's popup in the displayed Space, as `open_tab` or `open_background_tab`
+/// would, in which CEF makes the popup: its page keeps its opener, and `window.open` gives the
+/// page its window, which it may navigate or post to, like Chrome's. Its page shows or loads
+/// once made (popup_tab_created). The view CEF makes it in, unless the window cannot hold it
+/// yet: the tab then opens on its own, without its opener.
+#[cfg(target_os = "macos")]
+pub(super) fn open_popup_tab(
+    popup_id: i32,
+    url: &str,
+    behind: bool,
+) -> Option<*mut std::ffi::c_void> {
+    if !behind {
+        hide_site_controls();
+    }
+    let tab = update_sidebar(|sidebar| {
+        let space = sidebar.displayed().id;
+        if behind {
+            return sidebar
+                .open_tab_below(space, url)
+                .expect("the displayed Space");
+        }
+        let tab = sidebar.open_tab(space, url).expect("the displayed Space");
+        sidebar.select(space, tab).expect("a new tab");
+        tab
+    });
+    let Some(view) = crate::native::page_view(win().id, tab_number(tab)) else {
+        if behind {
+            load_hidden(tab);
+        } else {
+            show_selected();
+        }
+        return None;
+    };
+    OPENING_TABS.with_borrow_mut(|opening| opening.push((popup_id, tab, behind)));
+    if behind {
+        opened_behind(tab);
+    }
+    Some(view)
+}
+
+/// Like Arc's, a toast tells of a tab opened behind the one shown, which a click goes to, while
+/// the sidebar that would show it is hidden.
+fn opened_behind(tab: NodeId) {
     if win().sidebar_mode.get() == SidebarMode::Hidden {
         let go = json!({ "name": "select", "args": tab });
         toast(json!({
