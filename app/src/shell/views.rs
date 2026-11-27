@@ -122,6 +122,10 @@ fn page(tab: NodeId) -> Option<()> {
     if PAGES.with_borrow(|pages| pages.contains_key(&tab)) {
         return Some(());
     }
+    // A popup's tab shows once CEF has made its page.
+    if OPENING_TABS.with_borrow(|opening| opening.iter().any(|&(_, opening, _)| opening == tab)) {
+        return None;
+    }
     // An Easel shows its board instead of a page.
     if let Some(number) = easel_of(tab) {
         return easel_view(tab, number);
@@ -145,25 +149,7 @@ fn page(tab: NodeId) -> Option<()> {
             let browser = make_page(tab, profile, start, &mut context);
             MAKING.set(None);
             let browser = browser?;
-            if let Some(host) = browser.host() {
-                host.was_hidden(1);
-            }
-            PAGES.with_borrow_mut(|pages| {
-                pages.insert(
-                    tab,
-                    Live {
-                        profile,
-                        browser,
-                        hidden_since: None,
-                        frozen: false,
-                        capturing: false,
-                        frames: HashMap::new(),
-                        played: false,
-                        session: None,
-                    },
-                )
-            });
-            mute_page(tab);
+            add_page(tab, profile, browser);
             Some(())
         }
         // The tab shows once its profile's web data is ready.
@@ -172,6 +158,61 @@ fn page(tab: NodeId) -> Option<()> {
             create_profile_context(profile);
             None
         }
+    }
+}
+
+/// Makes a browser made for a tab, hidden until it shows, the tab's page.
+fn add_page(tab: NodeId, profile: ProfileId, browser: Browser) {
+    if let Some(host) = browser.host() {
+        host.was_hidden(1);
+    }
+    PAGES.with_borrow_mut(|pages| {
+        pages.insert(
+            tab,
+            Live {
+                profile,
+                browser,
+                hidden_since: None,
+                frozen: false,
+                capturing: false,
+                frames: HashMap::new(),
+                played: false,
+                session: None,
+            },
+        )
+    });
+    mute_page(tab);
+}
+
+/// Makes a popup CEF made in a tab's view (open_popup_tab) that tab's page, which shows, or
+/// loads behind the tab shown. CEF makes popups in the order it asked for them.
+pub(super) fn popup_tab_created(profile: ProfileId, browser: &Browser) {
+    let opening =
+        OPENING_TABS.with_borrow_mut(|opening| (!opening.is_empty()).then(|| opening.remove(0)));
+    let Some((_, tab, behind)) = opening else {
+        return;
+    };
+    add_page(tab, profile, browser.clone());
+    if behind {
+        load_hidden(tab);
+    } else {
+        show_selected();
+    }
+}
+
+/// A popup CEF did not make after all leaves its tab to open on its own, without its opener.
+pub(super) fn popup_tab_aborted(popup_id: i32) {
+    let opening = OPENING_TABS.with_borrow_mut(|opening| {
+        let at = opening.iter().position(|&(id, _, _)| id == popup_id)?;
+        Some(opening.remove(at))
+    });
+    let Some((_, tab, behind)) = opening else {
+        return;
+    };
+    if behind {
+        load_hidden(tab);
+    } else if STATE.with_borrow(|state| state.sidebar.displayed().selected == Some(tab)) {
+        show_selected();
     }
 }
 
@@ -632,6 +673,27 @@ pub(super) fn expire_closed_pages(all: bool) {
 fn close_live(live: &Live) {
     if let Some(host) = live.browser.host() {
         host.close_browser(1);
+    }
+}
+
+/// A tab's page closed by itself, with window.close(): the tab closes too, once the page has left.
+pub(super) fn page_closed_itself(tab: NodeId) {
+    PAGES.with_borrow_mut(|pages| pages.remove(&tab));
+    if win().shown.get() == Some(tab) {
+        win().shown.set(None);
+    }
+    post_task(ThreadId::UI, Some(&mut CloseTab::new(tab)));
+}
+
+wrap_task! {
+    struct CloseTab {
+        tab: NodeId,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            close_tab(Some(self.tab));
+        }
     }
 }
 

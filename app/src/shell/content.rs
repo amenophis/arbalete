@@ -1040,7 +1040,8 @@ wrap_life_span_handler! {
     impl LifeSpanHandler {
         /// A popup a page opens with `window.open` and a size, like a sign-in's, opens in a
         /// Little Arbalete window, like Arc's, keeping its opener: it sends its result there and
-        /// closes. Others open in tabs, behind the one shown for a link clicked with ⌘.
+        /// closes. Others open in tabs, behind the one shown for a link clicked with ⌘, which CEF
+        /// makes from a tab's page too, so `window.open` returns the tab's window, like Chrome's.
         fn on_before_popup(
             &self,
             browser: Option<&mut Browser>,
@@ -1070,8 +1071,9 @@ wrap_life_span_handler! {
             let Some(url) = target_url.map(CefString::to_string).filter(|url| popup_allowed(user_gesture) && page_may_open(&frame_url(frame), url)) else {
                 return 1;
             };
+            let (mut window_info, mut client) = (window_info, client);
             #[cfg(target_os = "macos")]
-            if let (Some(profile), Some(window_info), Some(client)) = (self.opener, window_info, client)
+            if let (Some(profile), Some(window_info), Some(client)) = (self.opener, window_info.as_deref_mut(), client.as_deref_mut())
                 && target_disposition == WindowOpenDisposition::NEW_POPUP
                 && !is_chrome_page(&url)
             {
@@ -1090,7 +1092,26 @@ wrap_life_span_handler! {
                 OPENING_POPUPS.with_borrow_mut(|popups| popups.push((popup_id, id)));
                 return 0;
             }
-            if target_disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB {
+            let behind = target_disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB;
+            // A tab's page opens a tab CEF makes, keeping its opener, in the displayed Space when
+            // it is in the page's profile, which CEF makes the popup in.
+            #[cfg(target_os = "macos")]
+            if let (Some(profile), Some(window_info), Some(client)) = (self.profile, window_info, client)
+                && !is_chrome_page(&url)
+                && displayed_profile() == profile
+            {
+                let Some(view) = open_popup_tab(popup_id, &url, behind) else { return 1 };
+                *window_info = WindowInfo {
+                    parent_view: view,
+                    // Any size: the container gives the page its own.
+                    bounds: Rect { x: 0, y: 0, width: 800, height: 600 },
+                    runtime_style: RuntimeStyle::ALLOY,
+                    ..Default::default()
+                };
+                *client = Some(ContentClient::new(profile, false, None));
+                return 0;
+            }
+            if behind {
                 open_background_tab(&url);
             } else {
                 open_tab(&url);
@@ -1110,6 +1131,7 @@ wrap_life_span_handler! {
             }
             #[cfg(target_os = "macos")]
             picture_aborted(popup_id);
+            popup_tab_aborted(popup_id);
         }
 
         fn on_after_created(&self, browser: Option<&mut Browser>) {
@@ -1120,6 +1142,12 @@ wrap_life_span_handler! {
                 popup_created(id, profile, browser);
             }
             if let Some(profile) = self.profile {
+                // A tab's page not made in page() is a popup's.
+                if MAKING.get().is_none()
+                    && let Some(browser) = browser.as_deref()
+                {
+                    popup_tab_created(profile, browser);
+                }
                 content_created(profile, browser);
             }
         }
@@ -1159,7 +1187,13 @@ wrap_life_span_handler! {
                 post_task(ThreadId::UI, Some(&mut RemovePeek::new(window)));
                 return 1;
             }
-            let Some(host) = browser.and_then(|browser| browser.host()) else {
+            let Some(browser) = browser else { return 0 };
+            // A page closing by itself, like a popup's tab with window.close(), closes its tab,
+            // like Chrome's: the app's own closes take the page from its tab first, but quitting.
+            if let Some(tab) = page_tab(browser).filter(|_| !CLOSING.get()) {
+                page_closed_itself(tab);
+            }
+            let Some(host) = browser.host() else {
                 return 0;
             };
             post_task(
